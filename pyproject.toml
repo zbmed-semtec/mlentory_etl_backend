@@ -30,6 +30,10 @@ aiohttp = "^3.9.0"
 rdflib = "^7.0.0"
 pandas = "^2.1.0"
 numpy = "^1.26.0"
+datasets = "^2.19.0"
+huggingface_hub = "^0.24.6"
+arxiv = "^1.4.8"
+spdx-lookup = "^1.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

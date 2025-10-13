@@ -163,3 +163,6 @@ test-reports/
 # Profiling
 *.prof
 
+# Cursor
+.cursor/
+

@@ -74,21 +74,13 @@ clean-data: ## Remove local data files only (keeps database volumes)
 	rm -rf data/raw/* data/normalized/* data/rdf/* data/cache/*
 	@echo "$(GREEN)Data files cleaned!$(NC)"
 
-prune: ## Remove all stopped containers and unused images
-	@echo "$(BLUE)Pruning Docker resources...$(NC)"
-	docker system prune -f
-	@echo "$(GREEN)Prune complete!$(NC)"
-
 ##@ Development
 
-shell: ## Open a shell in the Dagster container
+shell-dagster: ## Open a shell in the Dagster container
 	docker-compose exec dagster-webserver /bin/bash
 
 shell-neo4j: ## Open Neo4j Cypher shell
 	docker-compose exec neo4j cypher-shell -u $(NEO4J_USER) -p $(NEO4J_PASSWORD)
-
-ps: ## Show running containers
-	docker-compose ps
 
 ##@ Testing & Quality
 
