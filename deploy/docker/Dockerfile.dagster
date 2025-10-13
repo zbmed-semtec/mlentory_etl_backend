@@ -1,0 +1,59 @@
+FROM python:3.11-slim
+
+LABEL maintainer="MLentory Team"
+LABEL description="Dagster orchestration container for MLentory ETL"
+
+# Set working directory
+WORKDIR /opt/dagster/app
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DAGSTER_HOME=/opt/dagster/dagster_home
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy pyproject.toml and install dependencies
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir poetry && \
+    poetry config virtualenvs.create false && \
+    poetry install --no-interaction --no-ansi || \
+    pip install --no-cache-dir \
+    dagster \
+    dagster-webserver \
+    dagster-postgres \
+    dagster-docker \
+    pydantic \
+    neo4j \
+    elasticsearch \
+    requests \
+    beautifulsoup4 \
+    lxml \
+    python-dotenv
+
+# Copy application code
+COPY etl/ ./etl/
+COPY extractors/ ./extractors/
+COPY transformers/ ./transformers/
+COPY loaders/ ./loaders/
+COPY schemas/ ./schemas/
+
+# Create dagster home directory
+RUN mkdir -p $DAGSTER_HOME
+
+# Copy dagster configuration
+COPY deploy/dagster/dagster.yaml $DAGSTER_HOME/dagster.yaml
+
+# Expose Dagster webserver port
+EXPOSE 3000
+
+# Default command (can be overridden in docker-compose)
+CMD ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000"]
+

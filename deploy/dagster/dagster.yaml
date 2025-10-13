@@ -1,0 +1,71 @@
+# Dagster Instance Configuration
+# This file configures the Dagster instance settings
+
+# Storage configuration - PostgreSQL backend
+storage:
+  postgres:
+    postgres_db:
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+      port: 5432
+
+# Run launcher configuration
+run_launcher:
+  module: dagster.core.launcher
+  class: DefaultRunLauncher
+
+# Run coordinator configuration
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+
+# Compute logs configuration
+compute_logs:
+  module: dagster.core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir: /opt/dagster/dagster_home/logs
+
+# Local artifact storage
+local_artifact_storage:
+  module: dagster.core.storage.root
+  class: LocalArtifactStorage
+  config:
+    base_dir: /opt/dagster/dagster_home/storage
+
+# Telemetry (disabled for privacy)
+telemetry:
+  enabled: false
+
+# Scheduler settings
+scheduler:
+  module: dagster.core.scheduler
+  class: DagsterDaemonScheduler
+
+# Sensor settings
+run_monitoring:
+  enabled: true
+  start_timeout_seconds: 180
+  max_resume_run_attempts: 3
+
+# Code server settings
+code_servers:
+  local_startup_timeout: 180
+
+# Retention policy
+run_retries:
+  enabled: true
+  max_retries: 3
+
+retention:
+  schedule:
+    purge_after_days: 30
+  sensor:
+    purge_after_days: 30
+

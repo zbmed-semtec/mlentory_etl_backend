@@ -1,0 +1,90 @@
+---
+alwaysApply: true
+---
+MLentory ETL project rules
+
+project:
+  name: MLentory
+  description: >
+    A modular data pipeline that extracts ML model metadata from the web,
+    normalizes it into the FAIR4ML schema, stores it in Neo4j, and indexes it
+    in Elasticsearch for fast discovery.
+
+  tech_stack:
+    - Python 3.11+
+    - Dagster for orchestration
+    - Docker for service isolation
+    - Neo4j for graph storage
+    - Elasticsearch for indexing and search
+    - Pydantic for schema validation
+    - Poetry or uv for dependency management
+
+structure:
+  directories:
+    - etl/               # Dagster pipelines and assets
+    - extractors/        # Source-specific scrapers/spiders
+    - transformers/      # FAIR4ML normalization logic we can have multiple modules for each source
+    - loaders/           # Loaders for Neo4j + Elasticsearch
+    - schemas/           # Shared Pydantic schema
+    - deploy/            # Docker, compose, Dagster deployment, make file
+    - tests/             # Unit and integration tests
+    - docs/              # Architecture and data model docs
+
+  naming_conventions:
+    - Python modules: snake_case
+    - Classes: PascalCase
+    - Environment variables: UPPER_SNAKE_CASE
+    - Docker services: kebab-case
+
+workflow:
+  orchestration:
+    - Use Dagster for all ETL orchestration.
+    - Each stage (extract, transform, load) is a Dagster *asset*.
+    - Keep assets idempotent — they can rerun safely on failure.
+    - Store intermediate outputs (JSON, RDF) in `/data` mounted volume.
+
+  docker:
+    - Each external platform (e.g. HuggingFace, PapersWithCode) runs in its own container for extraction.
+    - Neo4j and Elasticsearch run as core infra services.
+    - Local dev stack runs via `docker-compose up`.
+
+  data_flow:
+    - Extractors → write raw data to `/data/raw/<source>/`.
+    - Transformers → normalize into FAIR4ML schema in `/data/normalized/<source>/`.
+    - Loaders → upsert FAIR4ML objects into Neo4j and Elasticsearch, creates an RDF file in `/data/rdf/<source>/`.
+
+  dagster:
+    - Project entrypoint: `etl/repository.py`
+    - Use Dagster I/O managers for artifact persistence.
+    - Tag each run with git commit and date for traceability.
+
+  schema:
+    - FAIR4ML Pydantic models define all entities.
+    - All transforms must validate output against the FAIR4ML model.
+    - We will use schema definitions for each source, this will allow us to easily add new sources and modify the schema.
+
+  testing:
+    - Unit tests: pytest
+    - Integration tests: use docker-compose test stack (Neo4j + ES)
+    - Include fixtures for raw/normalized FAIR4ML data
+    - Target coverage ≥ 80%
+
+  coding_style:
+    - Use `black`
+    - Type-check with `mypy`
+    - Docstrings follow Google style
+    - Avoid hard-coded paths; use `Path` objects
+
+  evolvability:
+    - Extraction logic per source lives in separate module, easily swapped.
+    - We will use schema definitions for each source, this will allow us to easily add new sources and modify the schema.
+
+examples:
+  docker_compose_services:
+    - dagster: Dagster web UI and daemon
+    - neo4j: Graph database
+    - elasticsearch: Search engine
+    - extractors: container(s) per source (e.g., hf-extractor, oml-extractor)
+
+security:
+  - Store secrets in `.env` not in code, have a .env.example file.

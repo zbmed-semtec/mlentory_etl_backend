@@ -1,0 +1,180 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Core Infrastructure Services
+  # =============================================================================
+  
+  neo4j:
+    image: neo4j:${NEO4J_VERSION:-5.14.0}
+    container_name: mlentory-neo4j
+    ports:
+      - "${NEO4J_BROWSER_PORT:-7474}:7474"  # HTTP Browser
+      - "${NEO4J_BOLT_PORT:-7687}:7687"      # Bolt protocol
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-mlentory_neo4j_password_change_me}
+      - NEO4J_dbms_memory_pagecache_size=1G
+      - NEO4J_dbms_memory_heap_initial__size=1G
+      - NEO4J_dbms_memory_heap_max__size=1G
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+      - NEO4JLABS_PLUGINS=["apoc"]
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    networks:
+      - mlentory-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION:-8.11.0}
+    container_name: mlentory-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms512m -Xmx512m}"
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:-mlentory_es_password_change_me}
+      - xpack.security.http.ssl.enabled=false
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - mlentory-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # =============================================================================
+  # Dagster Orchestration
+  # =============================================================================
+
+  dagster-postgres:
+    image: postgres:15-alpine
+    container_name: mlentory-dagster-postgres
+    environment:
+      POSTGRES_USER: ${DAGSTER_POSTGRES_USER:-dagster}
+      POSTGRES_PASSWORD: ${DAGSTER_POSTGRES_PASSWORD:-dagster_password_change_me}
+      POSTGRES_DB: ${DAGSTER_POSTGRES_DB:-dagster}
+    volumes:
+      - dagster_postgres_data:/var/lib/postgresql/data
+    networks:
+      - mlentory-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DAGSTER_POSTGRES_USER:-dagster}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dagster-daemon:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dagster
+    container_name: mlentory-dagster-daemon
+    environment:
+      - DAGSTER_HOME=${DAGSTER_HOME:-/opt/dagster/dagster_home}
+      - DAGSTER_POSTGRES_USER=${DAGSTER_POSTGRES_USER:-dagster}
+      - DAGSTER_POSTGRES_PASSWORD=${DAGSTER_POSTGRES_PASSWORD:-dagster_password_change_me}
+      - DAGSTER_POSTGRES_DB=${DAGSTER_POSTGRES_DB:-dagster}
+      - DAGSTER_POSTGRES_HOST=dagster-postgres
+      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-mlentory_neo4j_password_change_me}
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-mlentory_es_password_change_me}
+      - DATA_DIR=${DATA_DIR:-/data}
+    volumes:
+      - ./etl:/opt/dagster/app/etl
+      - ./extractors:/opt/dagster/app/extractors
+      - ./transformers:/opt/dagster/app/transformers
+      - ./loaders:/opt/dagster/app/loaders
+      - ./schemas:/opt/dagster/app/schemas
+      - ./data:/data
+      - dagster_home:/opt/dagster/dagster_home
+    networks:
+      - mlentory-network
+    depends_on:
+      dagster-postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    command: dagster-daemon run
+
+  dagster-webserver:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dagster
+    container_name: mlentory-dagster-webserver
+    ports:
+      - "${DAGSTER_PORT:-3000}:3000"
+    environment:
+      - DAGSTER_HOME=${DAGSTER_HOME:-/opt/dagster/dagster_home}
+      - DAGSTER_POSTGRES_USER=${DAGSTER_POSTGRES_USER:-dagster}
+      - DAGSTER_POSTGRES_PASSWORD=${DAGSTER_POSTGRES_PASSWORD:-dagster_password_change_me}
+      - DAGSTER_POSTGRES_DB=${DAGSTER_POSTGRES_DB:-dagster}
+      - DAGSTER_POSTGRES_HOST=dagster-postgres
+      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-mlentory_neo4j_password_change_me}
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-mlentory_es_password_change_me}
+      - DATA_DIR=${DATA_DIR:-/data}
+    volumes:
+      - ./etl:/opt/dagster/app/etl
+      - ./extractors:/opt/dagster/app/extractors
+      - ./transformers:/opt/dagster/app/transformers
+      - ./loaders:/opt/dagster/app/loaders
+      - ./schemas:/opt/dagster/app/schemas
+      - ./data:/data
+      - dagster_home:/opt/dagster/dagster_home
+    networks:
+      - mlentory-network
+    depends_on:
+      dagster-postgres:
+        condition: service_healthy
+      dagster-daemon:
+        condition: service_started
+    command: dagster-webserver -h 0.0.0.0 -p 3000
+
+# =============================================================================
+# Networks
+# =============================================================================
+
+networks:
+  mlentory-network:
+    driver: bridge
+    name: mlentory-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+
+volumes:
+  neo4j_data:
+    name: mlentory-neo4j-data
+  neo4j_logs:
+    name: mlentory-neo4j-logs
+  neo4j_import:
+    name: mlentory-neo4j-import
+  neo4j_plugins:
+    name: mlentory-neo4j-plugins
+  elasticsearch_data:
+    name: mlentory-elasticsearch-data
+  dagster_postgres_data:
+    name: mlentory-dagster-postgres-data
+  dagster_home:
+    name: mlentory-dagster-home
+
