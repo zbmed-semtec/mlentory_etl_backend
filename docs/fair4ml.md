@@ -1,5 +1,70 @@
 # FAIR4ML Schema Documentation
 
+Release metadata (aligned with FAIR4ML 0.1.0):
+
+- Release date: 2024-10-27
+- Version: 0.1.0
+- Status: Draft (under review)
+- This version URI: https://w3id.org/fair4ml/0.1.0
+- Latest version URI: https://w3id.org/fair4ml#
+- License: CC0-1.0
+- Specification: https://rda-fair4ml.github.io/FAIR4ML-schema/release/0.1.0/index.html
+
+### Namespaces used
+
+- `rdf`: http://www.w3.org/1999/02/22-rdf-syntax-ns#
+- `rdfs`: http://www.w3.org/2000/01/rdf-schema#
+- `owl`: http://www.w3.org/2002/07/owl#
+- `schema`: http://schema.org/
+- `codemeta`: https://w3id.org/codemeta/
+- `fair4ml`: https://w3id.org/fair4ml#
+- `cr`: http://mlcommons.org/croissant/
+
+### Extending Schema.org hierarchy
+
+This profile extends Schema.org with two main classes:
+
+```
+schema:Thing > schema:CreativeWork > fair4ml:MLModel
+schema:Thing > schema:CreativeWork > fair4ml:MLModelEvaluation
+```
+
+### fair4ml:MLModel — new properties
+
+| Property | Expected Type | Description |
+|---|---|---|
+| [fair4ml:legal](https://w3id.org/fair4ml#legal) | [schema:Text](http://schema.org/Text) | Considerations with respect to legal aspects. |
+| [fair4ml:ethicalSocial](https://w3id.org/fair4ml#ethicalSocial) | [schema:Text](http://schema.org/Text) | Considerations with respect to ethical and social aspects. |
+| [fair4ml:evaluatedOn](https://w3id.org/fair4ml#evaluatedOn) | [schema:Dataset](http://schema.org/Dataset), [cr:Dataset](http://mlcommons.org/croissant/1.0) | Dataset used for evaluating the model (may be extrinsic). |
+| [fair4ml:fineTunedFrom](https://w3id.org/fair4ml#fineTunedFrom) | [fair4ml:MLModel](https://w3id.org/fair4ml#MLModel) | Source model used for fine-tuning. |
+| [fair4ml:hasCO2eEmissions](https://w3id.org/fair4ml#hasCO2eEmissions) | [schema:Text](http://schema.org/Text) | CO2e emissions produced by training (include units, e.g., "10 tonnes"). |
+| [fair4ml:intendedUse](https://w3id.org/fair4ml#intendedUse) | [schema:Text](http://schema.org/Text), [schema:DefinedTerm](http://schema.org/DefinedTerm), [schema:URL](http://schema.org/URL) | Purpose and intended use to help assess suitability. |
+| [fair4ml:mlTask](https://w3id.org/fair4ml#mlTask) | [schema:Text](http://schema.org/Text), [schema:DefinedTerm](http://schema.org/DefinedTerm) | ML task addressed by the model (e.g., binary classification). |
+| [fair4ml:modelCategory](https://w3id.org/fair4ml#modelCategory) | [schema:Text](http://schema.org/Text), [schema:DefinedTerm](http://schema.org/DefinedTerm) | Category (e.g., Supervised), architecture (e.g., transformer), or algorithm. |
+| [fair4ml:modelRisksBiasLimitations](https://w3id.org/fair4ml#modelRisksBiasLimitations) | [schema:Text](http://schema.org/Text) | Description of risks, biases, and limitations. |
+| [fair4ml:sharedBy](https://w3id.org/fair4ml#sharedBy) | [schema:Person](http://schema.org/Person), [schema:Organization](http://schema.org/Organization) | Person or organization who shared the model online. |
+| [fair4ml:testedOn](https://w3id.org/fair4ml#testedOn) | [schema:Dataset](http://schema.org/Dataset), [cr:Dataset](http://mlcommons.org/croissant/1.0) | Dataset used to test the model (train/test/validation splits). |
+| [fair4ml:trainedOn](https://w3id.org/fair4ml#trainedOn) | [schema:Dataset](http://schema.org/Dataset), [cr:Dataset](http://mlcommons.org/croissant/1.0) | AI-ready dataset used for training/optimization. |
+| [fair4ml:usageInstructions](https://w3id.org/fair4ml#usageInstructions) | [schema:Text](http://schema.org/Text) | Instructions needed to run the model (may include code). |
+| [fair4ml:codeSampleSnippet](https://w3id.org/fair4ml#codeSampleSnippet) | [schema:Text](http://schema.org/Text) | Code snippet with an example usage of the model. |
+| [fair4ml:validatedOn](https://w3id.org/fair4ml#validatedOn) | [schema:Dataset](http://schema.org/Dataset), [cr:Dataset](http://mlcommons.org/croissant/1.0) | Dataset used to validate the model. |
+
+Note: `fair4ml:MLModel` also inherits properties from Schema.org `CreativeWork` and CodeMeta.
+
+### fair4ml:MLModelEvaluation — new properties
+
+| Property | Expected Type | Description |
+|---|---|---|
+| [fair4ml:hasEvaluation](https://w3id.org/fair4ml#hasEvaluation) | [fair4ml:MLModelEvaluation](https://w3id.org/fair4ml#MLModelEvaluation) | Associates a model with an evaluation instance. |
+| [fair4ml:evaluatedMLModel](https://w3id.org/fair4ml#evaluatedMLModel) | [fair4ml:MLModel](https://w3id.org/fair4ml#MLModel) | Model evaluated (reverse: `fair4ml:evaluatedWith`). |
+| [fair4ml:evaluationDataset](https://w3id.org/fair4ml#evaluationDataset) | [cr:Dataset](http://mlcommons.org/croissant/1.0) | Dataset used for the evaluation. |
+| [fair4ml:evaluationMetrics](https://w3id.org/fair4ml#evaluationMetrics) | [schema:Text](http://schema.org/Text), [schema:PropertyValue](http://schema.org/PropertyValue) | Metrics used for evaluating the model (text or structured values). |
+| [fair4ml:evaluationResults](https://w3id.org/fair4ml#evaluationResults) | [schema:Text](http://schema.org/Text) | Summary of the evaluation results. |
+| [fair4ml:evaluationSoftware](https://w3id.org/fair4ml#evaluationSoftware) | [schema:SoftwareSourceCode](http://schema.org/SoftwareSourceCode), [schema:SoftwareApplication](http://schema.org/SoftwareApplication) | Code/software used to perform the evaluation. |
+| [fair4ml:extrinsicEvaluation](https://w3id.org/fair4ml#extrinsicEvaluation) | [schema:Boolean](http://schema.org/Boolean) | Whether the evaluation is extrinsic (outside the training scope, unseen dataset). |
+
+Note: `fair4ml:MLModelEvaluation` inherits from Schema.org `CreativeWork` and CodeMeta.
+
 ## Overview
 
 FAIR4ML is a schema for representing ML model metadata in a FAIR (Findable, Accessible, Interoperable, Reusable) manner. This document describes the core entities and their relationships.
@@ -205,26 +270,6 @@ class Model(BaseModel):
 
 Models are indexed in Elasticsearch with the following mapping:
 
-```json
-{
-  "mappings": {
-    "properties": {
-      "id": { "type": "keyword" },
-      "name": { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
-      "description": { "type": "text" },
-      "framework": { "type": "keyword" },
-      "task": { "type": "keyword" },
-      "authors": { "type": "keyword" },
-      "organization": { "type": "keyword" },
-      "license": { "type": "keyword" },
-      "created_at": { "type": "date" },
-      "updated_at": { "type": "date" },
-      "source": { "type": "keyword" }
-    }
-  }
-}
-```
-
 ## RDF Representation
 
 Models are exported as RDF using the MLSchema ontology:
@@ -245,59 +290,12 @@ Models are exported as RDF using the MLSchema ontology:
     dcat:distribution <http://huggingface.co/bert-base-uncased> .
 ```
 
-## Source-Specific Mappings
-
-### HuggingFace → FAIR4ML
-
-| HF Field | FAIR4ML Field |
-|----------|---------------|
-| `modelId` | `id` |
-| `modelName` | `name` |
-| `pipeline_tag` | `task.name` |
-| `library_name` | `framework.name` |
-| `downloads` | metadata |
-| `tags` | metadata |
-
-### PapersWithCode → FAIR4ML
-
-| PWC Field | FAIR4ML Field |
-|-----------|---------------|
-| `id` | `id` |
-| `name` | `name` |
-| `paper` | `Paper` entity |
-| `tasks` | `task` |
-| `results` | `metrics` |
-
-### OpenML → FAIR4ML
-
-| OpenML Field | FAIR4ML Field |
-|--------------|---------------|
-| `run_id` | `id` |
-| `flow_name` | `name` |
-| `task_id` | `task` |
-| `evaluations` | `metrics` |
-
-## Validation Rules
-
-1. **Required Fields**: `id`, `name`, `source`, `source_url`
-2. **Unique IDs**: Globally unique within source
-3. **Date Formats**: ISO 8601
-4. **URLs**: Must be valid HTTP/HTTPS URLs
-5. **Licenses**: Should use SPDX identifiers when possible
-
-## Extensibility
-
-To extend the schema for new sources:
-
-1. Define source-specific schema in `schemas/sources/<source>.py`
-2. Implement mapping logic in transformer
-3. Update documentation
-4. Ensure backward compatibility
-
 ## References
 
 - [FAIR Principles](https://www.go-fair.org/fair-principles/)
 - [MLSchema.org](http://mlschema.org/)
 - [DCAT Vocabulary](https://www.w3.org/TR/vocab-dcat-2/)
 - [Croissant Format](https://github.com/mlcommons/croissant)
+
+- FAIR4ML 0.1.0 specification: https://rda-fair4ml.github.io/FAIR4ML-schema/release/0.1.0/index.html
 
