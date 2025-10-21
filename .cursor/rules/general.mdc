@@ -9,6 +9,19 @@ project:
     A modular data pipeline that extracts ML model metadata from the web,
     normalizes it into the FAIR4ML schema, stores it in Neo4j, and indexes it
     in Elasticsearch for fast discovery.
+  
+  commit_message:
+    - Use the git emoji conventions for the commit message.
+    - Use the following emojis:
+      - :sparkles: for new features
+      - :bug: for bug fixes
+      - :memo: for documentation
+      - :wrench: for configuration files
+      - :bricks: for infrastructure related changes
+      - :zap: for performance improvements
+      - :fire: for removing code or files
+      - :lock: for security fixes
+      - :package: for packaging
 
   tech_stack:
     - Python 3.11+
