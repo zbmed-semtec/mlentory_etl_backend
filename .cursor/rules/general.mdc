@@ -16,6 +16,7 @@ project:
       - :sparkles: for new features
       - :bug: for bug fixes
       - :memo: for documentation
+      - :white_check_mark: for tests
       - :wrench: for configuration files
       - :bricks: for infrastructure related changes
       - :zap: for performance improvements
