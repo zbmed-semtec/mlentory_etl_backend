@@ -4,7 +4,9 @@ Dagster repository definition.
 This is the main entrypoint for the Dagster instance.
 """
 
-from dagster import repository
+from dagster import repository, load_assets_from_modules
+
+from etl.assets import hf_extraction as hf_assets_module
 
 
 @repository
@@ -15,6 +17,6 @@ def mlentory_etl_repository():
     Returns:
         list: List of jobs and schedules
     """
-    # TODO: Import and register jobs, assets, and schedules here
-    return []
+    hf_assets = load_assets_from_modules([hf_assets_module])
+    return [*hf_assets]
 
