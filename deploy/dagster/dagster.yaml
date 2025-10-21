@@ -15,15 +15,11 @@ storage:
         env: DAGSTER_POSTGRES_DB
       port: 5432
 
-# Run launcher configuration
+# Run launcher configuration - use in-process launcher (no new containers per run)
 run_launcher:
   module: dagster.core.launcher
   class: DefaultRunLauncher
 
-# Run coordinator configuration
-run_coordinator:
-  module: dagster.core.run_coordinator
-  class: QueuedRunCoordinator
 
 # Compute logs configuration
 compute_logs:
@@ -43,20 +39,19 @@ local_artifact_storage:
 telemetry:
   enabled: false
 
-# Scheduler settings
-scheduler:
-  module: dagster.core.scheduler
-  class: DagsterDaemonScheduler
+# Run coordinator configuration - explicit default (no queuing)
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: DefaultRunCoordinator
 
 # Sensor settings
 run_monitoring:
-  enabled: true
-  start_timeout_seconds: 180
-  max_resume_run_attempts: 3
+  enabled: false  # Disable run monitoring for development
+  start_timeout_seconds: 100
 
 # Code server settings
 code_servers:
-  local_startup_timeout: 180
+  local_startup_timeout: 100
 
 # Retention policy
 run_retries:
