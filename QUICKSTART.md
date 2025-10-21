@@ -233,7 +233,3 @@ Now that your environment is running, you can:
 
 ---
 
-**Happy Building! 🚀**
-
-For questions or issues, please open a GitHub issue.
-

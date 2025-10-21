@@ -29,7 +29,7 @@ schema:Thing > schema:CreativeWork > fair4ml:MLModel
 schema:Thing > schema:CreativeWork > fair4ml:MLModelEvaluation
 ```
 
-### fair4ml:MLModel — new properties
+### fair4ml:MLModel
 
 | Property | Expected Type | Description |
 |---|---|---|
@@ -51,7 +51,7 @@ schema:Thing > schema:CreativeWork > fair4ml:MLModelEvaluation
 
 Note: `fair4ml:MLModel` also inherits properties from Schema.org `CreativeWork` and CodeMeta.
 
-### fair4ml:MLModelEvaluation — new properties
+### fair4ml:MLModelEvaluation
 
 | Property | Expected Type | Description |
 |---|---|---|
