@@ -20,7 +20,7 @@ help: ## Display this help message
 
 up: ## Start all services
 	@echo "$(BLUE)Starting MLentory ETL services...$(NC)"
-	docker-compose up -d
+	docker compose up -d
 	@echo "$(GREEN)Services started!$(NC)"
 	@echo "Dagster UI: http://localhost:3000"
 	@echo "Neo4j Browser: http://localhost:7474"
@@ -28,31 +28,31 @@ up: ## Start all services
 
 down: ## Stop all services
 	@echo "$(BLUE)Stopping MLentory ETL services...$(NC)"
-	docker-compose down
+	docker compose down
 	@echo "$(GREEN)Services stopped!$(NC)"
 
 restart: down up ## Restart all services
 
 logs: ## View logs from all services
-	docker-compose logs -f
+	docker compose logs -f
 
 logs-dagster: ## View Dagster logs
-	docker-compose logs -f dagster-webserver dagster-daemon
+	docker compose logs -f dagster-webserver dagster-daemon
 
 logs-neo4j: ## View Neo4j logs
-	docker-compose logs -f neo4j
+	docker compose logs -f neo4j
 
 logs-elasticsearch: ## View Elasticsearch logs
-	docker-compose logs -f elasticsearch
+	docker compose logs -f elasticsearch
 
 build: ## Build Docker images
 	@echo "$(BLUE)Building Docker images...$(NC)"
-	docker-compose build
+	docker compose build
 	@echo "$(GREEN)Build complete!$(NC)"
 
 rebuild: ## Rebuild Docker images without cache
 	@echo "$(BLUE)Rebuilding Docker images...$(NC)"
-	docker-compose build --no-cache
+	docker compose build --no-cache
 	@echo "$(GREEN)Rebuild complete!$(NC)"
 
 ##@ Data & Cleanup
@@ -62,7 +62,7 @@ clean: ## Stop services and remove volumes (WARNING: deletes all data)
 	@read -p "Are you sure? [y/N] " -n 1 -r; \
 	echo; \
 	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		docker-compose down -v; \
+		docker compose down -v; \
 		rm -rf data/raw/* data/normalized/* data/rdf/* data/cache/*; \
 		echo "$(GREEN)Cleanup complete!$(NC)"; \
 	else \
@@ -77,10 +77,10 @@ clean-data: ## Remove local data files only (keeps database volumes)
 ##@ Development
 
 shell-dagster: ## Open a shell in the Dagster container
-	docker-compose exec dagster-webserver /bin/bash
+	docker compose exec dagster-webserver /bin/bash
 
 shell-neo4j: ## Open Neo4j Cypher shell
-	docker-compose exec neo4j cypher-shell -u $(NEO4J_USER) -p $(NEO4J_PASSWORD)
+	docker compose exec neo4j cypher-shell -u $(NEO4J_USER) -p $(NEO4J_PASSWORD)
 
 ##@ Testing & Quality
 
@@ -126,7 +126,7 @@ extract: ## Run extraction for a specific source (usage: make extract SOURCE=hug
 		exit 1; \
 	fi
 	@echo "$(BLUE)Running extraction for $(SOURCE)...$(NC)"
-	docker-compose exec dagster-webserver dagster asset materialize --select extract_$(SOURCE)
+	docker compose exec dagster-webserver dagster asset materialize --select extract_$(SOURCE)
 
 transform: ## Run transformation for a specific source (usage: make transform SOURCE=huggingface)
 	@if [ -z "$(SOURCE)" ]; then \
@@ -134,7 +134,7 @@ transform: ## Run transformation for a specific source (usage: make transform SO
 		exit 1; \
 	fi
 	@echo "$(BLUE)Running transformation for $(SOURCE)...$(NC)"
-	docker-compose exec dagster-webserver dagster asset materialize --select transform_$(SOURCE)
+	docker compose exec dagster-webserver dagster asset materialize --select transform_$(SOURCE)
 
 load: ## Run loading for a specific source (usage: make load SOURCE=huggingface)
 	@if [ -z "$(SOURCE)" ]; then \
@@ -142,11 +142,11 @@ load: ## Run loading for a specific source (usage: make load SOURCE=huggingface)
 		exit 1; \
 	fi
 	@echo "$(BLUE)Running loading for $(SOURCE)...$(NC)"
-	docker-compose exec dagster-webserver dagster asset materialize --select load_$(SOURCE)
+	docker compose exec dagster-webserver dagster asset materialize --select load_$(SOURCE)
 
 etl-run: ## Run full ETL pipeline for all sources
 	@echo "$(BLUE)Running full ETL pipeline...$(NC)"
-	docker-compose exec dagster-webserver dagster job execute -j etl_pipeline
+	docker compose exec dagster-webserver dagster job execute -j etl_pipeline
 
 ##@ Setup
 
@@ -169,7 +169,7 @@ setup: init up ## Complete initial setup (init + start services)
 
 status: ## Show status of all services
 	@echo "$(BLUE)Service Status:$(NC)"
-	@docker-compose ps
+	@docker compose ps
 	@echo ""
 	@echo "$(BLUE)Network Info:$(NC)"
 	@docker network inspect mlentory-network --format '{{range .Containers}}{{.Name}}: {{.IPv4Address}}{{println}}{{end}}' 2>/dev/null || echo "Network not found"
@@ -183,7 +183,7 @@ env-check: ## Verify environment configuration
 		echo "$(GREEN)✓ .env file exists$(NC)"; \
 	fi
 	@docker --version > /dev/null 2>&1 && echo "$(GREEN)✓ Docker installed$(NC)" || echo "$(YELLOW)✗ Docker not found$(NC)"
-	@docker-compose --version > /dev/null 2>&1 && echo "$(GREEN)✓ Docker Compose installed$(NC)" || echo "$(YELLOW)✗ Docker Compose not found$(NC)"
+	@docker compose --version > /dev/null 2>&1 && echo "$(GREEN)✓ Docker Compose installed$(NC)" || echo "$(YELLOW)✗ Docker Compose not found$(NC)"
 
 version: ## Show version information
 	@echo "MLentory ETL Backend"
