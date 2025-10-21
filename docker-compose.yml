@@ -34,27 +34,31 @@ services:
       start_period: 40s
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION:-8.11.0}
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.2
     container_name: mlentory-elasticsearch
     ports:
       - "9200:9200"
       - "9300:9300"
     environment:
-      - discovery.type=single-node
-      - "ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms512m -Xmx512m}"
-      - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:-mlentory_es_password_change_me}
-      - xpack.security.http.ssl.enabled=false
+      - node.name=elastic
+      - "transport.host=localhost"
+      - "xpack.security.enabled=false"  # Disable security features for development, needs to be enabled for production
+      - discovery.type=single-node  #  Use single-node discovery for development
+      # - cluster.initial_master_nodes=elastic   # Use this for production
+      - cluster.name=es-docker-cluster
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+      # - "bootstrap.system_call_filter=false"   # Is not required for version 8.0 and above
+      # - node.max_local_storage_nodes=2
+      # Disk watermark settings to prevent allocation issues when disk is nearly full
+      - "cluster.routing.allocation.disk.watermark.low=85%"  # Start warning at 85% disk usage
+      - "cluster.routing.allocation.disk.watermark.high=97%" # High watermark at 97% as requested
+      - "cluster.routing.allocation.disk.watermark.flood_stage=98%" # Flood stage at 98%
+      - "cluster.info.update.interval=1m" # Update cluster info every minute
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
       - mlentory-network
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
 
   # =============================================================================
   # Dagster Orchestration
@@ -77,41 +81,6 @@ services:
       timeout: 5s
       retries: 5
 
-  dagster-daemon:
-    build:
-      context: .
-      dockerfile: deploy/docker/Dockerfile.dagster
-    container_name: mlentory-dagster-daemon
-    environment:
-      - DAGSTER_HOME=${DAGSTER_HOME:-/opt/dagster/dagster_home}
-      - DAGSTER_POSTGRES_USER=${DAGSTER_POSTGRES_USER:-dagster}
-      - DAGSTER_POSTGRES_PASSWORD=${DAGSTER_POSTGRES_PASSWORD:-dagster_password_change_me}
-      - DAGSTER_POSTGRES_DB=${DAGSTER_POSTGRES_DB:-dagster}
-      - DAGSTER_POSTGRES_HOST=dagster-postgres
-      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
-      - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-mlentory_neo4j_password_change_me}
-      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://elasticsearch:9200}
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-mlentory_es_password_change_me}
-      - DATA_DIR=${DATA_DIR:-/data}
-    volumes:
-      - ./etl:/opt/dagster/app/etl
-      - ./extractors:/opt/dagster/app/extractors
-      - ./transformers:/opt/dagster/app/transformers
-      - ./loaders:/opt/dagster/app/loaders
-      - ./schemas:/opt/dagster/app/schemas
-      - ./data:/data
-      - dagster_home:/opt/dagster/dagster_home
-    networks:
-      - mlentory-network
-    depends_on:
-      dagster-postgres:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
-    command: dagster-daemon run
 
   dagster-webserver:
     build:
@@ -126,11 +95,6 @@ services:
       - DAGSTER_POSTGRES_PASSWORD=${DAGSTER_POSTGRES_PASSWORD:-dagster_password_change_me}
       - DAGSTER_POSTGRES_DB=${DAGSTER_POSTGRES_DB:-dagster}
       - DAGSTER_POSTGRES_HOST=dagster-postgres
-      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
-      - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-mlentory_neo4j_password_change_me}
-      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://elasticsearch:9200}
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-mlentory_es_password_change_me}
       - DATA_DIR=${DATA_DIR:-/data}
     volumes:
       - ./etl:/opt/dagster/app/etl
@@ -140,14 +104,14 @@ services:
       - ./schemas:/opt/dagster/app/schemas
       - ./data:/data
       - dagster_home:/opt/dagster/dagster_home
+      - ./deploy/dagster/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
+      - ./deploy/dagster/workspace.yaml:/opt/dagster/dagster_home/workspace.yaml:ro
     networks:
       - mlentory-network
     depends_on:
       dagster-postgres:
         condition: service_healthy
-      dagster-daemon:
-        condition: service_started
-    command: dagster-webserver -h 0.0.0.0 -p 3000
+    command: dagster-webserver -w /opt/dagster/dagster_home/workspace.yaml -h 0.0.0.0 -p 3000
 
 # =============================================================================
 # Networks
