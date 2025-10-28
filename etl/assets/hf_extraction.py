@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Set
+from typing import Set, Tuple
 import logging
 
 from dagster import asset, AssetIn
@@ -27,22 +29,59 @@ class HFEnrichmentConfig:
 
 
 @asset(group_name="hf")
-def hf_raw_models() -> str:
+def hf_run_folder() -> str:
     """
-    Extract raw HF model metadata and persist JSON under /data/raw/hf.
+    Create a unique run folder for this materialization.
+    
+    All assets in this run will save outputs to this folder, ensuring
+    that outputs from a single run are grouped together.
     
     Returns:
-        Path to the saved models JSON file
+        Path to the run-specific output directory
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_id = str(uuid.uuid4())[:8]
+    run_folder_name = f"{timestamp}_{run_id}"
+    
+    run_folder = Path("/data/raw/hf") / run_folder_name
+    run_folder.mkdir(parents=True, exist_ok=True)
+    
+    logger.info(f"Created run folder: {run_folder}")
+    return str(run_folder)
+
+
+@asset(
+    group_name="hf",
+    ins={"run_folder": AssetIn("hf_run_folder")},
+)
+def hf_raw_models(run_folder: str) -> Tuple[str, str]:
+    """
+    Extract raw HF model metadata and persist JSON under the run folder.
+    
+    Args:
+        run_folder: Path to the run-specific output directory
+    
+    Returns:
+        Tuple of (models_json_path, run_folder) to pass to downstream assets
     """
     config = HFModelsExtractionConfig()
     extractor = HFExtractor()
+    
+    output_root = Path(run_folder).parent.parent  # Go up to /data
     df, output_path = extractor.extract_models(
         num_models=config.num_models,
         update_recent=config.update_recent,
         threads=config.threads,
+        output_root=output_root,
     )
-    logger.info(f"HF raw models saved to {output_path}")
-    return str(output_path)
+    
+    # Move the file to the run folder with a clean name
+    run_folder_path = Path(run_folder)
+    final_path = run_folder_path / "hf_models.json"
+    Path(output_path).rename(final_path)
+    
+    logger.info(f"HF raw models saved to {final_path}")
+    return (str(final_path), run_folder)
 
 
 # ========== Individual Entity Enrichment Assets ==========
@@ -50,41 +89,43 @@ def hf_raw_models() -> str:
 
 @asset(
     group_name="hf_enrichment",
-    ins={"models_json_path": AssetIn("hf_raw_models")},
+    ins={"models_data": AssetIn("hf_raw_models")},
 )
-def hf_identified_datasets(models_json_path: str) -> Set[str]:
+def hf_identified_datasets(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
     """
     Identify dataset references from raw HF models.
     
     Args:
-        models_json_path: Path to the raw models JSON
+        models_data: Tuple of (models_json_path, run_folder)
         
     Returns:
-        Set of unique dataset names
+        Tuple of (dataset_names, run_folder)
     """
+    models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = enrichment._load_models_dataframe(models_json_path)
     
     datasets = enrichment.identifiers["datasets"].identify(models_df)
     logger.info(f"Identified {len(datasets)} unique datasets")
     
-    return datasets
+    return (datasets, run_folder)
 
 
 @asset(
     group_name="hf_enrichment",
-    ins={"dataset_names": AssetIn("hf_identified_datasets")},
+    ins={"datasets_data": AssetIn("hf_identified_datasets")},
 )
-def hf_enriched_datasets(dataset_names: Set[str]) -> str:
+def hf_enriched_datasets(datasets_data: Tuple[Set[str], str]) -> str:
     """
     Extract metadata for identified datasets from HuggingFace.
     
     Args:
-        dataset_names: Set of dataset names to extract
+        datasets_data: Tuple of (dataset_names, run_folder)
         
     Returns:
         Path to the saved datasets JSON file
     """
+    dataset_names, run_folder = datasets_data
     config = HFEnrichmentConfig()
     extractor = HFExtractor()
     
@@ -93,52 +134,60 @@ def hf_enriched_datasets(dataset_names: Set[str]) -> str:
         return ""
     
     logger.info(f"Extracting {len(dataset_names)} datasets")
+    output_root = Path(run_folder).parent.parent  # Go up to /data
     _, json_path = extractor.extract_specific_datasets(
         dataset_names=list(dataset_names),
         threads=config.threads,
+        output_root=output_root,
     )
     
-    logger.info(f"Datasets saved to {json_path}")
-    return str(json_path)
+    # Move to run folder with clean name
+    final_path = Path(run_folder) / "hf_datasets_specific.json"
+    Path(json_path).rename(final_path)
+    
+    logger.info(f"Datasets saved to {final_path}")
+    return str(final_path)
 
 
 @asset(
     group_name="hf_enrichment",
-    ins={"models_json_path": AssetIn("hf_raw_models")},
+    ins={"models_data": AssetIn("hf_raw_models")},
 )
-def hf_identified_articles(models_json_path: str) -> Set[str]:
+def hf_identified_articles(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
     """
     Identify arXiv article references from raw HF models.
     
     Args:
-        models_json_path: Path to the raw models JSON
+        models_data: Tuple of (models_json_path, run_folder)
         
     Returns:
-        Set of unique arXiv IDs
+        Tuple of (arxiv_ids, run_folder)
     """
+    models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = enrichment._load_models_dataframe(models_json_path)
     
     articles = enrichment.identifiers["articles"].identify(models_df)
     logger.info(f"Identified {len(articles)} unique arXiv articles")
     
-    return articles
+    return (articles, run_folder)
 
 
 @asset(
     group_name="hf_enrichment",
-    ins={"arxiv_ids": AssetIn("hf_identified_articles")},
+    ins={"articles_data": AssetIn("hf_identified_articles")},
 )
-def hf_enriched_articles(arxiv_ids: Set[str]) -> str:
+def hf_enriched_articles(articles_data: Tuple[Set[str], str]) -> str:
     """
     Extract metadata for identified arXiv articles.
     
     Args:
-        arxiv_ids: Set of arXiv IDs to extract
+        articles_data: Tuple of (arxiv_ids, run_folder)
         
     Returns:
         Path to the saved articles JSON file
     """
+    arxiv_ids, run_folder = articles_data
     extractor = HFExtractor()
     
     if not arxiv_ids:
@@ -146,43 +195,52 @@ def hf_enriched_articles(arxiv_ids: Set[str]) -> str:
         return ""
     
     logger.info(f"Extracting {len(arxiv_ids)} arXiv articles")
-    _, json_path = extractor.extract_specific_arxiv(arxiv_ids=list(arxiv_ids))
+    output_root = Path(run_folder).parent.parent  # Go up to /data
+    _, json_path = extractor.extract_specific_arxiv(
+        arxiv_ids=list(arxiv_ids),
+        output_root=output_root,
+    )
     
-    logger.info(f"Articles saved to {json_path}")
-    return str(json_path)
+    # Move to run folder with clean name
+    final_path = Path(run_folder) / "arxiv_articles.json"
+    Path(json_path).rename(final_path)
+    
+    logger.info(f"Articles saved to {final_path}")
+    return str(final_path)
 
 
 @asset(
     group_name="hf_enrichment",
-    ins={"models_json_path": AssetIn("hf_raw_models")},
+    ins={"models_data": AssetIn("hf_raw_models")},
 )
-def hf_identified_base_models(models_json_path: str) -> Set[str]:
+def hf_identified_base_models(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
     """
     Identify base model references from raw HF models.
     
     Args:
-        models_json_path: Path to the raw models JSON
+        models_data: Tuple of (models_json_path, run_folder)
         
     Returns:
-        Set of unique base model IDs
+        Tuple of (base_model_ids, run_folder)
     """
+    models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = enrichment._load_models_dataframe(models_json_path)
     
     base_models = enrichment.identifiers["base_models"].identify(models_df)
     logger.info(f"Identified {len(base_models)} unique base models")
     
-    return base_models
+    return (base_models, run_folder)
 
 
 @asset(
     group_name="hf_enrichment",
     ins={
-        "base_model_ids": AssetIn("hf_identified_base_models"),
+        "base_models_data": AssetIn("hf_identified_base_models")
     },
 )
 def hf_enriched_base_models(
-    base_model_ids: Set[str]
+    base_models_data: Tuple[Set[str], str]
 ) -> str:
     """
     Extract metadata for identified base models from HuggingFace.
@@ -191,11 +249,12 @@ def hf_enriched_base_models(
     may reference the same datasets.
     
     Args:
-        base_model_ids: Set of base model IDs to extract
+        base_models_data: Tuple of (base_model_ids, run_folder)
         
     Returns:
         Path to the saved base models JSON file
     """
+    base_model_ids, run_folder = base_models_data
     config = HFEnrichmentConfig()
     extractor = HFExtractor()
     
@@ -204,52 +263,60 @@ def hf_enriched_base_models(
         return ""
     
     logger.info(f"Extracting {len(base_model_ids)} base models")
+    output_root = Path(run_folder).parent.parent  # Go up to /data
     _, json_path = extractor.extract_specific_models(
         model_ids=list(base_model_ids),
         threads=config.threads,
+        output_root=output_root,
     )
     
-    logger.info(f"Base models saved to {json_path}")
-    return str(json_path)
+    # Move to run folder with clean name
+    final_path = Path(run_folder) / "hf_models_specific.json"
+    Path(json_path).rename(final_path)
+    
+    logger.info(f"Base models saved to {final_path}")
+    return str(final_path)
 
 
 @asset(
     group_name="hf_enrichment",
-    ins={"models_json_path": AssetIn("hf_raw_models")},
+    ins={"models_data": AssetIn("hf_raw_models")},
 )
-def hf_identified_keywords(models_json_path: str) -> Set[str]:
+def hf_identified_keywords(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
     """
     Identify keywords/tags from raw HF models.
     
     Args:
-        models_json_path: Path to the raw models JSON
+        models_data: Tuple of (models_json_path, run_folder)
         
     Returns:
-        Set of unique keywords
+        Tuple of (keywords, run_folder)
     """
+    models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = enrichment._load_models_dataframe(models_json_path)
     
     keywords = enrichment.identifiers["keywords"].identify(models_df)
     logger.info(f"Identified {len(keywords)} unique keywords")
     
-    return keywords
+    return (keywords, run_folder)
 
 
 @asset(
     group_name="hf_enrichment",
-    ins={"keywords": AssetIn("hf_identified_keywords")},
+    ins={"keywords_data": AssetIn("hf_identified_keywords")},
 )
-def hf_enriched_keywords(keywords: Set[str]) -> str:
+def hf_enriched_keywords(keywords_data: Tuple[Set[str], str]) -> str:
     """
     Extract metadata for identified keywords.
     
     Args:
-        keywords: Set of keywords to extract
+        keywords_data: Tuple of (keywords, run_folder)
         
     Returns:
         Path to the saved keywords JSON file
     """
+    keywords, run_folder = keywords_data
     extractor = HFExtractor()
     
     if not keywords:
@@ -257,49 +324,59 @@ def hf_enriched_keywords(keywords: Set[str]) -> str:
         return ""
     
     logger.info(f"Extracting {len(keywords)} keywords")
-    _, json_path = extractor.extract_keywords(keywords=list(keywords))
+    output_root = Path(run_folder).parent.parent  # Go up to /data
+    _, json_path = extractor.extract_keywords(
+        keywords=list(keywords),
+        output_root=output_root,
+    )
     
-    logger.info(f"Keywords saved to {json_path}")
-    return str(json_path)
+    # Move to run folder with clean name
+    final_path = Path(run_folder) / "keywords.json"
+    Path(json_path).rename(final_path)
+    
+    logger.info(f"Keywords saved to {final_path}")
+    return str(final_path)
 
 
 @asset(
     group_name="hf_enrichment",
-    ins={"models_json_path": AssetIn("hf_raw_models")},
+    ins={"models_data": AssetIn("hf_raw_models")},
 )
-def hf_identified_licenses(models_json_path: str) -> Set[str]:
+def hf_identified_licenses(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
     """
     Identify license references from raw HF models.
     
     Args:
-        models_json_path: Path to the raw models JSON
+        models_data: Tuple of (models_json_path, run_folder)
         
     Returns:
-        Set of unique license IDs
+        Tuple of (license_ids, run_folder)
     """
+    models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = enrichment._load_models_dataframe(models_json_path)
     
     licenses = enrichment.identifiers["licenses"].identify(models_df)
     logger.info(f"Identified {len(licenses)} unique licenses")
     
-    return licenses
+    return (licenses, run_folder)
 
 
 @asset(
     group_name="hf_enrichment",
-    ins={"license_ids": AssetIn("hf_identified_licenses")},
+    ins={"licenses_data": AssetIn("hf_identified_licenses")},
 )
-def hf_enriched_licenses(license_ids: Set[str]) -> str:
+def hf_enriched_licenses(licenses_data: Tuple[Set[str], str]) -> str:
     """
     Extract metadata for identified licenses.
     
     Args:
-        license_ids: Set of license IDs to extract
+        licenses_data: Tuple of (license_ids, run_folder)
         
     Returns:
         Path to the saved licenses JSON file
     """
+    license_ids, run_folder = licenses_data
     extractor = HFExtractor()
     
     if not license_ids:
@@ -307,9 +384,15 @@ def hf_enriched_licenses(license_ids: Set[str]) -> str:
         return ""
     
     logger.info(f"Extracting {len(license_ids)} licenses")
-    _, json_path = extractor.extract_licenses(license_ids=list(license_ids))
+    output_root = Path(run_folder).parent.parent  # Go up to /data
+    _, json_path = extractor.extract_licenses(
+        license_ids=list(license_ids),
+        output_root=output_root,
+    )
     
-    logger.info(f"Licenses saved to {json_path}")
-    return str(json_path)
-
-
+    # Move to run folder with clean name
+    final_path = Path(run_folder) / "licenses.json"
+    Path(json_path).rename(final_path)
+    
+    logger.info(f"Licenses saved to {final_path}")
+    return str(final_path)
