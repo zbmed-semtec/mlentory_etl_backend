@@ -36,6 +36,8 @@ arxiv = "^1.4.8"
 spdx-lookup = "^0.3.3"
 wikipedia-api = "^0.7.1"
 wikidata = "^0.7.0"
+openml = "^0.15.1"
+selenium = "^4.38.0"
 
 [tool.pytest.ini_options]
 minversion = "7.0"
