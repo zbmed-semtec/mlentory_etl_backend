@@ -13,7 +13,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.14"
+python = ">=3.10,<3.14"
 dagster = "^1.11.0"
 dagster-webserver = "^1.10.0"
 dagster-postgres = "^0.27.0"
@@ -32,7 +32,7 @@ pandas = "^2.1.0"
 numpy = "^1.26.0"
 datasets = "^3.0.0"
 huggingface-hub = "^0.30.0"
-arxiv = "^1.4.8"
+arxiv = "^2.1.0"
 spdx-lookup = "^0.3.3"
 wikipedia-api = "^0.7.1"
 wikidata = "^0.7.0"

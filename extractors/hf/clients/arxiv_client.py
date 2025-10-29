@@ -4,6 +4,7 @@ from typing import List
 from datetime import datetime
 import time
 import logging
+import traceback
 
 import pandas as pd
 import arxiv
@@ -42,6 +43,8 @@ class HFArxivClient:
                 results = list(client.results(search))
             except Exception as e:  # noqa: BLE001
                 logger.warning("Error processing arXiv papers: %s", e)
+                # print the traceback
+                logger.error(traceback.format_exc())
                 time.sleep(5)
                 return pd.DataFrame()
 
