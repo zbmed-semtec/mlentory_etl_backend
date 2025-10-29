@@ -111,38 +111,32 @@ class OpenMLRunsClient:
             evaluations = getattr(run, "evaluations", None)
 
             metadata = {
-                "run_id": self._wrap_metadata(run.run_id),
+                "run_id": run.run_id,
                 # "description": self._wrap_metadata(run.description),
-                "uploader": self._wrap_metadata(run.uploader),
-                "uploader_name": self._wrap_metadata(run.uploader_name),
-                "uploader_url": self._wrap_metadata(uploader_url),
-                "task_id": self._wrap_metadata(run.task_id),
-                "task_type": self._wrap_metadata(task.task_type),
-                "task_evaluation_measure": self._wrap_metadata(
-                    task.evaluation_measure
-                ),
-                "task_estimation_procedure": self._wrap_metadata(task.estimation_procedure),
-                "flow_id": self._wrap_metadata(run.flow_id),
-                "flow_name": self._wrap_metadata(flow.name),
-                "flow_version": self._wrap_metadata(flow.version),
-                "flow_description": self._wrap_metadata(flow_description),
-                "flow_upload_date": self._wrap_metadata(flow_upload_date),
-                "flow_language": self._wrap_metadata(flow_language),
-                "setup_id": self._wrap_metadata(run.setup_id),
-                "setup_string": self._wrap_metadata(run.setup_string),
-                "dataset_id": self._wrap_metadata(run.dataset_id),
-                "dataset_name": self._wrap_metadata(dataset.name),
-                "dataset_openml_url": self._wrap_metadata(dataset_openml_url),
-                "openml_url": self._wrap_metadata(f"https://www.openml.org/r/{run_id}"),
-                "evaluations": self._wrap_metadata(evaluations),
-                "error_message": self._wrap_metadata(run.error_message),
-                "tags": self._wrap_metadata(
-                    list(run.tags) if run.tags else [],
-                ),
-                "flow_tags": self._wrap_metadata(flow_tags),
-                "keywords": self._wrap_metadata(
-                    list({*(list(run.tags) if run.tags else []), *flow_tags})
-                ),
+                "uploader": run.uploader,
+                "uploader_name": run.uploader_name,
+                "uploader_url": uploader_url,
+                "task_id": run.task_id,
+                "task_type": task.task_type,
+                "task_evaluation_measure": task.evaluation_measure,
+                "task_estimation_procedure": task.estimation_procedure,
+                "flow_id": run.flow_id,
+                "flow_name": flow.name,
+                "flow_version": flow.version,
+                "flow_description": flow_description,
+                "flow_upload_date": flow_upload_date,
+                "flow_language": flow_language,
+                "setup_id": run.setup_id,
+                "setup_string": run.setup_string,
+                "dataset_id": run.dataset_id,
+                "dataset_name": dataset.name,
+                "dataset_openml_url": dataset_openml_url,
+                "openml_url": f"https://www.openml.org/r/{run_id}",
+                "evaluations": evaluations,
+                "error_message": run.error_message,
+                "tags": list(run.tags) if run.tags else [],
+                "flow_tags": flow_tags,
+                "keywords": list({*(list(run.tags) if run.tags else []), *flow_tags}),
             }
 
             logger.info(f"Successfully fetched run metadata for run_id={run_id}")

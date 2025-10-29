@@ -116,32 +116,18 @@ class OpenMLDatasetsClient:
             )
 
             metadata = {
-                "dataset_id": self._wrap_metadata(dataset_id),
-                "name": self._wrap_metadata(dataset.name),
-                "version": self._wrap_metadata(str(dataset.version)),
-                "description": self._wrap_metadata(dataset.description),
-                "format": self._wrap_metadata(dataset.format),
-                # "license": self._wrap_metadata(dataset.license),
-                "inLanguage": self._wrap_metadata(dataset.language),
-                # "uploader": self._wrap_metadata(dataset.uploader),
-                "status": self._wrap_metadata(
-                    status,
-                    method=(
-                        "web_scraping"
-                        if scraped_stats["status"] != "N/A"
-                        else "openml_python_package"
-                    ),
-                ),
-                "likes": self._wrap_metadata(
-                    scraped_stats["likes"], method="web_scraping"
-                ),
-                "downloads": self._wrap_metadata(
-                    scraped_stats["downloads"], method="web_scraping"
-                ),
-                "url": self._wrap_metadata(dataset.url),
-                "openml_url": self._wrap_metadata(
-                    f"https://www.openml.org/d/{dataset_id}"
-                ),
+                "dataset_id": dataset_id,
+                "name": dataset.name,
+                "version": str(dataset.version),
+                "description": dataset.description,
+                "format": dataset.format,
+                # "license": dataset.license,
+                "inLanguage": dataset.language,
+                "status": status,
+                "likes": scraped_stats["likes"],
+                "downloads": scraped_stats["downloads"],
+                "url": dataset.url,
+                "openml_url": f"https://www.openml.org/d/{dataset_id}",
             }
 
             logger.debug(
