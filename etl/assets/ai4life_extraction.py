@@ -74,13 +74,13 @@ def ai4life_models_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtract
     models = [r for r in records if r.get("type") == "model"]
     
     # Wrap each model with metadata
-    wrapped_models = [extractor.wrap_record_with_metadata(m) for m in models]
+    # wrapped_models = [extractor.wrap_record_with_metadata(m) for m in models]
     
     # Save to JSON
     models_path = Path(run_folder) / "models.json"
-    models_path.write_text(json.dumps(wrapped_models, indent=2), encoding="utf-8")
+    models_path.write_text(json.dumps(models, indent=2), encoding="utf-8")
     
-    logger.info("Saved %d models to %s", len(wrapped_models), models_path)
+    logger.info("Saved %d models to %s", len(models), models_path)
     return (str(models_path), run_folder)
 
 
@@ -96,13 +96,13 @@ def ai4life_datasets_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtra
     datasets = [r for r in records if r.get("type") == "dataset"]
     
     # Wrap each dataset with metadata
-    wrapped_datasets = [extractor.wrap_record_with_metadata(d) for d in datasets]
+    # wrapped_datasets = [extractor.wrap_record_with_metadata(d) for d in datasets]
     
     # Save to JSON
     datasets_path = Path(run_folder) / "datasets.json"
-    datasets_path.write_text(json.dumps(wrapped_datasets, indent=2), encoding="utf-8")
+    datasets_path.write_text(json.dumps(datasets, indent=2), encoding="utf-8")
     
-    logger.info("Saved %d datasets to %s", len(wrapped_datasets), datasets_path)
+    logger.info("Saved %d datasets to %s", len(datasets), datasets_path)
     return (str(datasets_path), run_folder)
 
 
@@ -118,13 +118,13 @@ def ai4life_applications_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeE
     applications = [r for r in records if r.get("type") == "application"]
     
     # Wrap each application with metadata
-    wrapped_applications = [extractor.wrap_record_with_metadata(a) for a in applications]
+    # wrapped_applications = [extractor.wrap_record_with_metadata(a) for a in applications]
     
     # Save to JSON
     applications_path = Path(run_folder) / "applications.json"
-    applications_path.write_text(json.dumps(wrapped_applications, indent=2), encoding="utf-8")
+    applications_path.write_text(json.dumps(applications, indent=2), encoding="utf-8")
     
-    logger.info("Saved %d applications to %s", len(wrapped_applications), applications_path)
+    logger.info("Saved %d applications to %s", len(applications), applications_path)
     return (str(applications_path), run_folder)
 
 
