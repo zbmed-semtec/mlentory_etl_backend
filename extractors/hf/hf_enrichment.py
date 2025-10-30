@@ -226,3 +226,156 @@ class HFEnrichment:
         
         return output_paths
 
+    def enrich_with_ancestor_models(
+        self,
+        current_models_dataframe: pd.DataFrame,
+        depth_iterations: int = 1,
+    ) -> pd.DataFrame:
+        """
+        Iteratively extract base model metadata and merge with current models.
+        
+        This method identifies base models referenced in current_models_dataframe,
+        fetches their metadata, and repeats the process for newly discovered base
+        models up to depth_iterations times.
+        
+        Args:
+            current_models_dataframe: DataFrame containing current model metadata
+            depth_iterations: Number of iterations to traverse base model references
+            save_csv: Whether to save a CSV file in addition to JSON
+            output_root: Root directory for output (defaults to /data)
+            
+        Returns:
+            Tuple of (merged_df, json_path) containing all models with ancestors
+        """
+
+        base_identifier = self.identifiers["base_models"]
+        
+        max_iterations = max(0, depth_iterations)
+        if max_iterations == 0:
+            logger.info("depth_iterations set to 0; skipping base model extraction")
+            json_path = self.save_dataframe_to_json(
+                current_models_dataframe,
+                output_root=output_root,
+                save_csv=save_csv,
+                suffix="hf_models_with_ancestor"
+            )
+            return current_models_dataframe, json_path
+        
+        # Identify initial base models from current dataframe
+        initial_base_models = base_identifier.identify(current_models_dataframe)
+        logger.info("Identified %d base models from %d current models", 
+                   len(initial_base_models), len(current_models_dataframe))
+        
+        if not initial_base_models:
+            logger.info("No base models found; returning current models unchanged")
+            json_path = self.save_dataframe_to_json(
+                current_models_dataframe,
+                output_root=output_root,
+                save_csv=save_csv,
+                suffix="hf_models_with_ancestor"
+            )
+            return current_models_dataframe, json_path
+        
+        # Track which models we've already extracted
+        seen_ids: Set[str] = set()
+        
+        # Add current model IDs to seen set to avoid re-fetching
+        id_column = "id" if "id" in current_models_dataframe.columns else "modelId"
+        if id_column in current_models_dataframe.columns:
+            seen_ids.update(current_models_dataframe[id_column].dropna().astype(str).tolist())
+        
+        pending_ids: Set[str] = set(initial_base_models)
+        collected_frames: List[pd.DataFrame] = [current_models_dataframe]
+        iterations_run = 0
+        
+        # Iteratively extract base models
+        for iteration in range(max_iterations):
+            current_ids = sorted(pending_ids - seen_ids)
+            if not current_ids:
+                logger.info(
+                    "No new base models to extract at iteration %d; stopping early",
+                    iteration + 1,
+                )
+                break
+            
+            iterations_run = iteration + 1
+            logger.info(
+                "Base model extraction iteration %d/%d: extracting %d models",
+                iterations_run,
+                max_iterations,
+                len(current_ids),
+            )
+            
+            try:
+                df, _ = self.extract_specific_models(
+                    model_ids=current_ids,
+                    threads=4,  # Could be parameterized if needed
+                    output_root=output_root,
+                    save_csv=False,  # Don't save intermediate files
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "Failed to extract base models on iteration %d: %s",
+                    iterations_run,
+                    exc,
+                    exc_info=True,
+                )
+                seen_ids.update(current_ids)
+                continue
+            
+            seen_ids.update(current_ids)
+            
+            if df is None or df.empty:
+                logger.info(
+                    "Iteration %d returned no base model metadata",
+                    iterations_run,
+                )
+                continue
+            
+            collected_frames.append(df)
+            
+            # Identify new base models from the extracted data
+            newly_identified = base_identifier.identify(df)
+            newly_identified -= seen_ids
+            if newly_identified:
+                logger.info(
+                    "Iteration %d discovered %d additional base models",
+                    iterations_run,
+                    len(newly_identified),
+                )
+                pending_ids.update(newly_identified)
+            else:
+                logger.info(
+                    "Iteration %d discovered no new base models",
+                    iterations_run,
+                )
+        
+        remaining = pending_ids - seen_ids
+        if remaining:
+            logger.info(
+                "Reached iteration limit (%d) with %d base models still pending",
+                max_iterations,
+                len(remaining),
+            )
+        
+        # Merge all collected dataframes
+        merged_df = pd.concat(collected_frames, ignore_index=True)
+        
+        # Remove duplicates based on model ID
+        if id_column in merged_df.columns:
+            before_count = len(merged_df)
+            merged_df = merged_df.drop_duplicates(subset=[id_column], keep="first")
+            after_count = len(merged_df)
+            if after_count != before_count:
+                logger.info(
+                    "Removed %d duplicate models during merge",
+                    before_count - after_count,
+                )
+        
+        logger.info(
+            "Merged %d total models (original + %d iterations of base models)",
+            len(merged_df),
+            iterations_run,
+        )
+        
+        return merged_df
