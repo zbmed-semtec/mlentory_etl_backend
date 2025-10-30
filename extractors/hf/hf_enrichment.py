@@ -12,7 +12,7 @@ import logging
 
 import pandas as pd
 
-from .hf_extractor import HFExtractor
+from .hf_helper import HFHelper
 from .entity_identifiers import (
     EntityIdentifier,
     DatasetIdentifier,
@@ -21,6 +21,8 @@ from .entity_identifiers import (
     KeywordIdentifier,
     LicenseIdentifier,
 )
+
+from .hf_extractor import HFExtractor
 
 
 logger = logging.getLogger(__name__)
@@ -154,44 +156,6 @@ class HFEnrichment:
         
         return output_paths
 
-    def _load_models_dataframe(self, models_json_path: Path | str) -> pd.DataFrame:
-        """
-        Load models JSON into a DataFrame with robust handling.
-
-        Supports both array JSON (e.g., [ {...}, {...} ]) and JSON Lines (NDJSON).
-        Provides clear diagnostics for common issues (missing/empty/invalid file).
-        """
-        path = Path(models_json_path)
-
-        if not path.exists():
-            raise FileNotFoundError(f"Models JSON not found at: {path}")
-        if path.is_dir():
-            raise ValueError(f"Expected a file but got a directory: {path}")
-        if path.stat().st_size == 0:
-            raise ValueError(f"Models JSON is empty: {path}")
-
-        # First attempt: array JSON via pandas
-        try:
-            df = pd.read_json(path, orient="records")
-            if not df.empty or len(df.columns) > 0:
-                return df
-        except ValueError:
-            pass
-
-        # Second attempt: JSON Lines via pandas
-        try:
-            df = pd.read_json(path, orient="records", lines=True)
-            if not df.empty or len(df.columns) > 0:
-                return df
-        except ValueError:
-            pass
-
-        # If both pandas attempts fail, raise clear error
-        raise ValueError(
-            f"Failed to parse models JSON at {path}. "
-            "File must be valid JSON array or JSON Lines format."
-        )
-
     def enrich_from_models_json(
         self,
         models_json_path: Path | str,
@@ -213,7 +177,7 @@ class HFEnrichment:
             Dict mapping entity type to output file path
         """
         # Load models (robust to array JSON and JSONL)
-        models_df = self._load_models_dataframe(models_json_path)
+        models_df = HFHelper.load_models_dataframe(models_json_path)
         logger.info("Loaded %d models from %s", len(models_df), models_json_path)
         
         # Identify related entities
@@ -230,6 +194,7 @@ class HFEnrichment:
         self,
         current_models_dataframe: pd.DataFrame,
         depth_iterations: int = 1,
+        threads: int = 4,
     ) -> pd.DataFrame:
         """
         Iteratively extract base model metadata and merge with current models.
@@ -241,48 +206,41 @@ class HFEnrichment:
         Args:
             current_models_dataframe: DataFrame containing current model metadata
             depth_iterations: Number of iterations to traverse base model references
-            save_csv: Whether to save a CSV file in addition to JSON
-            output_root: Root directory for output (defaults to /data)
+            threads: Number of threads for parallel downloads
             
         Returns:
-            Tuple of (merged_df, json_path) containing all models with ancestors
+            DataFrame containing all models with their ancestors merged
         """
-
         base_identifier = self.identifiers["base_models"]
         
         max_iterations = max(0, depth_iterations)
         if max_iterations == 0:
             logger.info("depth_iterations set to 0; skipping base model extraction")
-            json_path = self.save_dataframe_to_json(
-                current_models_dataframe,
-                output_root=output_root,
-                save_csv=save_csv,
-                suffix="hf_models_with_ancestor"
-            )
-            return current_models_dataframe, json_path
+            return current_models_dataframe
         
         # Identify initial base models from current dataframe
         initial_base_models = base_identifier.identify(current_models_dataframe)
-        logger.info("Identified %d base models from %d current models", 
-                   len(initial_base_models), len(current_models_dataframe))
+        logger.info(
+            "Identified %d base models from %d current models", 
+            len(initial_base_models), 
+            len(current_models_dataframe)
+        )
         
         if not initial_base_models:
             logger.info("No base models found; returning current models unchanged")
-            json_path = self.save_dataframe_to_json(
-                current_models_dataframe,
-                output_root=output_root,
-                save_csv=save_csv,
-                suffix="hf_models_with_ancestor"
-            )
-            return current_models_dataframe, json_path
+            return current_models_dataframe
         
         # Track which models we've already extracted
         seen_ids: Set[str] = set()
         
         # Add current model IDs to seen set to avoid re-fetching
-        id_column = "id" if "id" in current_models_dataframe.columns else "modelId"
-        if id_column in current_models_dataframe.columns:
-            seen_ids.update(current_models_dataframe[id_column].dropna().astype(str).tolist())
+        try:
+            id_column = HFHelper.get_model_id_column(current_models_dataframe)
+            seen_ids.update(
+                current_models_dataframe[id_column].dropna().astype(str).tolist()
+            )
+        except ValueError:
+            logger.warning("No ID column found in current models dataframe")
         
         pending_ids: Set[str] = set(initial_base_models)
         collected_frames: List[pd.DataFrame] = [current_models_dataframe]
@@ -307,11 +265,10 @@ class HFEnrichment:
             )
             
             try:
-                df, _ = self.extract_specific_models(
+                df, _ = self.extractor.extract_specific_models(
                     model_ids=current_ids,
-                    threads=4,  # Could be parameterized if needed
-                    output_root=output_root,
-                    save_csv=False,  # Don't save intermediate files
+                    threads=threads,
+                    save_csv=False,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
@@ -361,16 +318,8 @@ class HFEnrichment:
         # Merge all collected dataframes
         merged_df = pd.concat(collected_frames, ignore_index=True)
         
-        # Remove duplicates based on model ID
-        if id_column in merged_df.columns:
-            before_count = len(merged_df)
-            merged_df = merged_df.drop_duplicates(subset=[id_column], keep="first")
-            after_count = len(merged_df)
-            if after_count != before_count:
-                logger.info(
-                    "Removed %d duplicate models during merge",
-                    before_count - after_count,
-                )
+        # Remove duplicates using helper
+        merged_df = HFHelper.deduplicate_models(merged_df)
         
         logger.info(
             "Merged %d total models (original + %d iterations of base models)",

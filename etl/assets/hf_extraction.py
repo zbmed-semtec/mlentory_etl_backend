@@ -12,7 +12,7 @@ import pandas as pd
 
 from dagster import asset, AssetIn
 
-from extractors.hf import HFExtractor, HFEnrichment
+from extractors.hf import HFExtractor, HFEnrichment, HFHelper
 
 
 logger = logging.getLogger(__name__)
@@ -141,7 +141,7 @@ def hf_raw_models_from_file(run_folder: str) -> Tuple[Optional[pd.DataFrame], st
     df, output_path = extractor.extract_specific_models(
         model_ids=model_ids,
         threads=config.threads,
-        output_root=output_root,
+        save_csv=False,
     )
     
     # Clean up the temporary file created by extractor
@@ -230,18 +230,19 @@ def hf_add_ancestor_models(models_data: Tuple[str, str]) -> Tuple[str, str]:
         models_data: Tuple of (models_json_path, run_folder)
 
     Returns:
-        Path to the saved base models JSON file (``hf_models_specific.json``)
+        Path to the saved base models JSON file (``hf_models_with_ancestors.json``)
     """
     models_json_path, run_folder = models_data
     config = HFModelsExtractionConfig()
     extractor = HFExtractor()
     enrichment = HFEnrichment(extractor=extractor)
     
-    models_df = enrichment._load_models_dataframe(models_json_path)
+    models_df = HFHelper.load_models_dataframe(models_json_path)
     
     df_with_ancestors = enrichment.enrich_with_ancestor_models(
         current_models_dataframe=models_df,
-        depth_iterations=config.base_model_iterations
+        depth_iterations=config.base_model_iterations,
+        threads=config.threads,
     )
 
     # Move to run folder with clean name
@@ -269,7 +270,7 @@ def hf_identified_datasets(models_data: Tuple[str, str]) -> Tuple[Set[str], str]
     """
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
-    models_df = enrichment._load_models_dataframe(models_json_path)
+    models_df = HFHelper.load_models_dataframe(models_json_path)
     
     datasets = enrichment.identifiers["datasets"].identify(models_df)
     logger.info(f"Identified {len(datasets)} unique datasets")
@@ -331,7 +332,7 @@ def hf_identified_articles(models_data: Tuple[str, str]) -> Tuple[Set[str], str]
     """
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
-    models_df = enrichment._load_models_dataframe(models_json_path)
+    models_df = HFHelper.load_models_dataframe(models_json_path)
     
     articles = enrichment.identifiers["articles"].identify(models_df)
     logger.info(f"Identified {len(articles)} unique arXiv articles")
@@ -391,7 +392,7 @@ def hf_identified_keywords(models_data: Tuple[str, str]) -> Tuple[Set[str], str]
     """
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
-    models_df = enrichment._load_models_dataframe(models_json_path)
+    models_df = HFHelper.load_models_dataframe(models_json_path)
     
     keywords = enrichment.identifiers["keywords"].identify(models_df)
     logger.info(f"Identified {len(keywords)} unique keywords")
@@ -451,7 +452,7 @@ def hf_identified_licenses(models_data: Tuple[str, str]) -> Tuple[Set[str], str]
     """
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
-    models_df = enrichment._load_models_dataframe(models_json_path)
+    models_df = HFHelper.load_models_dataframe(models_json_path)
     
     licenses = enrichment.identifiers["licenses"].identify(models_df)
     logger.info(f"Identified {len(licenses)} unique licenses")
