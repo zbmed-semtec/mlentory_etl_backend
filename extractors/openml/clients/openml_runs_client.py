@@ -86,6 +86,8 @@ class OpenMLRunsClient:
         logger.info(f"Fetching metadata for run_id={run_id}")
         logger.info(type(run_id))
         run_id = int(run_id)
+        if run_id == 1:
+            raise Exception(f"Run ID {run_id} is not valid")
         try:
             run = openml.runs.get_run(run_id)
             dataset = openml.datasets.get_dataset(run.dataset_id)
