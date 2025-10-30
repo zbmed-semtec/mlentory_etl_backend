@@ -49,7 +49,7 @@ class OpenMLEnrichmentConfig:
 # ========== Run Folder Creation ==========
 
 
-@asset(group_name="openml")
+@asset(group_name="openml", tags={"pipeline": "openml_etl"})
 def openml_run_folder() -> str:
     """
     Create a unique run folder for this materialization.
@@ -76,6 +76,7 @@ def openml_run_folder() -> str:
 
 @asset(
     group_name="openml",
+    tags={"pipeline": "openml_etl"},
     ins={"run_folder": AssetIn("openml_run_folder")},
 )
 def openml_raw_runs(run_folder: str) -> Tuple[str, str]:
@@ -120,6 +121,7 @@ def openml_raw_runs(run_folder: str) -> Tuple[str, str]:
 
 @asset(
     group_name="openml_enrichment",
+    tags={"pipeline": "openml_etl"},
     ins={"runs_data": AssetIn("openml_raw_runs")},
 )
 def openml_identified_datasets(runs_data: Tuple[str, str]) -> Tuple[Set[int], str]:
@@ -144,6 +146,7 @@ def openml_identified_datasets(runs_data: Tuple[str, str]) -> Tuple[Set[int], st
 
 @asset(
     group_name="openml_enrichment",
+    tags={"pipeline": "openml_etl"},
     ins={"datasets_data": AssetIn("openml_identified_datasets")},
 )
 def openml_enriched_datasets(datasets_data: Tuple[Set[int], str]) -> str:

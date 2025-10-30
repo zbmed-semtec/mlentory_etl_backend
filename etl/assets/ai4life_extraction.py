@@ -34,7 +34,7 @@ class AI4LifeConfig:
     parent_id: str = os.getenv("AI4LIFE_PARENT_ID", "bioimage-io/bioimage.io")
 
 
-@asset(group_name="ai4life")
+@asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"})
 def ai4life_run_folder() -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_id = str(uuid.uuid4())[:8]
@@ -44,7 +44,7 @@ def ai4life_run_folder() -> str:
     return str(run_folder)
 
 
-@asset(group_name="ai4life", ins={"run_folder": AssetIn("ai4life_run_folder")})
+@asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"run_folder": AssetIn("ai4life_run_folder")})
 def ai4life_raw_records(run_folder: str) -> Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]:
     """
     Fetch raw records from AI4Life API.
@@ -62,7 +62,7 @@ def ai4life_raw_records(run_folder: str) -> Tuple[List[Dict[str, Any]], str, AI4
     return (data, run_folder, extractor)
 
 
-@asset(group_name="ai4life", ins={"raw_data": AssetIn("ai4life_raw_records")})
+@asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
 def ai4life_models_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
     """
     Filter model records and wrap with extraction metadata.
@@ -84,7 +84,7 @@ def ai4life_models_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtract
     return (str(models_path), run_folder)
 
 
-@asset(group_name="ai4life", ins={"raw_data": AssetIn("ai4life_raw_records")})
+@asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
 def ai4life_datasets_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
     """
     Filter dataset records and wrap with extraction metadata.
@@ -106,7 +106,7 @@ def ai4life_datasets_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtra
     return (str(datasets_path), run_folder)
 
 
-@asset(group_name="ai4life", ins={"raw_data": AssetIn("ai4life_raw_records")})
+@asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
 def ai4life_applications_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
     """
     Filter application records and wrap with extraction metadata.
