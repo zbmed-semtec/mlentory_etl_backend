@@ -35,9 +35,13 @@ class BaseModelIdentifier(EntityIdentifier):
         for _, row in models_df.iterrows():
             # Extract from tags
             tags = row.get("tags", [])
-            base_models.update(self.extract_from_tags(tags, "base_model:"))
-            
-            # TODO: Future enhancement - parse model card for base model mentions
+            # logger.info(f"Row: {row.get('modelId', '')}")
+            # logger.info(f"Tags: {tags}")
+            for tag in tags:
+                if isinstance(tag, str) and tag.startswith("base_model:"):
+                    base_model = tag.split(":")[-1].strip()
+                    if base_model:
+                        base_models.add(base_model)
             
         logger.info("Identified %d unique base models", len(base_models))
         return base_models

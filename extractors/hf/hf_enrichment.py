@@ -322,8 +322,9 @@ class HFEnrichment:
         merged_df = HFHelper.deduplicate_models(merged_df)
         
         logger.info(
-            "Merged %d total models (original + %d iterations of base models)",
+            "Merged %d total models (original: %d, iterations: %d)",
             len(merged_df),
+            len(current_models_dataframe),
             iterations_run,
         )
         
