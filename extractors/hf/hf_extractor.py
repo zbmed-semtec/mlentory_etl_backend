@@ -56,7 +56,11 @@ class HFExtractor:
         output_root: Path | None = None,
     ) -> (pd.DataFrame, Path):
         df = self.models_client.get_specific_models_metadata(model_ids=model_ids, threads=threads)
-        json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="hf_models_specific")
+        json_path = None
+        
+        if output_root is not None:
+            json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="hf_models_specific")
+        
         return df, json_path
 
     def extract_specific_datasets(
