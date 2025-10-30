@@ -39,6 +39,18 @@ local_artifact_storage:
 telemetry:
   enabled: false
 
+# Python logging configuration
+python_logs:
+  # Set log level to DEBUG to capture debug, info, and error logs
+  python_log_level: DEBUG
+  # Capture logs from these Python loggers
+  managed_python_loggers:
+    - ""  # Root logger - captures all Python logging calls
+    - extractors  # Capture all extractors module logs
+    - transformers  # Capture all transformers module logs
+    - loaders  # Capture all loaders module logs
+    - etl  # Capture all etl module logs
+
 # Run coordinator configuration - explicit default (no queuing)
 run_coordinator:
   module: dagster.core.run_coordinator
