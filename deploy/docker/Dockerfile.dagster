@@ -24,9 +24,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy application code
 COPY etl/ ./etl/
-COPY extractors/ ./extractors/
-COPY transformers/ ./transformers/
-COPY loaders/ ./loaders/
+COPY etl_extractors/ ./etl_extractors/
+COPY etl_transformers/ ./etl_transformers/
+COPY etl_loaders/ ./etl_loaders/
 COPY schemas/ ./schemas/
 
 # Create dagster home directory

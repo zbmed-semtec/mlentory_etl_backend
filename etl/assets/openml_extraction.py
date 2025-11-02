@@ -21,7 +21,7 @@ import logging
 
 from dagster import asset, AssetIn
 
-from extractors.openml import OpenMLExtractor, OpenMLEnrichment
+from etl_extractors.openml import OpenMLExtractor, OpenMLEnrichment
 
 
 logger = logging.getLogger(__name__)

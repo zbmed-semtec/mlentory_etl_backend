@@ -21,7 +21,7 @@ import logging
 
 from dagster import asset, AssetIn
 
-from extractors.ai4life.ai4life_extractor import AI4LifeExtractor
+from etl_extractors.ai4life.ai4life_extractor import AI4LifeExtractor
 
 
 logger = logging.getLogger(__name__)

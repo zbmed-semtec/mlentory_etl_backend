@@ -12,7 +12,7 @@ import pandas as pd
 
 from dagster import asset, AssetIn
 
-from extractors.hf import HFExtractor, HFEnrichment, HFHelper
+from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper
 
 
 logger = logging.getLogger(__name__)

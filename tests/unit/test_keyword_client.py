@@ -8,7 +8,7 @@ from pathlib import Path
 import json
 import tempfile
 
-from extractors.hf.clients.keyword_client import HFKeywordClient
+from etl_extractors.hf.clients.keyword_client import HFKeywordClient
 
 
 @pytest.fixture

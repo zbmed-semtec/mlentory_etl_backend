@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import glob
 
-from extractors.hf import HFExtractor, HFEnrichment
+from etl_extractors.hf import HFExtractor, HFEnrichment
 
 
 @pytest.mark.e2e
