@@ -123,8 +123,8 @@ class MLModel(BaseModel):
     )
     
     # ========== Model Lineage (fair4ml) ==========
-    fineTunedFrom: Optional[str] = Field(
-        default=None,
+    fineTunedFrom: Optional[List[str]] = Field(
+        default_factory=list,
         description="Identifier of the base model this was fine-tuned from (fair4ml:fineTunedFrom)"
     )
     
