@@ -257,8 +257,6 @@ def hf_add_ancestor_models(models_data: Tuple[str, str]) -> Tuple[str, str]:
     logger.info(f"Base models with ancestors saved to {final_path}")
     return (str(final_path), run_folder)
 
-
-
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
@@ -526,3 +524,117 @@ def hf_enriched_licenses(licenses_data: Tuple[Dict[str, List[str]], str]) -> str
     
     logger.info(f"Licenses saved to {final_path}")
     return str(final_path)
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl"}
+)
+def hf_identified_base_models(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
+    """
+    Identify related models per model from raw HF models.
+    
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+    
+    Returns:
+        Tuple of ({model_id: [related_model_ids]}, run_folder)
+    """
+    models_json_path, run_folder = models_data
+    enrichment = HFEnrichment()
+    models_df = HFHelper.load_models_dataframe(models_json_path)
+    
+    model_related_models = enrichment.identifiers["base_models"].identify_per_model(models_df)
+    logger.info(f"Identified related models for {len(model_related_models)} models")
+    return (model_related_models, run_folder)
+
+@asset(
+    group_name="hf_enrichment",
+    ins={
+        "base_models_data": AssetIn("hf_identified_base_models"),
+        "ancestor_models": AssetIn("hf_add_ancestor_models"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_enriched_base_models(
+    base_models_data: Tuple[Dict[str, List[str]], str],
+    ancestor_models: Tuple[str, str],
+) -> str:
+    """
+    Aggregate metadata for identified base models and create stubs when missing.
+
+    Args:
+        base_models_data: Tuple of ({model_id: [base_model_ids]}, run_folder)
+        ancestor_models: Tuple of (hf_models_with_ancestors_path, run_folder)
+
+    Returns:
+        Path to the saved base models JSON file
+    """
+    model_base_models_map, _ = base_models_data
+    ancestors_json_path, run_folder = ancestor_models
+
+    # Load extracted ancestor models to see which base models we already have metadata for
+    if Path(ancestors_json_path).exists():
+        with open(ancestors_json_path, "r", encoding="utf-8") as f:
+            ancestor_models_data = json.load(f)
+    else:
+        logger.warning("Ancestor models file not found at %s", ancestors_json_path)
+        ancestor_models_data = []
+
+    ancestor_models_by_id: Dict[str, Dict] = {}
+    for model in ancestor_models_data:
+        model_id = model.get("modelId") or model.get("id")
+        if not model_id:
+            continue
+        ancestor_models_by_id[model_id] = model
+
+    # Collect all unique base model identifiers
+    unique_base_model_ids: Set[str] = set()
+    for base_models in model_base_models_map.values():
+        unique_base_model_ids.update(base_models)
+
+    logger.info("Evaluating %d unique base models for enrichment", len(unique_base_model_ids))
+
+    base_model_entities: Dict[str, Dict] = {}
+
+    for base_model_id in sorted(unique_base_model_ids):
+        mlentory_id = HFHelper.generate_entity_hash("Model", base_model_id)
+        if base_model_id in ancestor_models_by_id:
+            model_record = dict(ancestor_models_by_id[base_model_id])
+            model_record["mlentory_id"] = model_record.get("mlentory_id", mlentory_id)
+            model_record["enriched"] = True
+            model_record.setdefault("entity_type", "Model")
+            model_record.setdefault("platform", "HF")
+            base_model_entities[base_model_id] = model_record
+        else:
+            base_model_entities[base_model_id] = {
+                "modelId": base_model_id,
+                "mlentory_id": mlentory_id,
+                "enriched": False,
+                "entity_type": "Model",
+                "platform": "HF",
+                "extraction_metadata": {
+                    "extraction_method": "HF_API",
+                    "confidence": 1.0,
+                    "extraction_time": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+                },
+            }
+
+    # Persist enriched + stub base model entities
+    output_path = Path(run_folder) / "hf_base_models_enriched.json"
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(
+            list(base_model_entities.values()),
+            f,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
+
+    logger.info(
+        "Saved %d base model entities (including stubs) to %s",
+        len(base_model_entities),
+        output_path,
+    )
+
+    return str(output_path)
