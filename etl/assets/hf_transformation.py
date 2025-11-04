@@ -32,6 +32,7 @@ from pydantic import BaseModel, ValidationError
 
 from dagster import asset, AssetIn
 
+from etl_extractors.hf import HFHelper
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from schemas.fair4ml import MLModel
 
@@ -160,11 +161,75 @@ def hf_extract_basic_properties(
     logger.info(f"Saved basic properties to {output_path}")
     return str(output_path)
 
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "datasets_mapping": AssetIn("hf_identified_datasets"),
+        "articles_mapping": AssetIn("hf_identified_articles"),
+        "keywords_mapping": AssetIn("hf_identified_keywords"),
+        "licenses_mapping": AssetIn("hf_identified_licenses"),
+        "run_folder_data": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_entity_linking(
+    datasets_mapping: Tuple[Dict[str, List[str]], str],
+    articles_mapping: Tuple[Dict[str, List[str]], str],
+    keywords_mapping: Tuple[Dict[str, List[str]], str],
+    licenses_mapping: Tuple[Dict[str, List[str]], str],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Create entity linking mapping: model_id -> {datasets, articles, keywords, licenses}
+
+    Links identified entities with their enriched metadata.
+
+    Args:
+        datasets_mapping: Tuple of ({model_id: [dataset_names]}, run_folder)
+        articles_mapping: Tuple of ({model_id: [arxiv_ids]}, run_folder)
+        keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
+        licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
+        run_folder_data: Tuple of (models_json_path, normalized_folder)
+
+    Returns:
+        Path to saved entity linking JSON file
+    """
+    _, normalized_folder = run_folder_data
+
+    # Extract the model-entity mappings from the tuples
+    model_datasets = datasets_mapping[0]
+    model_articles = articles_mapping[0]
+    model_keywords = keywords_mapping[0]
+    model_licenses = licenses_mapping[0]
+
+    # Create the final linking structure
+    entity_linking = {}
+
+    for model_id in model_datasets.keys():
+        model_entities = {
+            "datasets": lambda: HFHelper.generate_entity_hash('Dataset', model_datasets[model_id]),
+            "articles": lambda: HFHelper.generate_entity_hash('Article', model_articles[model_id]),
+            "keywords": lambda: HFHelper.generate_entity_hash('Keyword', model_keywords[model_id]),
+            "licenses": lambda: HFHelper.generate_entity_hash('License', model_licenses[model_id])
+        }
+
+        entity_linking[model_id] = model_entities
+
+    # Save the linking data
+    output_path = Path(normalized_folder) / "entity_linking.json"
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(entity_linking, f, indent=2, ensure_ascii=False, default=str)
+
+    logger.info(f"Saved entity linking data for {len(entity_linking)} models to {output_path}")
+    return str(output_path)
+
 @asset(
     group_name="hf_transformation",
     ins={
         "models_data": AssetIn("hf_normalized_run_folder"),
         "basic_properties": AssetIn("hf_extract_basic_properties"),
+        "entity_linking": AssetIn("hf_entity_linking"),
         # TODO: Add more partial schema inputs as we implement them:
         # "keywords_language": AssetIn("hf_extract_keywords_language"),
         # "task_category": AssetIn("hf_extract_task_category"),
@@ -179,18 +244,20 @@ def hf_extract_basic_properties(
 def hf_models_normalized(
     models_data: Tuple[str, str],
     basic_properties: str,
+    entity_linking: str,
 ) -> Tuple[str, str]:
     """
     Merge partial schemas and create final FAIR4ML MLModel objects.
-    
+
     This asset aggregates all partial property extractions, merges them by model,
     validates against Pydantic schema, and writes the final normalized models.
-    
+
     Args:
         models_data: Tuple of (raw_data_json_path, normalized_folder)
         basic_properties: Path to basic properties partial schema
-        
-        
+        entity_linking: Path to entity linking JSON file
+
+
     Returns:
         Path to the saved normalized models JSON file
     """
@@ -209,15 +276,15 @@ def hf_models_normalized(
     with open(basic_properties, 'r', encoding='utf-8') as f:
         basic_props = json.load(f)
     
-    # TODO: Load additional partial schemas as they are implemented
-    # with open(keywords_language, 'r', encoding='utf-8') as f:
-    #     keywords_lang = json.load(f)
-    # with open(task_category, 'r', encoding='utf-8') as f:
-    #     task_cat = json.load(f)
-    # ... etc
-    
     logger.info(f"Loaded {len(basic_props)} basic property schemas")
-    
+
+    # Load entity linking data
+    logger.info(f"Loading entity linking data from {entity_linking}")
+    with open(entity_linking, 'r', encoding='utf-8') as f:
+        entity_linking_data = json.load(f)
+
+    logger.info(f"Loaded entity linking data for {len(entity_linking_data)} models")
+
     # Create index mapping for efficient merging
     basic_props_by_index = {item["_index"]: item for item in basic_props}
     # TODO: Create indices for other partial schemas
@@ -237,21 +304,20 @@ def hf_models_normalized(
             merged.pop("_model_id", None)
             merged.pop("_index", None)
             merged.pop("_error", None)
-            
-            # TODO: Merge additional partial schemas
-            # Merge keywords & language
-            # if idx in keywords_lang_by_index:
-            #     kw_data = keywords_lang_by_index[idx]
-            #     merged["keywords"] = kw_data.get("keywords", [])
-            #     merged["inLanguage"] = kw_data.get("inLanguage", [])
-            #     # Merge extraction_metadata
-            #     merged["extraction_metadata"].update(kw_data.get("extraction_metadata", {}))
-            
+
             # Add platform-specific metrics
             merged["metrics"] = {
                 "downloads": raw_model.get("downloads", 0),
                 "likes": raw_model.get("likes", 0),
             }
+
+            # Add linked entities
+            if model_id in entity_linking_data:
+                model_entities = entity_linking_data[model_id]
+
+                # Add enriched datasets, articles, keywords, licenses
+                # These will be used by downstream processes to create proper FAIR4ML relationships
+                merged["_linked_entities"] = model_entities
             
             merged_schemas.append(merged)
             
@@ -322,3 +388,49 @@ def hf_models_normalized(
     
     return (str(output_path), str(normalized_folder))
 
+
+
+def _load_enriched_entity_mapping(json_path: str, entity_type: str) -> Dict[str, Dict]:
+    """
+    Load enriched entity JSON file and create {entity_id: entity_data} mapping.
+
+    Args:
+        json_path: Path to the enriched entities JSON file
+        entity_type: Type of entity ("datasets", "articles", "keywords", "licenses")
+
+    Returns:
+        Dict mapping entity identifier to enriched entity data
+    """
+    if not json_path or not Path(json_path).exists():
+        logger.warning(f"Enriched {entity_type} file not found: {json_path}")
+        return {}
+
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            entities = json.load(f)
+
+        entity_mapping = {}
+
+        for entity in entities:
+            # Get the appropriate identifier field based on entity type
+            if entity_type == "datasets":
+                entity_id = entity.get("datasetId")
+            elif entity_type == "articles":
+                entity_id = entity.get("arxiv_id")
+            elif entity_type == "keywords":
+                entity_id = entity.get("keyword")
+            elif entity_type == "licenses":
+                entity_id = entity.get("Name") or entity.get("Identifier")
+            else:
+                logger.warning(f"Unknown entity type: {entity_type}")
+                continue
+
+            if entity_id:
+                entity_mapping[entity_id] = entity
+
+        logger.info(f"Loaded {len(entity_mapping)} enriched {entity_type} entities")
+        return entity_mapping
+
+    except Exception as e:
+        logger.error(f"Error loading enriched {entity_type} from {json_path}: {e}")
+        return {}
