@@ -389,14 +389,6 @@ def hf_models_normalized(
     if not normalized_models:
         logger.error("No models were successfully normalized. Failing the run.")
         raise RuntimeError("hf_models_normalized produced zero models. Aborting run.")
-
-    # Warn if fewer models were produced than provided as input
-    if len(normalized_models) < len(raw_models):
-        logger.warning(
-            "Normalized model count (%s) is less than input raw models (%s).",
-            len(normalized_models),
-            len(raw_models),
-        )
     
     # Write normalized models
     output_path = Path(normalized_folder) / "mlmodels.json"
@@ -411,6 +403,16 @@ def hf_models_normalized(
         with open(errors_path, 'w', encoding='utf-8') as f:
             json.dump(validation_errors, f, indent=2, ensure_ascii=False)
         logger.info(f"Wrote {len(validation_errors)} errors to {errors_path}")
+    
+        # Warn if fewer models were produced than provided as input, and provide file paths to the errors
+    if len(normalized_models) < len(raw_models):
+        logger.warning(
+            "Normalized model count (%s) is less than input raw models (%s).",
+            "check the entity linking and validation errors files: %s",
+            len(normalized_models),
+            len(raw_models),
+            str(errors_path)
+        )
     
     return (str(output_path), str(normalized_folder))
 
