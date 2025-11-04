@@ -46,9 +46,9 @@ python_logs:
   # Capture logs from these Python loggers
   managed_python_loggers:
     - ""  # Root logger - captures all Python logging calls
-    - extractors  # Capture all extractors module logs
-    - transformers  # Capture all transformers module logs
-    - loaders  # Capture all loaders module logs
+    - etl_extractors  # Capture all extractors module logs
+    - etl_transformers  # Capture all transformers module logs
+    - etl_loaders  # Capture all loaders module logs
     - etl  # Capture all etl module logs
 
 # Run coordinator configuration - explicit default (no queuing)

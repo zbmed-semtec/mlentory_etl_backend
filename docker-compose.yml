@@ -98,9 +98,9 @@ services:
       - DATA_DIR=${DATA_DIR:-/data}
     volumes:
       - ./etl:/opt/dagster/app/etl
-      - ./extractors:/opt/dagster/app/extractors
-      - ./transformers:/opt/dagster/app/transformers
-      - ./loaders:/opt/dagster/app/loaders
+      - ./etl_extractors:/opt/dagster/app/etl_extractors
+      - ./etl_transformers:/opt/dagster/app/etl_transformers
+      - ./etl_loaders:/opt/dagster/app/etl_loaders
       - ./schemas:/opt/dagster/app/schemas
       - ./data:/data
       - dagster_home:/opt/dagster/dagster_home

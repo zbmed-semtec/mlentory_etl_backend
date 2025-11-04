@@ -38,6 +38,7 @@ wikipedia-api = "^0.7.1"
 wikidata = "^0.7.0"
 openml = "^0.15.1"
 selenium = "^4.38.0"
+pycountry = "^24.5.0"
 
 [tool.pytest.ini_options]
 minversion = "7.0"
