@@ -14,6 +14,7 @@ import re
 from datetime import datetime
 from typing import Dict, Any, Optional
 import logging
+import pycountry
 
 from schemas.fair4ml import MLModel, ExtractionMetadata
 
@@ -250,7 +251,7 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     
     result["extraction_metadata"] = extraction_metadata
     return result
-
+                
 
 def normalize_hf_model(raw_model: Dict[str, Any]) -> MLModel:
     """
@@ -290,3 +291,15 @@ def normalize_hf_model(raw_model: Dict[str, Any]) -> MLModel:
     # Validate and return
     return MLModel(**mapped_data)
 
+def is_language_code(code: str) -> bool:
+    """
+    Check if a code is a valid language code.
+    
+    Args:
+        code: Language code to check
+        
+    Returns:
+        True if the code is a valid language code, False otherwise
+    """
+    return (pycountry.languages.get(alpha_2=code) or
+            pycountry.languages.get(alpha_3=code)) is not None
