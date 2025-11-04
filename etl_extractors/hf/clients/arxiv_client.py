@@ -9,6 +9,8 @@ import traceback
 import pandas as pd
 import arxiv
 
+from ..hf_helper import HFHelper
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -21,14 +23,19 @@ class HFArxivClient:
 
     def get_specific_arxiv_metadata_dataset(self, arxiv_ids: List[str], batch_size: int = 200) -> pd.DataFrame:
         temp_arxiv_ids: List[str] = []
+        original_to_normalized = {}  # Map normalized ID back to original
+        
         for arxiv_id in arxiv_ids:
             if "." in arxiv_id:
                 arxiv_id = arxiv_id.split("/")[-1]
-                temp_arxiv_ids.append(arxiv_id.split("v")[0] if "v" in arxiv_id else arxiv_id)
+                normalized = arxiv_id.split("v")[0] if "v" in arxiv_id else arxiv_id
+                temp_arxiv_ids.append(normalized)
+                original_to_normalized[normalized] = arxiv_id
         arxiv_ids = temp_arxiv_ids
 
         client = arxiv.Client(page_size=batch_size)
         arxiv_data: List[dict] = []
+        retrieved_ids = set()
 
         for i in range(0, len(arxiv_ids), batch_size):
             batch_ids = arxiv_ids[i : i + batch_size]
@@ -42,15 +49,32 @@ class HFArxivClient:
                 search = arxiv.Search(id_list=batch_ids, max_results=batch_size)
                 results = list(client.results(search))
             except Exception as e:  # noqa: BLE001
-                logger.warning("Error processing arXiv papers: %s", e)
-                # print the traceback
+                logger.warning("Error processing arXiv papers batch: %s, creating stub entities", e)
                 logger.error(traceback.format_exc())
+                # Create stub entities for all IDs in this batch
+                for arxiv_id in batch_ids:
+                    arxiv_data.append({
+                        "arxiv_id": arxiv_id,
+                        "mlentory_id": HFHelper.generate_entity_hash("Article", arxiv_id),
+                        "title": None,
+                        "enriched": False,
+                        "entity_type": "Article",
+                        "platform": "HF",
+                        "extraction_metadata": {
+                            "extraction_method": "arXiv_API",
+                            "confidence": 1.0,
+                            "extraction_time": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+                        },
+                    })
+                    retrieved_ids.add(arxiv_id)
                 time.sleep(5)
-                return pd.DataFrame()
+                continue
 
             for paper in results:
                 try:
                     arxiv_id = str(paper).split("/")[-1].strip()
+                    retrieved_ids.add(arxiv_id)
+                    
                     authors_data = []
                     if hasattr(paper, "authors") and paper.authors:
                         for author in paper.authors:
@@ -77,6 +101,7 @@ class HFArxivClient:
 
                     paper_metadata = {
                         "arxiv_id": arxiv_id,
+                        "mlentory_id": HFHelper.generate_entity_hash("Article", arxiv_id),
                         "title": paper.title,
                         "published": published,
                         "updated": updated,
@@ -89,6 +114,9 @@ class HFArxivClient:
                         "doi": doi,
                         "links": links,
                         "pdf_url": paper.pdf_url if hasattr(paper, "pdf_url") else None,
+                        "enriched": True,
+                        "entity_type": "Article",
+                        "platform": "HF",
                         "extraction_metadata": {
                             "extraction_method": "arXiv_API",
                             "confidence": 1.0,
@@ -97,15 +125,45 @@ class HFArxivClient:
                     }
                     arxiv_data.append(paper_metadata)
                 except Exception as e:  # noqa: BLE001
-                    logger.warning("Error processing arXiv paper '%s': %s", arxiv_id, e)
+                    logger.warning("Error processing arXiv paper '%s': %s, creating stub", arxiv_id, e)
+                    arxiv_data.append({
+                        "arxiv_id": arxiv_id,
+                        "mlentory_id": HFHelper.generate_entity_hash("Article", arxiv_id),
+                        "title": None,
+                        "enriched": False,
+                        "entity_type": "Article",
+                        "platform": "HF",
+                        "extraction_metadata": {
+                            "extraction_method": "arXiv_API",
+                            "confidence": 1.0,
+                            "extraction_time": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+                        },
+                    })
+                    retrieved_ids.add(arxiv_id)
+
+            # Create stub entities for IDs that weren't retrieved in this batch
+            for arxiv_id in batch_ids:
+                if arxiv_id not in retrieved_ids:
+                    logger.warning("arXiv paper '%s' not found in results, creating stub", arxiv_id)
+                    arxiv_data.append({
+                        "arxiv_id": arxiv_id,
+                        "mlentory_id": HFHelper.generate_entity_hash("Article", arxiv_id),
+                        "title": None,
+                        "enriched": False,
+                        "entity_type": "Article",
+                        "platform": "HF",
+                        "extraction_metadata": {
+                            "extraction_method": "arXiv_API",
+                            "confidence": 1.0,
+                            "extraction_time": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+                        },
+                    })
+                    retrieved_ids.add(arxiv_id)
 
             if i + batch_size < len(arxiv_ids):
                 logger.info("Waiting 6 seconds before processing next batch...")
                 time.sleep(6)
 
-        if not arxiv_data:
-            logger.warning("No arXiv papers could be successfully retrieved")
-            return pd.DataFrame()
         return pd.DataFrame(arxiv_data)
 
 

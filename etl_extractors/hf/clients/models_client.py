@@ -9,6 +9,8 @@ from huggingface_hub import HfApi, ModelCard
 from datasets import load_dataset
 import logging
 
+from ..hf_helper import HFHelper
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -68,6 +70,7 @@ class HFModelsClient:
 
             model_info = {
                 "modelId": model.id,
+                "mlentory_id": HFHelper.generate_entity_hash("Model", model.id),
                 "author": model.author,
                 "last_modified": model.last_modified,
                 "downloads": model.downloads,
@@ -77,6 +80,9 @@ class HFModelsClient:
                 "pipeline_tag": model.pipeline_tag,
                 "createdAt": model.created_at,
                 "card": card.content if card else "",
+                "enriched": True,
+                "entity_type": "Model",
+                "platform": "HF",
             }
             return model_info if self.has_model_enough_information(model_info) else None
 
@@ -108,6 +114,7 @@ class HFModelsClient:
 
                 model_info = {
                     "modelId": model.id,
+                    "mlentory_id": HFHelper.generate_entity_hash("Model", model.id),
                     "author": model.author,
                     "last_modified": model.last_modified,
                     "downloads": model.downloads,
@@ -117,6 +124,9 @@ class HFModelsClient:
                     "pipeline_tag": model.pipeline_tag,
                     "createdAt": model.created_at,
                     "card": card.content if card else "",
+                    "enriched": True,
+                    "entity_type": "Model",
+                    "platform": "HF",
                 }
                 if self.has_model_enough_information(model_info):
                     results.append(model_info)

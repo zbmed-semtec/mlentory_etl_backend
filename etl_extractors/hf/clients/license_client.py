@@ -8,6 +8,8 @@ import pandas as pd
 import logging
 import spdx_lookup
 
+from ..hf_helper import HFHelper
+
 
 
 logger = logging.getLogger(__name__)
@@ -34,14 +36,17 @@ class HFLicenseClient:
         for license_id in license_ids:
             license_data: Dict[str, Any] = {
                 "Name": license_id,
+                "mlentory_id": HFHelper.generate_entity_hash("License", license_id),
                 "Identifier": None,
                 "OSI Approved": None,
                 "Deprecated": None,
                 "Notes": None,
                 "Text": None,
                 "URL": None,
+                "entity_type": "License",
+                "platform": "HF",
                 "extraction_metadata": {
-                    "extraction_method": "Extracted from SPDX API",
+                    "extraction_method": "SPDX_API",
                     "confidence": 1.0,
                 },
             }
@@ -63,7 +68,17 @@ class HFLicenseClient:
                     license_data["Notes"] = spdx_license.notes
                 if hasattr(spdx_license, "text"):
                     license_data["Text"] = spdx_license.text
-                    
+                
+                license_data["enriched"] = True
+                all_license_data.append(license_data)
+            else:
+                # Create stub entity if license not found in SPDX
+                logger.warning("License '%s' not found in SPDX, creating stub entity", license_id)
+                license_data["enriched"] = False
+                license_data["extraction_metadata"] = {
+                    "extraction_method": "SPDX_API",
+                    "confidence": 1.0,
+                }
                 all_license_data.append(license_data)
         
         return pd.DataFrame(all_license_data)

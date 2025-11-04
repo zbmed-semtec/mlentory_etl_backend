@@ -11,6 +11,8 @@ import json
 import wikipediaapi
 from wikidata.client import Client as WikidataClient
 
+from ..hf_helper import HFHelper
+
 
 
 logger = logging.getLogger(__name__)
@@ -63,11 +65,15 @@ class HFKeywordClient:
                 
                 self.curated_definitions[keyword] = {
                     'keyword': keyword,
+                    'mlentory_id': HFHelper.generate_entity_hash("Keyword", keyword),
                     'definition': row['definition'],
                     'aliases': aliases,
                     'source': 'curated_csv',
                     'url': None,
                     'wikidata_qid': None,
+                    'enriched': True,
+                    'entity_type': 'Keyword',
+                    'platform': 'HF',
                     'extraction_metadata': {
                         'extraction_method': 'Curated CSV',
                         'confidence': 1.0,
@@ -100,17 +106,21 @@ class HFKeywordClient:
             if keyword_data:
                 all_keyword_data.append(keyword_data)
             else:
-                # No data found, create minimal entry
+                # No data found, create stub entity
                 all_keyword_data.append({
                     'keyword': keyword,
+                    'mlentory_id': HFHelper.generate_entity_hash("Keyword", keyword),
                     'definition': None,
                     'source': 'not_found',
                     'url': None,
                     'aliases': [],
                     'wikidata_qid': None,
+                    'enriched': False,
+                    'entity_type': 'Keyword',
+                    'platform': 'HF',
                     'extraction_metadata': {
-                        'extraction_method': 'Not Found',
-                        'confidence': 0.0,
+                        'extraction_method': 'Wikipedia API',
+                        'confidence': 1.0,
                     }
                 })
         
@@ -153,11 +163,15 @@ class HFKeywordClient:
             
             return {
                 'keyword': keyword,
+                'mlentory_id': HFHelper.generate_entity_hash("Keyword", keyword),
                 'definition': definition,
                 'source': 'wikipedia',
                 'url': page.fullurl,
                 'aliases': aliases,
                 'wikidata_qid': wikidata_qid,
+                'enriched': True,
+                'entity_type': 'Keyword',
+                'platform': 'HF',
                 'extraction_metadata': {
                     'extraction_method': 'Wikipedia API' + (' + Wikidata' if wikidata_qid else ''),
                     'confidence': 0.8,

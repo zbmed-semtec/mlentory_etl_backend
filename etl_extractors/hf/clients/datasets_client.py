@@ -10,6 +10,8 @@ import pandas as pd
 from huggingface_hub import HfApi
 import logging
 
+from ..hf_helper import HFHelper
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -42,7 +44,11 @@ class HFDatasetsClient:
                 return None
             return {
                 "datasetId": dataset.id,
+                "mlentory_id": HFHelper.generate_entity_hash("Dataset", dataset.id),
                 "croissant_metadata": croissant_metadata,
+                "enriched": True,
+                "entity_type": "Dataset",
+                "platform": "HF",
                 "extraction_metadata": {
                     "extraction_method": "Downloaded_from_HF_Croissant_endpoint",
                     "confidence": 1.0,
@@ -84,20 +90,51 @@ class HFDatasetsClient:
             try:
                 croissant_metadata = self.get_croissant_metadata(dataset_id)
                 if croissant_metadata == {}:
-                    logger.warning("No croissant metadata found for dataset '%s'", dataset_id)
-                    return None
+                    logger.warning("No croissant metadata found for dataset '%s', creating stub entity", dataset_id)
+                    # Create stub entity for non-enriched dataset
+                    return {
+                        "datasetId": dataset_id,
+                        "mlentory_id": HFHelper.generate_entity_hash("Dataset", dataset_id),
+                        "croissant_metadata": None,
+                        "enriched": False,
+                        "entity_type": "Dataset",
+                        "platform": "HF",
+                        "extraction_metadata": {
+                            "extraction_method": "HF_Croissant_endpoint",
+                            "confidence": 1.0,
+                            "extraction_time": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+                        },
+                    }
                 return {
                     "datasetId": dataset_id,
+                    "mlentory_id": HFHelper.generate_entity_hash("Dataset", dataset_id),
                     "croissant_metadata": croissant_metadata,
+                    "enriched": True,
+                    "entity_type": "Dataset",
+                    "platform": "HF",
                     "extraction_metadata": {
-                        "extraction_method": "Downloaded_from_HF_Croissant_endpoint",
+                        "extraction_method": "HF_Croissant_endpoint",
                         "confidence": 1.0,
                         "extraction_time": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
                     },
                 }
             except Exception as e:  # noqa: BLE001
-                logger.warning("Error processing dataset '%s': %s", dataset_id, e)
-                return None
+                logger.warning("Error processing dataset '%s': %s, creating stub entity", dataset_id, e)
+                # Create stub entity on error
+                return {
+                    "datasetId": dataset_id,
+                    "mlentory_id": HFHelper.generate_entity_hash("Dataset", dataset_id),
+                    "croissant_metadata": None,
+                    "enriched": False,
+                    "entity_type": "Dataset",
+                    "platform": "HF",
+                    "extraction_metadata": {
+                        "extraction_method": "HF_Croissant_endpoint",
+                        "confidence": 1.0,
+                        "extraction_time": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+                        "error": str(e),
+                    },
+                }
 
         with ThreadPoolExecutor(max_workers=threads) as executor:
             futures = [executor.submit(process_dataset, dataset_id) for dataset_id in dataset_names]
