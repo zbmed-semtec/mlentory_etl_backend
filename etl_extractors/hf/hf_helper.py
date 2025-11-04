@@ -132,32 +132,33 @@ class HFHelper:
         return df
 
     @staticmethod
-    def generate_entity_hash(self, entity_type: str, entity_id: str) -> str:
+    def generate_entity_hash(entity_type: str, entity_id: str, platform: str = "HF") -> str:
         """
         Generate a consistent hash from entity properties.
 
         Args:
-            entity_type (str): The type of entity (e.g., 'Dataset', 'Person')
+            entity_type (str): The type of entity (e.g., 'Dataset', 'Model', 'Article')
             entity_id (str): The unique identifier for the entity
+            platform (str): The platform name (default: 'HF')
 
         Returns:
-            str: A SHA-256 hash of the concatenated properties
+            str: A SHA-256 hash of the concatenated properties (mlentory_id)
 
         Example:
-            >>> hash = HFHelper.generate_entity_hash('Dataset', 'dataset1')
-            >>> print(hash)
+            >>> hash_value = HFHelper.generate_entity_hash('Dataset', 'squad')
+            >>> print(hash_value)
             '8a1c0c50e3e4f0b8a9d5c9e8b7a6f5d4c3b2a1'
         """
         # Create a sorted dictionary of properties to ensure consistent hashing
         properties = {
-            "platform": "HF",
+            "platform": platform,
             "type": entity_type,
             "id": entity_id
         }
-        
+
         # Convert to JSON string to ensure consistent serialization
         properties_str = json.dumps(properties, sort_keys=True)
-        
+
         # Generate SHA-256 hash
         hash_obj = hashlib.sha256(properties_str.encode())
         return hash_obj.hexdigest()
