@@ -4,7 +4,7 @@ Base interface for entity identifiers.
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Set, Dict, Any
+from typing import Set, Dict, Any, List
 import pandas as pd
 
 
@@ -26,12 +26,25 @@ class EntityIdentifier(ABC):
     def identify(self, models_df: pd.DataFrame) -> Set[str]:
         """
         Extract entity IDs/names from the models DataFrame.
-        
+
         Args:
             models_df: DataFrame containing raw HF model metadata
-            
+
         Returns:
             Set of entity identifiers (dataset names, arXiv IDs, etc.)
+        """
+        pass
+
+    @abstractmethod
+    def identify_per_model(self, models_df: pd.DataFrame) -> Dict[str, List[str]]:
+        """
+        Extract entity IDs/names per model from the models DataFrame.
+
+        Args:
+            models_df: DataFrame containing raw HF model metadata
+
+        Returns:
+            Dict mapping model_id to list of entity identifiers for that model
         """
         pass
 
