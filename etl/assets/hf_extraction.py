@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Set, Tuple, List, Optional
+from typing import Set, Tuple, List, Optional, Dict
 import logging
 
 import pandas as pd
@@ -263,24 +264,24 @@ def hf_add_ancestor_models(models_data: Tuple[str, str]) -> Tuple[str, str]:
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
     tags={"pipeline": "hf_etl"}
 )
-def hf_identified_datasets(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
+def hf_identified_datasets(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
-    Identify dataset references from raw HF models.
-    
+    Identify dataset references per model from raw HF models.
+
     Args:
         models_data: Tuple of (models_json_path, run_folder)
-        
+
     Returns:
-        Tuple of (dataset_names, run_folder)
+        Tuple of ({model_id: [dataset_names]}, run_folder)
     """
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = HFHelper.load_models_dataframe(models_json_path)
-    
-    datasets = enrichment.identifiers["datasets"].identify(models_df)
-    logger.info(f"Identified {len(datasets)} unique datasets")
-    
-    return (datasets, run_folder)
+
+    model_datasets = enrichment.identifiers["datasets"].identify_per_model(models_df)
+    logger.info(f"Identified datasets for {len(model_datasets)} models")
+
+    return (model_datasets, run_folder)
 
 
 @asset(
@@ -288,7 +289,7 @@ def hf_identified_datasets(models_data: Tuple[str, str]) -> Tuple[Set[str], str]
     ins={"datasets_data": AssetIn("hf_identified_datasets")},
     tags={"pipeline": "hf_etl"}
 )
-def hf_enriched_datasets(datasets_data: Tuple[Set[str], str]) -> str:
+def hf_enriched_datasets(datasets_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
     Extract metadata for identified datasets from HuggingFace.
     
@@ -298,7 +299,11 @@ def hf_enriched_datasets(datasets_data: Tuple[Set[str], str]) -> str:
     Returns:
         Path to the saved datasets JSON file
     """
-    dataset_names, run_folder = datasets_data
+    model_datasets_dict, run_folder = datasets_data
+    dataset_names = set()
+    for model_id, datasets in model_datasets_dict.items():
+        dataset_names.update(datasets)
+    
     config = HFEnrichmentConfig()
     extractor = HFExtractor()
     
@@ -327,24 +332,24 @@ def hf_enriched_datasets(datasets_data: Tuple[Set[str], str]) -> str:
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
     tags={"pipeline": "hf_etl"}
 )
-def hf_identified_articles(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
+def hf_identified_articles(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
-    Identify arXiv article references from raw HF models.
-    
+    Identify arXiv article references per model from raw HF models.
+
     Args:
         models_data: Tuple of (models_json_path, run_folder)
-        
+
     Returns:
-        Tuple of (arxiv_ids, run_folder)
+        Tuple of ({model_id: [arxiv_ids]}, run_folder)
     """
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = HFHelper.load_models_dataframe(models_json_path)
-    
-    articles = enrichment.identifiers["articles"].identify(models_df)
-    logger.info(f"Identified {len(articles)} unique arXiv articles")
-    
-    return (articles, run_folder)
+
+    model_articles = enrichment.identifiers["articles"].identify_per_model(models_df)
+    logger.info(f"Identified arXiv articles for {len(model_articles)} models")
+
+    return (model_articles, run_folder)
 
 
 @asset(
@@ -352,7 +357,7 @@ def hf_identified_articles(models_data: Tuple[str, str]) -> Tuple[Set[str], str]
     ins={"articles_data": AssetIn("hf_identified_articles")},
     tags={"pipeline": "hf_etl"}
 )
-def hf_enriched_articles(articles_data: Tuple[Set[str], str]) -> str:
+def hf_enriched_articles(articles_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
     Extract metadata for identified arXiv articles.
     
@@ -362,12 +367,18 @@ def hf_enriched_articles(articles_data: Tuple[Set[str], str]) -> str:
     Returns:
         Path to the saved articles JSON file
     """
-    arxiv_ids, run_folder = articles_data
+    model_articles_dict, run_folder = articles_data
     extractor = HFExtractor()
+    
+    arxiv_ids = set()
+    
+    for model_id, articles in model_articles_dict.items():
+        arxiv_ids.update(articles)
     
     if not arxiv_ids:
         logger.info("No articles to extract")
         return ""
+    
     
     logger.info(f"Extracting {len(arxiv_ids)} arXiv articles")
     output_root = Path(run_folder).parent.parent  # Go up to /data
@@ -389,24 +400,24 @@ def hf_enriched_articles(articles_data: Tuple[Set[str], str]) -> str:
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
     tags={"pipeline": "hf_etl"}
 )
-def hf_identified_keywords(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
+def hf_identified_keywords(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
-    Identify keywords/tags from raw HF models.
-    
+    Identify keywords/tags per model from raw HF models.
+
     Args:
         models_data: Tuple of (models_json_path, run_folder)
-        
+
     Returns:
-        Tuple of (keywords, run_folder)
+        Tuple of ({model_id: [keywords]}, run_folder)
     """
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = HFHelper.load_models_dataframe(models_json_path)
-    
-    keywords = enrichment.identifiers["keywords"].identify(models_df)
-    logger.info(f"Identified {len(keywords)} unique keywords")
-    
-    return (keywords, run_folder)
+
+    model_keywords = enrichment.identifiers["keywords"].identify_per_model(models_df)
+    logger.info(f"Identified keywords for {len(model_keywords)} models")
+
+    return (model_keywords, run_folder)
 
 
 @asset(
@@ -414,7 +425,7 @@ def hf_identified_keywords(models_data: Tuple[str, str]) -> Tuple[Set[str], str]
     ins={"keywords_data": AssetIn("hf_identified_keywords")},
     tags={"pipeline": "hf_etl"}
 )
-def hf_enriched_keywords(keywords_data: Tuple[Set[str], str]) -> str:
+def hf_enriched_keywords(keywords_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
     Extract metadata for identified keywords.
     
@@ -424,7 +435,12 @@ def hf_enriched_keywords(keywords_data: Tuple[Set[str], str]) -> str:
     Returns:
         Path to the saved keywords JSON file
     """
-    keywords, run_folder = keywords_data
+    model_keywords_dict, run_folder = keywords_data
+    keywords = set()
+    
+    for model_id, model_keywords in model_keywords_dict.items():
+        keywords.update(model_keywords)
+    
     extractor = HFExtractor()
     
     if not keywords:
@@ -451,24 +467,24 @@ def hf_enriched_keywords(keywords_data: Tuple[Set[str], str]) -> str:
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
     tags={"pipeline": "hf_etl"}
 )
-def hf_identified_licenses(models_data: Tuple[str, str]) -> Tuple[Set[str], str]:
+def hf_identified_licenses(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
-    Identify license references from raw HF models.
-    
+    Identify license references per model from raw HF models.
+
     Args:
         models_data: Tuple of (models_json_path, run_folder)
-        
+
     Returns:
-        Tuple of (license_ids, run_folder)
+        Tuple of ({model_id: [license_ids]}, run_folder)
     """
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = HFHelper.load_models_dataframe(models_json_path)
-    
-    licenses = enrichment.identifiers["licenses"].identify(models_df)
-    logger.info(f"Identified {len(licenses)} unique licenses")
-    
-    return (licenses, run_folder)
+
+    model_licenses = enrichment.identifiers["licenses"].identify_per_model(models_df)
+    logger.info(f"Identified licenses for {len(model_licenses)} models")
+
+    return (model_licenses, run_folder)
 
 
 @asset(
@@ -476,7 +492,7 @@ def hf_identified_licenses(models_data: Tuple[str, str]) -> Tuple[Set[str], str]
     ins={"licenses_data": AssetIn("hf_identified_licenses")},
     tags={"pipeline": "hf_etl"}
 )
-def hf_enriched_licenses(licenses_data: Tuple[Set[str], str]) -> str:
+def hf_enriched_licenses(licenses_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
     Extract metadata for identified licenses.
     
@@ -486,7 +502,11 @@ def hf_enriched_licenses(licenses_data: Tuple[Set[str], str]) -> str:
     Returns:
         Path to the saved licenses JSON file
     """
-    license_ids, run_folder = licenses_data
+    model_licenses_dict, run_folder = licenses_data
+    license_ids = set()
+    for model_id, licenses in model_licenses_dict.items():
+        license_ids.update(licenses)
+    
     extractor = HFExtractor()
     
     if not license_ids:
