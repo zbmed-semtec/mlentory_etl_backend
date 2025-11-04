@@ -323,7 +323,7 @@ def hf_models_normalized(
                 model_entities = entity_linking_data[model_id]
 
                 # Add enriched datasets, articles, keywords, licenses
-                merged["license"] = model_entities["licenses"][0]
+                merged["license"] = model_entities["licenses"][0] if len(model_entities["licenses"]) > 0 else None
                 merged["trainedOn"] = model_entities["datasets"]
                 merged["testedOn"] = model_entities["datasets"]
                 merged["validatedOn"] = model_entities["datasets"]
@@ -339,6 +339,7 @@ def hf_models_normalized(
                 
         except Exception as e:
             logger.error(f"Error merging schemas for model {model_id}: {e}", exc_info=True)
+            logger.error(f"Stack trace: {traceback.format_exc()}")
     
     logger.info(f"Merged {len(merged_schemas)} schemas")
     
@@ -352,10 +353,6 @@ def hf_models_normalized(
         
         try:
             # Validate with Pydantic
-            
-            logger.info(f"Merged data: {merged_data}")
-            logger.info(f"Merged data type: {type(merged_data)}")
-            
             mlmodel = MLModel(**merged_data)
             
             # Convert to dict for JSON serialization
@@ -405,14 +402,14 @@ def hf_models_normalized(
         logger.info(f"Wrote {len(validation_errors)} errors to {errors_path}")
     
         # Warn if fewer models were produced than provided as input, and provide file paths to the errors
-    if len(normalized_models) < len(raw_models):
-        logger.warning(
-            "Normalized model count (%s) is less than input raw models (%s).",
-            "check the entity linking and validation errors files: %s",
-            len(normalized_models),
-            len(raw_models),
-            str(errors_path)
-        )
+        if len(normalized_models) < len(raw_models):
+            logger.warning(
+                "Normalized model count (%s) is less than input raw models (%s).",
+                "check the entity linking and validation errors files: %s",
+                len(normalized_models),
+                len(raw_models),
+                str(errors_path)
+            )
     
     return (str(output_path), str(normalized_folder))
 
