@@ -208,10 +208,10 @@ def hf_entity_linking(
 
     for model_id in model_datasets.keys():
         model_entities = {
-            "datasets": lambda: HFHelper.generate_entity_hash('Dataset', model_datasets[model_id]),
-            "articles": lambda: HFHelper.generate_entity_hash('Article', model_articles[model_id]),
-            "keywords": lambda: HFHelper.generate_entity_hash('Keyword', model_keywords[model_id]),
-            "licenses": lambda: HFHelper.generate_entity_hash('License', model_licenses[model_id])
+            "datasets": [HFHelper.generate_entity_hash('Dataset', x) for x in model_datasets[model_id]],
+            "articles": [HFHelper.generate_entity_hash('Article', x) for x in model_articles[model_id]],
+            "keywords": [HFHelper.generate_entity_hash('Keyword', x) for x in model_keywords[model_id]],
+            "licenses": [HFHelper.generate_entity_hash('License', x) for x in model_licenses[model_id]]
         }
 
         entity_linking[model_id] = model_entities
@@ -412,21 +412,29 @@ def _load_enriched_entity_mapping(json_path: str, entity_type: str) -> Dict[str,
         entity_mapping = {}
 
         for entity in entities:
-            # Get the appropriate identifier field based on entity type
-            if entity_type == "datasets":
-                entity_id = entity.get("datasetId")
-            elif entity_type == "articles":
-                entity_id = entity.get("arxiv_id")
-            elif entity_type == "keywords":
-                entity_id = entity.get("keyword")
-            elif entity_type == "licenses":
-                entity_id = entity.get("Name") or entity.get("Identifier")
+            # Use mlentory_id as the key
+            mlentory_id = entity.get("mlentory_id")
+            if mlentory_id:
+                entity_mapping[mlentory_id] = entity
             else:
-                logger.warning(f"Unknown entity type: {entity_type}")
-                continue
+                # Fallback: generate mlentory_id if not present (for backward compatibility)
+                if entity_type == "datasets":
+                    entity_id = entity.get("datasetId")
+                elif entity_type == "articles":
+                    entity_id = entity.get("arxiv_id")
+                elif entity_type == "keywords":
+                    entity_id = entity.get("keyword")
+                elif entity_type == "licenses":
+                    entity_id = entity.get("Name") or entity.get("Identifier")
+                else:
+                    logger.warning(f"Unknown entity type: {entity_type}")
+                    continue
 
-            if entity_id:
-                entity_mapping[entity_id] = entity
+                if entity_id:
+                    from etl_extractors.hf import HFHelper
+                    mlentory_id = HFHelper.generate_entity_hash(entity_type.rstrip("s").capitalize(), entity_id)
+                    entity["mlentory_id"] = mlentory_id
+                    entity_mapping[mlentory_id] = entity
 
         logger.info(f"Loaded {len(entity_mapping)} enriched {entity_type} entities")
         return entity_mapping
