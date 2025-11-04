@@ -73,6 +73,8 @@ class BaseModelIdentifier(EntityIdentifier):
 
             if base_models:
                 model_base_models[model_id] = list(base_models)
+            else:
+                model_base_models[model_id] = []
 
         logger.info("Identified base models for %d models", len(model_base_models))
         return model_base_models
