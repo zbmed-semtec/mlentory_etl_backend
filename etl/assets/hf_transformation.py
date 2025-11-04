@@ -169,6 +169,7 @@ def hf_extract_basic_properties(
         "articles_mapping": AssetIn("hf_identified_articles"),
         "keywords_mapping": AssetIn("hf_identified_keywords"),
         "licenses_mapping": AssetIn("hf_identified_licenses"),
+        "base_models_mapping": AssetIn("hf_identified_base_models"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
     tags={"pipeline": "hf_etl"}
@@ -178,6 +179,7 @@ def hf_entity_linking(
     articles_mapping: Tuple[Dict[str, List[str]], str],
     keywords_mapping: Tuple[Dict[str, List[str]], str],
     licenses_mapping: Tuple[Dict[str, List[str]], str],
+    base_models_mapping: Tuple[Dict[str, List[str]], str],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -190,6 +192,7 @@ def hf_entity_linking(
         articles_mapping: Tuple of ({model_id: [arxiv_ids]}, run_folder)
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
+        base_models_mapping: Tuple of ({model_id: [base_model_ids]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
 
     Returns:
@@ -202,16 +205,20 @@ def hf_entity_linking(
     model_articles = articles_mapping[0]
     model_keywords = keywords_mapping[0]
     model_licenses = licenses_mapping[0]
-
+    model_base_models = base_models_mapping[0]
     # Create the final linking structure
     entity_linking = {}
 
+    logger.info(f"base models: {model_base_models}")
+    logger.info(f"base models: {model_base_models.keys()}")
+    
     for model_id in model_datasets.keys():
         model_entities = {
             "datasets": [HFHelper.generate_entity_hash('Dataset', x) for x in model_datasets[model_id]],
             "articles": [HFHelper.generate_entity_hash('Article', x) for x in model_articles[model_id]],
             "keywords": [HFHelper.generate_entity_hash('Keyword', x) for x in model_keywords[model_id]],
-            "licenses": [HFHelper.generate_entity_hash('License', x) for x in model_licenses[model_id]]
+            "licenses": [HFHelper.generate_entity_hash('License', x) for x in model_licenses[model_id]],
+            "base_models": [HFHelper.generate_entity_hash('Model', x) for x in model_base_models[model_id]]
         }
 
         entity_linking[model_id] = model_entities
@@ -323,6 +330,7 @@ def hf_models_normalized(
                 merged["evaluatedOn"] = model_entities["datasets"]
                 merged["referencePublication"] = model_entities["articles"]
                 merged["keywords"] = model_entities["keywords"]
+                merged["fineTunedFrom"] = model_entities["base_models"]
             
             merged_schemas.append(merged)
             
@@ -376,6 +384,19 @@ def hf_models_normalized(
     
     if validation_errors:
         logger.warning(f"Encountered {len(validation_errors)} validation errors")
+    
+    # Guardrail: fail the run if no models were successfully transformed
+    if not normalized_models:
+        logger.error("No models were successfully normalized. Failing the run.")
+        raise RuntimeError("hf_models_normalized produced zero models. Aborting run.")
+
+    # Warn if fewer models were produced than provided as input
+    if len(normalized_models) < len(raw_models):
+        logger.warning(
+            "Normalized model count (%s) is less than input raw models (%s).",
+            len(normalized_models),
+            len(raw_models),
+        )
     
     # Write normalized models
     output_path = Path(normalized_folder) / "mlmodels.json"
