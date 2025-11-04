@@ -5,6 +5,8 @@ Contains commonly used functions shared across HF extractors, enrichment, and as
 """
 
 from __future__ import annotations
+import hashlib
+import json
 from pathlib import Path
 import logging
 
@@ -129,3 +131,33 @@ class HFHelper:
         
         return df
 
+    @staticmethod
+    def generate_entity_hash(self, entity_type: str, entity_id: str) -> str:
+        """
+        Generate a consistent hash from entity properties.
+
+        Args:
+            entity_type (str): The type of entity (e.g., 'Dataset', 'Person')
+            entity_id (str): The unique identifier for the entity
+
+        Returns:
+            str: A SHA-256 hash of the concatenated properties
+
+        Example:
+            >>> hash = HFHelper.generate_entity_hash('Dataset', 'dataset1')
+            >>> print(hash)
+            '8a1c0c50e3e4f0b8a9d5c9e8b7a6f5d4c3b2a1'
+        """
+        # Create a sorted dictionary of properties to ensure consistent hashing
+        properties = {
+            "platform": "HF",
+            "type": entity_type,
+            "id": entity_id
+        }
+        
+        # Convert to JSON string to ensure consistent serialization
+        properties_str = json.dumps(properties, sort_keys=True)
+        
+        # Generate SHA-256 hash
+        hash_obj = hashlib.sha256(properties_str.encode())
+        return hash_obj.hexdigest()
