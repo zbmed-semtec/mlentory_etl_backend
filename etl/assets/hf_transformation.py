@@ -306,18 +306,23 @@ def hf_models_normalized(
             merged.pop("_error", None)
 
             # Add platform-specific metrics
-            merged["metrics"] = {
-                "downloads": raw_model.get("downloads", 0),
-                "likes": raw_model.get("likes", 0),
-            }
+            # merged["metrics"] = {
+            #     "downloads": raw_model.get("downloads", 0),
+            #     "likes": raw_model.get("likes", 0),
+            # }
 
             # Add linked entities
             if model_id in entity_linking_data:
                 model_entities = entity_linking_data[model_id]
 
                 # Add enriched datasets, articles, keywords, licenses
-                # These will be used by downstream processes to create proper FAIR4ML relationships
-                merged["_linked_entities"] = model_entities
+                merged["license"] = model_entities["licenses"][0]
+                merged["trainedOn"] = model_entities["datasets"]
+                merged["testedOn"] = model_entities["datasets"]
+                merged["validatedOn"] = model_entities["datasets"]
+                merged["evaluatedOn"] = model_entities["datasets"]
+                merged["referencePublication"] = model_entities["articles"]
+                merged["keywords"] = model_entities["keywords"]
             
             merged_schemas.append(merged)
             

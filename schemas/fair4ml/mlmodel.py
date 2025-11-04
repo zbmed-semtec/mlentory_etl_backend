@@ -107,6 +107,11 @@ class MLModel(BaseModel):
         description="License under which the model is distributed (schema:license)"
     )
     
+    referencePublication: Optional[List[str]] = Field(
+        default=None,
+        description="Reference publication for the model (schema:referencePublication)"
+    )
+    
     # ========== ML Task & Category (fair4ml) ==========
     mlTask: Optional[str] = Field(
         default=None,
