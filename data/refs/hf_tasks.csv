@@ -1,0 +1,46 @@
+task,category
+audio-classification,Audio
+audio-to-audio,Audio
+automatic-speech-recognition,Audio
+text-to-speech,Audio
+depth-estimation,Computer Vision
+image-classification,Computer Vision
+image-feature-extraction,Computer Vision
+image-segmentation,Computer Vision
+image-to-3d,Computer Vision
+image-to-image,Computer Vision
+image-to-text,Computer Vision
+image-to-video,Computer Vision
+keypoint-detection,Computer Vision
+mask-generation,Computer Vision
+object-detection,Computer Vision
+text-to-3d,Computer Vision
+text-to-image,Computer Vision
+text-to-video,Computer Vision
+unconditional-image-generation,Computer Vision
+video-classification,Computer Vision
+video-to-video,Computer Vision
+zero-shot-image-classification,Computer Vision
+zero-shot-object-detection,Computer Vision
+any-to-any,Multimodal
+audio-text-to-text,Multimodal
+document-question-answering,Multimodal
+image-text-to-text,Multimodal
+video-text-to-text,Multimodal
+visual-document-retrieval,Multimodal
+visual-question-answering,Multimodal
+feature-extraction,Natural Language Processing
+fill-mask,Natural Language Processing
+question-answering,Natural Language Processing
+sentence-similarity,Natural Language Processing
+summarization,Natural Language Processing
+table-question-answering,Natural Language Processing
+text-classification,Natural Language Processing
+text-generation,Natural Language Processing
+text-ranking,Natural Language Processing
+token-classification,Natural Language Processing
+translation,Natural Language Processing
+zero-shot-classification,Natural Language Processing
+reinforcement-learning,Reinforcement Learning
+tabular-classification,Tabular
+tabular-regression,Tabular
