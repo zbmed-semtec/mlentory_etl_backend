@@ -11,6 +11,7 @@ from .article_identifier import ArticleIdentifier
 from .base_model_identifier import BaseModelIdentifier
 from .keyword_identifier import KeywordIdentifier
 from .license_identifier import LicenseIdentifier
+from .task_identifier import TaskIdentifier
 
 __all__ = [
     "EntityIdentifier",
@@ -19,5 +20,6 @@ __all__ = [
     "BaseModelIdentifier",
     "KeywordIdentifier",
     "LicenseIdentifier",
+    "TaskIdentifier",
 ]
 

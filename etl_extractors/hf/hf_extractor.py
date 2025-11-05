@@ -14,6 +14,7 @@ from .clients import (
     HFLicenseClient,
     HFKeywordClient,
     HFLanguagesClient,
+    HFTasksClient,
 )
 
 
@@ -35,6 +36,7 @@ class HFExtractor:
         license_client: Optional[HFLicenseClient] = None,
         keyword_client: Optional[HFKeywordClient] = None,
         languages_client: Optional[HFLanguagesClient] = None,
+        tasks_client: Optional[HFTasksClient] = None,
     ) -> None:
         self.models_client = models_client or HFModelsClient()
         self.datasets_client = datasets_client or HFDatasetsClient()
@@ -42,6 +44,7 @@ class HFExtractor:
         self.license_client = license_client or HFLicenseClient()
         self.keyword_client = keyword_client or HFKeywordClient()
         self.languages_client = languages_client or HFLanguagesClient()
+        self.tasks_client = tasks_client or HFTasksClient()
 
     def extract_models(
         self,
@@ -122,6 +125,15 @@ class HFExtractor:
     ) -> (pd.DataFrame, Path):
         df = self.languages_client.get_languages_metadata(language_codes=language_codes)
         json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="languages")
+        return df, json_path
+
+    def extract_tasks(
+        self,
+        save_csv: bool = False,
+        output_root: Path | None = None,
+    ) -> (pd.DataFrame, Path):
+        df = self.tasks_client.get_tasks_metadata()
+        json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="tasks")
         return df, json_path
     
     def save_dataframe_to_json(self, df: pd.DataFrame, output_root: Path | None = None, save_csv: bool = False, suffix: str = "hf_models") -> Path:

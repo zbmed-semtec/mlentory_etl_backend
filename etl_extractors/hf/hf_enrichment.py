@@ -22,6 +22,7 @@ from .entity_identifiers import (
     BaseModelIdentifier,
     KeywordIdentifier,
     LicenseIdentifier,
+    TaskIdentifier,
 )
 
 from .hf_extractor import HFExtractor
@@ -55,6 +56,7 @@ class HFEnrichment:
             "keywords": KeywordIdentifier(),
             "licenses": LicenseIdentifier(),
             "languages": LanguageIdentifier(),
+            "tasks": TaskIdentifier(),
         }
 
     def enrich_from_models_json(

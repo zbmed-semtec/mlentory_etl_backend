@@ -64,11 +64,12 @@ coverage.xml
 
 # Data directories (excluded from version control)
 data/
-!data/.gitkeep
 data/raw/
 data/normalized/
 data/rdf/
 data/cache/
+!data/refs/
+!data/refs/**
 
 # Dagster
 dagster_home/

@@ -4,6 +4,7 @@ from .arxiv_client import HFArxivClient
 from .license_client import HFLicenseClient
 from .keyword_client import HFKeywordClient
 from .language_client import HFLanguagesClient
+from .tasks_client import HFTasksClient
 
 __all__ = [
     "HFModelsClient",
@@ -12,6 +13,7 @@ __all__ = [
     "HFLicenseClient",
     "HFKeywordClient",
     "HFLanguagesClient",
+    "HFTasksClient",
 ]
 
 
