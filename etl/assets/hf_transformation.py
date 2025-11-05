@@ -170,6 +170,8 @@ def hf_extract_basic_properties(
         "keywords_mapping": AssetIn("hf_identified_keywords"),
         "licenses_mapping": AssetIn("hf_identified_licenses"),
         "base_models_mapping": AssetIn("hf_identified_base_models"),
+        "languages_mapping": AssetIn("hf_identified_languages"),
+        "tasks_mapping": AssetIn("hf_identified_tasks"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
     tags={"pipeline": "hf_etl"}
@@ -180,6 +182,8 @@ def hf_entity_linking(
     keywords_mapping: Tuple[Dict[str, List[str]], str],
     licenses_mapping: Tuple[Dict[str, List[str]], str],
     base_models_mapping: Tuple[Dict[str, List[str]], str],
+    languages_mapping: Tuple[Dict[str, List[str]], str],
+    tasks_mapping: Tuple[Dict[str, List[str]], str],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -206,6 +210,8 @@ def hf_entity_linking(
     model_keywords = keywords_mapping[0]
     model_licenses = licenses_mapping[0]
     model_base_models = base_models_mapping[0]
+    model_languages = languages_mapping[0]
+    model_tasks = tasks_mapping[0]
     # Create the final linking structure
     entity_linking = {}
 
@@ -218,7 +224,9 @@ def hf_entity_linking(
             "articles": [HFHelper.generate_entity_hash('Article', x) for x in model_articles[model_id]],
             "keywords": [HFHelper.generate_entity_hash('Keyword', x) for x in model_keywords[model_id]],
             "licenses": [HFHelper.generate_entity_hash('License', x) for x in model_licenses[model_id]],
-            "base_models": [HFHelper.generate_entity_hash('Model', x) for x in model_base_models[model_id]]
+            "base_models": [HFHelper.generate_entity_hash('Model', x) for x in model_base_models[model_id]],
+            "languages": [HFHelper.generate_entity_hash('Language', x) for x in model_languages[model_id]],
+            "tasks": [HFHelper.generate_entity_hash('Task', x) for x in model_tasks[model_id]],
         }
 
         entity_linking[model_id] = model_entities
@@ -331,6 +339,8 @@ def hf_models_normalized(
                 merged["referencePublication"] = model_entities["articles"]
                 merged["keywords"] = model_entities["keywords"]
                 merged["fineTunedFrom"] = model_entities["base_models"]
+                merged["inLanguage"] = model_entities["languages"]
+                merged["mlTask"] = model_entities["tasks"]
             
             merged_schemas.append(merged)
             
