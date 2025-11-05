@@ -7,7 +7,14 @@ import logging
 
 import pandas as pd
 
-from .clients import HFModelsClient, HFDatasetsClient, HFArxivClient, HFLicenseClient, HFKeywordClient
+from .clients import (
+    HFModelsClient,
+    HFDatasetsClient,
+    HFArxivClient,
+    HFLicenseClient,
+    HFKeywordClient,
+    HFLanguagesClient,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -27,12 +34,14 @@ class HFExtractor:
         arxiv_client: Optional[HFArxivClient] = None,
         license_client: Optional[HFLicenseClient] = None,
         keyword_client: Optional[HFKeywordClient] = None,
+        languages_client: Optional[HFLanguagesClient] = None,
     ) -> None:
         self.models_client = models_client or HFModelsClient()
         self.datasets_client = datasets_client or HFDatasetsClient()
         self.arxiv_client = arxiv_client or HFArxivClient()
         self.license_client = license_client or HFLicenseClient()
         self.keyword_client = keyword_client or HFKeywordClient()
+        self.languages_client = languages_client or HFLanguagesClient()
 
     def extract_models(
         self,
@@ -103,6 +112,16 @@ class HFExtractor:
     ) -> (pd.DataFrame, Path):
         df = self.keyword_client.get_keywords_metadata(keywords=keywords)
         json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="keywords")
+        return df, json_path
+
+    def extract_languages(
+        self,
+        language_codes: List[str],
+        save_csv: bool = False,
+        output_root: Path | None = None,
+    ) -> (pd.DataFrame, Path):
+        df = self.languages_client.get_languages_metadata(language_codes=language_codes)
+        json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="languages")
         return df, json_path
     
     def save_dataframe_to_json(self, df: pd.DataFrame, output_root: Path | None = None, save_csv: bool = False, suffix: str = "hf_models") -> Path:

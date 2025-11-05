@@ -638,3 +638,68 @@ def hf_enriched_base_models(
     )
 
     return str(output_path)
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl"}
+)
+def hf_identified_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
+    """
+    Identify languages per model from raw HF models.
+    
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Tuple of ({model_id: [language_codes]}, run_folder)
+    """
+    models_json_path, run_folder = models_data
+    enrichment = HFEnrichment()
+    models_df = HFHelper.load_models_dataframe(models_json_path)
+    
+    model_languages = enrichment.identifiers["languages"].identify_per_model(models_df)
+    logger.info(f"Identified languages for {len(model_languages)} models")
+    return (model_languages, run_folder)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"languages_data": AssetIn("hf_identified_languages")},
+    tags={"pipeline": "hf_etl"}
+)
+def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> str:
+    """
+    Enrich language codes referenced by models using the pycountry dataset.
+
+    Args:
+        languages_data: Tuple of ({model_id: [language_codes]}, run_folder)
+
+    Returns:
+        Path to the saved languages JSON file.
+    """
+
+    model_languages_dict, run_folder = languages_data
+    language_codes: Set[str] = set()
+
+    for languages in model_languages_dict.values():
+        language_codes.update(filter(None, languages))
+
+    if not language_codes:
+        logger.info("No languages to extract")
+        return ""
+
+    extractor = HFExtractor()
+
+    logger.info("Extracting %d languages", len(language_codes))
+    output_root = Path(run_folder).parent.parent  # Go up to /data
+    _, json_path = extractor.extract_languages(
+        language_codes=sorted(language_codes),
+        output_root=output_root,
+    )
+
+    final_path = Path(run_folder) / "languages.json"
+    Path(json_path).rename(final_path)
+
+    logger.info("Languages saved to %s", final_path)
+    return str(final_path)

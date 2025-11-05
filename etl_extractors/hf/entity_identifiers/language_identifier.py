@@ -1,9 +1,9 @@
 """
-Identifier for licenses referenced in model metadata.
+Identifier for languages referenced in model metadata.
 """
 
 from __future__ import annotations
-from typing import Set
+from typing import Dict, List, Set
 import pandas as pd
 import logging
 
@@ -42,6 +42,34 @@ class LanguageIdentifier(EntityIdentifier):
         logger.info("Identified %d unique languages", len(languages))
         return languages
 
+    def identify_per_model(self, models_df: pd.DataFrame) -> Dict[str, List[str]]:
+        """
+        Extract language codes per model.
+
+        Returns:
+            Dict mapping model_id to list of language codes referenced by that model
+        """
+        model_languages: Dict[str, List[str]] = {}
+
+        if models_df.empty:
+            return model_languages
+
+        for _, row in models_df.iterrows():
+            model_id = row.get("modelId", "")
+            if not model_id:
+                continue
+
+            languages = set()
+
+            tags = row.get("tags", [])
+            for tag in tags:
+                if isinstance(tag, str) and is_language_code(tag):
+                    languages.add(tag)
+            
+            model_languages[model_id] = list(languages)
+
+        logger.info("Identified languages for %d models", len(model_languages))
+        return model_languages
 
 def is_language_code(code: str) -> bool:
     """
