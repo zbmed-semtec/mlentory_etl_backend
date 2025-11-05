@@ -12,6 +12,8 @@ import logging
 
 import pandas as pd
 
+from etl_extractors.hf.entity_identifiers.language_identifier import LanguageIdentifier
+
 from .hf_helper import HFHelper
 from .entity_identifiers import (
     EntityIdentifier,
@@ -52,109 +54,8 @@ class HFEnrichment:
             "base_models": BaseModelIdentifier(),
             "keywords": KeywordIdentifier(),
             "licenses": LicenseIdentifier(),
+            "languages": LanguageIdentifier(),
         }
-
-    def identify_related_entities(
-        self, models_df: pd.DataFrame, entity_types: List[str] | None = None
-    ) -> Dict[str, Set[str]]:
-        """
-        Identify all related entities from the models DataFrame.
-        
-        Args:
-            models_df: DataFrame containing raw HF model metadata
-            entity_types: List of entity types to identify, or None for all
-            
-        Returns:
-            Dict mapping entity type to set of entity IDs
-        """
-        if entity_types is None:
-            entity_types = list(self.identifiers.keys())
-        
-        related_entities: Dict[str, Set[str]] = {}
-        
-        for entity_type in entity_types:
-            if entity_type in self.identifiers:
-                identifier = self.identifiers[entity_type]
-                related_entities[entity_type] = identifier.identify(models_df)
-            else:
-                logger.warning("Unknown entity type '%s', skipping", entity_type)
-        
-        return related_entities
-
-    def extract_related_entities(
-        self,
-        related_entities: Dict[str, Set[str]],
-        *,
-        threads: int = 4,
-        output_root: Path | None = None,
-    ) -> Dict[str, Path]:
-        """
-        Download and persist metadata for identified related entities.
-        
-        Args:
-            related_entities: Dict mapping entity type to set of entity IDs
-            threads: Number of threads for parallel downloads
-            output_root: Root directory for output (defaults to /data)
-            
-        Returns:
-            Dict mapping entity type to output file path
-        """
-        output_paths: Dict[str, Path] = {}
-        output_base = (output_root or Path("/data")).joinpath("raw", "hf")
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
-        for entity_type, entity_ids in related_entities.items():
-            if not entity_ids:
-                logger.info("No %s to extract", entity_type)
-                continue
-                
-            logger.info("Extracting %d %s", len(entity_ids), entity_type)
-            
-            try:
-                if entity_type == "datasets":
-                    _,json_path = self.extractor.extract_specific_datasets(
-                        dataset_names=list(entity_ids), threads=threads
-                    )
-                    output_paths[entity_type] = Path(json_path)
-                    continue
-                    
-                elif entity_type == "articles":
-                    _,json_path = self.extractor.extract_specific_arxiv(
-                        arxiv_ids=list(entity_ids)
-                    )
-                    output_paths[entity_type] = Path(json_path)
-                    continue
-                    
-                elif entity_type == "base_models":
-                    _,json_path = self.extractor.extract_specific_models(
-                        model_ids=list(entity_ids), threads=threads
-                    )
-                    output_paths[entity_type] = Path(json_path)
-                    continue
-                    
-                elif entity_type == "keywords":
-                    _,json_path = self.extractor.extract_keywords(
-                        keywords=list(entity_ids)
-                    )
-                    output_paths[entity_type] = Path(json_path)
-                    continue
-                    
-                elif entity_type == "licenses":
-                    _,json_path = self.extractor.extract_licenses(
-                        license_ids=list(entity_ids)
-                    )
-                    output_paths[entity_type] = Path(json_path)
-                    continue
-                    
-                else:
-                    logger.warning("No extraction handler for entity type '%s'", entity_type)
-                    continue
-                
-                
-            except Exception as e:  # noqa: BLE001
-                logger.error("Error extracting %s: %s", entity_type, e, exc_info=True)
-        
-        return output_paths
 
     def enrich_from_models_json(
         self,
