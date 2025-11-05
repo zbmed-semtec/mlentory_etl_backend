@@ -62,9 +62,13 @@ class KeywordIdentifier(EntityIdentifier):
         logger.info("Identified %d unique keywords", len(keywords))
         return keywords
 
-    def identify_per_model(self, models_df: pd.DataFrame) -> Dict[str, List[str]]:
+    def identify_per_model(self, models_df: pd.DataFrame, processed_keywords_per_model: Dict[str, List[str]]) -> Dict[str, List[str]]:
         """
         Extract keywords per model.
+
+        Args:
+            models_df: DataFrame containing raw HF model metadata
+            processed_keywords_per_model: Dictionary mapping model_id to list of keywords associated with that model
 
         Returns:
             Dict mapping model_id to list of keywords associated with that model
@@ -87,13 +91,14 @@ class KeywordIdentifier(EntityIdentifier):
             for tag in tags:
                 if isinstance(tag, str) and tag.strip():
                     # Let's descard tags that can be processed as other things
-                    unwanted_tag_prefixes = ["dataset:", "arxiv:", "base_model:", "license:"]
-                    if any(tag.startswith(prefix) for prefix in unwanted_tag_prefixes):
+                    
+                    if tag.strip() in processed_keywords_per_model[model_id] or tag.split(":")[-1].strip() in processed_keywords_per_model[model_id]:
+                        logger.debug(f"Keyword {tag.strip()} already processed for model {model_id}")
                         continue
 
-                    if len(tag.split(" ")) > 4:
+                    if len(tag.split(" ")) > 5:
                         continue
-
+                    
                     keywords.add(tag.strip())
 
             if keywords:
