@@ -395,10 +395,24 @@ def hf_enriched_articles(articles_data: Tuple[Dict[str, List[str]], str]) -> str
 
 @asset(
     group_name="hf_enrichment",
-    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    
+    ins={   "datasets_mapping": AssetIn("hf_identified_datasets"),
+            "articles_mapping": AssetIn("hf_identified_articles"),
+            "licenses_mapping": AssetIn("hf_identified_licenses"),
+            "base_models_mapping": AssetIn("hf_identified_base_models"),
+            "languages_mapping": AssetIn("hf_identified_languages"),
+            "tasks_mapping": AssetIn("hf_identified_tasks"),
+            "models_data": AssetIn("hf_add_ancestor_models")
+            },
     tags={"pipeline": "hf_etl"}
 )
-def hf_identified_keywords(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
+def hf_identified_keywords(datasets_mapping: Tuple[Dict[str, List[str]], str],
+                           articles_mapping: Tuple[Dict[str, List[str]], str],
+                           licenses_mapping: Tuple[Dict[str, List[str]], str],
+                           base_models_mapping: Tuple[Dict[str, List[str]], str],
+                           languages_mapping: Tuple[Dict[str, List[str]], str],
+                           tasks_mapping: Tuple[Dict[str, List[str]], str],
+                           models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
     Identify keywords/tags per model from raw HF models.
 
@@ -411,8 +425,25 @@ def hf_identified_keywords(models_data: Tuple[str, str]) -> Tuple[Dict[str, List
     models_json_path, run_folder = models_data
     enrichment = HFEnrichment()
     models_df = HFHelper.load_models_dataframe(models_json_path)
+    
+    processed_keywords_per_model = {}
+    for model_id in models_df["modelId"]:
+        processed_keywords_per_model[model_id] = []
+        if model_id in datasets_mapping[0]:
+            processed_keywords_per_model[model_id].extend(datasets_mapping[0][model_id])
+        if model_id in articles_mapping[0]:
+            processed_keywords_per_model[model_id].extend(articles_mapping[0][model_id])
+        if model_id in licenses_mapping[0]:
+            processed_keywords_per_model[model_id].extend(licenses_mapping[0][model_id])
+        if model_id in base_models_mapping[0]:
+            processed_keywords_per_model[model_id].extend(base_models_mapping[0][model_id])
+        if model_id in languages_mapping[0]:
+            processed_keywords_per_model[model_id].extend(languages_mapping[0][model_id])
+        if model_id in tasks_mapping[0]:
+            processed_keywords_per_model[model_id].extend(tasks_mapping[0][model_id])
+    
 
-    model_keywords = enrichment.identifiers["keywords"].identify_per_model(models_df)
+    model_keywords = enrichment.identifiers["keywords"].identify_per_model(models_df, processed_keywords_per_model)
     logger.info(f"Identified keywords for {len(model_keywords)} models")
 
     return (model_keywords, run_folder)
@@ -702,4 +733,77 @@ def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> s
     Path(json_path).rename(final_path)
 
     logger.info("Languages saved to %s", final_path)
+    return str(final_path)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl"}
+)
+def hf_identified_tasks(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
+    """
+    Identify Hugging Face tasks referenced by each model.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Tuple of ({model_id: [task_names]}, run_folder)
+    """
+
+    models_json_path, run_folder = models_data
+    enrichment = HFEnrichment()
+    models_df = HFHelper.load_models_dataframe(models_json_path)
+
+    model_tasks = enrichment.identifiers["tasks"].identify_per_model(models_df)
+    logger.info("Identified tasks for %d models", len(model_tasks))
+    return (model_tasks, run_folder)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"tasks_data": AssetIn("hf_identified_tasks")},
+    tags={"pipeline": "hf_etl"}
+)
+def hf_enriched_tasks(tasks_data: Tuple[Dict[str, List[str]], str]) -> str:
+    """
+    Enrich detected tasks with metadata scraped from Hugging Face.
+
+    Args:
+        tasks_data: Tuple of ({model_id: [task_names]}, run_folder)
+
+    Returns:
+        Path to the saved tasks JSON file.
+    """
+
+    model_tasks_dict, run_folder = tasks_data
+    task_names: Set[str] = set()
+
+    for tasks in model_tasks_dict.values():
+        task_names.update(filter(None, tasks))
+
+    if not task_names:
+        logger.info("No tasks to extract")
+        return ""
+    
+    logger.info("Extracting %d tasks", len(task_names))
+    logger.info("Task names: %s", task_names)
+
+    extractor = HFExtractor()
+    output_root = Path(run_folder).parent.parent
+
+    tasks_df, raw_path = extractor.extract_tasks(output_root=output_root)
+
+    if not tasks_df.empty and "task" in tasks_df.columns:
+        filtered_df = tasks_df[tasks_df["task"].isin(sorted(task_names))]
+    else:
+        filtered_df = tasks_df.iloc[0:0]
+
+    final_path = Path(run_folder) / "tasks.json"
+    filtered_df.to_json(path_or_buf=str(final_path), orient="records", indent=2, date_format="iso")
+
+    Path(raw_path).unlink(missing_ok=True)
+
+    logger.info("Tasks saved to %s", final_path)
     return str(final_path)
