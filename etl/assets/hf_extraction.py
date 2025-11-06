@@ -40,7 +40,10 @@ def _read_model_ids_from_file(file_path: str) -> List[str]:
             line = line.strip()
             # Skip empty lines and comments
             if line and not line.startswith('#'):
-                model_ids.append(line)
+                if not line.startswith("https://huggingface.co/"):
+                    model_ids.append(line)
+                else:
+                    model_ids.append(line.replace("https://huggingface.co/", ""))
     
     logger.info(f"Read {len(model_ids)} model IDs from {file_path}")
     return model_ids
@@ -51,7 +54,7 @@ class HFModelsExtractionConfig:
     num_models: int = int(os.getenv("HF_NUM_MODELS", "50"))
     update_recent: bool = os.getenv("HF_UPDATE_RECENT", "true").lower() == "true"
     threads: int = int(os.getenv("HF_THREADS", "4"))
-    models_file_path: str = os.getenv("HF_MODELS_FILE_PATH", "/data/config/hf_model_ids.txt")
+    models_file_path: str = os.getenv("HF_MODELS_FILE_PATH", "/data/refs/hf_model_ids.txt")
     base_model_iterations: int = int(os.getenv("HF_BASE_MODEL_ITERATIONS", "1"))
 
 
@@ -145,6 +148,7 @@ def hf_raw_models_from_file(run_folder: str) -> Tuple[Optional[pd.DataFrame], st
         model_ids=model_ids,
         threads=config.threads,
         save_csv=False,
+        output_root=output_root,
     )
     
     # Clean up the temporary file created by extractor
