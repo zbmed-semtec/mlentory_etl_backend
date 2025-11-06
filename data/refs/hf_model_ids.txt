@@ -1,0 +1,10 @@
+https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct
+https://huggingface.co/baidu/ERNIE-4.5-21B-A3B-Thinking
+https://huggingface.co/openbmb/MiniCPM4.1-8B
+https://huggingface.co/microsoft/VibeVoice-1.5B
+https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507
+https://huggingface.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2
+https://huggingface.co/allenai/OLMoASR
+https://huggingface.co/dphn/Dolphin-Mistral-24B-Venice-Edition 
+https://huggingface.co/Tesslate/UIGEN-FX-4B-Preview
+https://huggingface.co/QuantStack/Wan2.2-S2V-14B-GGUF
