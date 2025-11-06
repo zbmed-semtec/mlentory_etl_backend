@@ -14,7 +14,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
+from pydantic import ConfigDict
 
 
 class ExtractionMetadata(BaseModel):
@@ -126,8 +127,8 @@ class MLModel(BaseModel):
     )
     
     # ========== ML Task & Category (fair4ml) ==========
-    mlTask: Optional[str] = Field(
-        default=None,
+    mlTask: Optional[list[str]] = Field(
+        default_factory=list,
         description="ML task addressed by this model, e.g., 'text-generation', 'image-classification' (fair4ml:mlTask)",
         alias="https://w3id.org/fair4ml/mlTask"
     )
@@ -254,10 +255,11 @@ class MLModel(BaseModel):
         description="Metadata about how each field was extracted - non-FAIR extension for provenance",
         alias="https://w3id.org/mlentory/mlentory_graph/meta/"
     )
-    
-    class Config:
-        """Pydantic model configuration."""
-        json_schema_extra = {
+
+    # Allow populating fields by their Python names even when aliases are defined
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
             "example": {
                 "identifier": "https://huggingface.co/bert-base-uncased",
                 "name": "bert-base-uncased",
@@ -265,9 +267,11 @@ class MLModel(BaseModel):
                 "author": "google",
                 "dateCreated": "2020-01-01T00:00:00Z",
                 "keywords": ["bert", "transformer", "nlp"],
-                "mlTask": "fill-mask",
+                "mlTask": ["fill-mask", "text-classification"],
                 "modelCategory": ["transformer", "bert"],
                 "metrics": {"downloads": 1000000, "likes": 500}
             }
-        }
+        },
+    )
+        
 
