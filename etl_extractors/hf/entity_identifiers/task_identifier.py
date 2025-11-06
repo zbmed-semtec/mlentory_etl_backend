@@ -65,6 +65,8 @@ class TaskIdentifier(EntityIdentifier):
             tasks = sorted(self._extract_tasks_from_row(row))
             if tasks:
                 model_tasks[str(model_id)] = tasks
+            else:
+                model_tasks[str(model_id)] = []
 
         logger.info("Identified tasks for %d models", len(model_tasks))
         return model_tasks
