@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 def _json_default(o):
     """Non-recursive JSON serializer for known non-serializable types."""
     if isinstance(o, BaseModel):
-        return o.model_dump(mode='json')
+        return o.model_dump(mode='json', by_alias=True)
     if isinstance(o, datetime):
         return o.isoformat()
     if isinstance(o, Path):
@@ -314,6 +314,7 @@ def hf_models_normalized(
         try:
             # Start with basic properties
             merged = basic_props_by_index.get(idx, {}).copy()
+            # logger.info(f"Merged schemas: {merged}")
             
             # Remove internal fields used for merging
             merged.pop("_model_id", None)
@@ -365,8 +366,8 @@ def hf_models_normalized(
             # Validate with Pydantic
             mlmodel = MLModel(**merged_data)
             
-            # Convert to dict for JSON serialization
-            normalized_models.append(mlmodel.model_dump(mode='json'))
+            # Convert to dict for JSON serialization using IRI aliases
+            normalized_models.append(mlmodel.model_dump(mode='json', by_alias=True))
             
             if (idx + 1) % 100 == 0:
                 logger.info(f"Validated {idx + 1}/{len(merged_schemas)} models")
