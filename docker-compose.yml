@@ -11,19 +11,17 @@ services:
     ports:
       - "${NEO4J_BROWSER_PORT:-7474}:7474"  # HTTP Browser
       - "${NEO4J_BOLT_PORT:-7687}:7687"      # Bolt protocol
+    env_file:
+      - .env
     environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-mlentory_neo4j_password_change_me}
-      - NEO4J_dbms_memory_pagecache_size=1G
-      - NEO4J_dbms_memory_heap_initial__size=1G
-      - NEO4J_dbms_memory_heap_max__size=1G
-      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
-      - NEO4J_dbms_security_procedures_allowlist=apoc.*
-      - NEO4JLABS_PLUGINS=["apoc"]
+      # NEO4J_AUTH: neo4j/password
+      - NEO4J_PLUGINS=["apoc", "n10s"]
     volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-      - neo4j_import:/var/lib/neo4j/import
-      - neo4j_plugins:/plugins
+      - ./config/neo4j/data:/data
+      - ./config/neo4j/logs:/logs
+      - ./config/neo4j/plugins:/plugins
+      - ./config/neo4j/import:/var/lib/neo4j/import
+      - ./config/neo4j/conf:/conf
     networks:
       - mlentory-network
     healthcheck:
@@ -56,7 +54,7 @@ services:
       - "cluster.routing.allocation.disk.watermark.flood_stage=98%" # Flood stage at 98%
       - "cluster.info.update.interval=1m" # Update cluster info every minute
     volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./config/elasticsearch/data:/usr/share/elasticsearch/data
     networks:
       - mlentory-network
 
@@ -89,6 +87,8 @@ services:
     container_name: mlentory-dagster-webserver
     ports:
       - "${DAGSTER_PORT:-3000}:3000"
+    env_file:
+      - .env
     environment:
       - DAGSTER_HOME=${DAGSTER_HOME:-/opt/dagster/dagster_home}
       - DAGSTER_POSTGRES_USER=${DAGSTER_POSTGRES_USER:-dagster}
