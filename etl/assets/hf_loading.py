@@ -1,0 +1,189 @@
+"""
+Dagster assets for HuggingFace → Neo4j RDF loading.
+
+This module defines assets for persisting normalized HF FAIR4ML models
+as RDF triples into Neo4j using rdflib-neo4j.
+
+Pipeline:
+1. hf_rdf_store_ready: Ensure Neo4j store is configured and ready
+2. hf_load_models_rdf: Build and persist RDF triples from normalized models
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, Tuple
+
+from dagster import AssetIn, asset
+
+from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+from etl_loaders.rdf_store import (
+    get_neo4j_store_config_from_env,
+    Neo4jConfig,
+    init_neosemantics,
+    ensure_default_prefixes,
+    get_neosemantics_config,
+    reset_database,
+)
+
+logger = logging.getLogger(__name__)
+
+
+@asset(
+    group_name="hf_loading",
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_rdf_store_ready() -> Dict[str, Any]:
+    """
+    Verify Neo4j RDF store is configured and ready.
+    
+    Loads configuration from environment variables and validates connectivity.
+    Returns a config marker that downstream assets can depend on.
+    
+    Returns:
+        Dict with store readiness status and config info
+        
+    Raises:
+        ValueError: If required env vars are missing
+        ConnectionError: If Neo4j is not reachable
+    """
+    logger.info("Checking Neo4j RDF store readiness...")
+    
+    try:
+        # Read env for reporting
+        env_cfg = Neo4jConfig.from_env()
+        # Build store config (may not expose uri/database attributes)
+        _ = get_neo4j_store_config_from_env(
+            batching=True,
+            batch_size=5000,
+            multithreading=True,
+            max_workers=4,
+        )
+        # Initialize/ensure n10s according to environment flag
+        reset_flag = os.getenv("N10S_RESET_ON_CONFIG_CHANGE", "false").lower() == "true"
+        desired_cfg = {"keepCustomDataTypes": True, "handleVocabUris": "SHORTEN"}
+        if reset_flag:
+            logger.warning("N10S_RESET_ON_CONFIG_CHANGE=true → resetting database and re-initializing n10s")
+            reset_database(drop_config=True)
+            init_neosemantics(desired_cfg)
+        else:
+            current_cfg = get_neosemantics_config()
+            if not current_cfg:
+                init_neosemantics(desired_cfg)
+            else:
+                logger.info("n10s has existing configuration; skipping re-init on non-empty graph")
+        ensure_default_prefixes()
+        
+        logger.info(f"Neo4j RDF store configured: uri={env_cfg.uri}, database={env_cfg.database}")
+        
+        return {
+            "status": "ready",
+            "uri": env_cfg.uri,
+            "database": env_cfg.database,
+            "batching": True,
+            "batch_size": 5000,
+            "multithreading": True,
+            "max_workers": 4,
+        }
+        
+    except ValueError as e:
+        logger.error(f"Neo4j configuration error: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error checking Neo4j store: {e}", exc_info=True)
+        raise
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "normalized_models": AssetIn("hf_models_normalized"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_load_models_to_neo4j(
+    normalized_models: Tuple[str, str],
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized HF models as RDF triples into Neo4j.
+    
+    Builds RDF triples from FAIR4ML models and persists them to Neo4j
+    using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        normalized_models: Tuple of (mlmodels_json_path, normalized_folder)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder)
+        
+    Raises:
+        FileNotFoundError: If normalized models file not found
+        Exception: If loading fails
+    """
+    mlmodels_json_path, normalized_folder = normalized_models
+    
+    logger.info(f"Loading RDF from normalized models: {mlmodels_json_path}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+    
+    # Get Neo4j store config
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+    
+    # Create RDF output directory parallel to normalized
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent  / "3_rdf" / "hf"  # /data/3_rdf/hf
+    rdf_run_folder = rdf_base / normalized_path.name  # Same run ID as normalized
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+    
+    logger.info(f"RDF outputs will be saved to: {rdf_run_folder}")
+    
+    # Output Turtle file path
+    ttl_path = rdf_run_folder / "mlmodels.ttl"
+    
+    # Build and persist RDF
+    logger.info("Building and persisting RDF triples...")
+    load_stats = build_and_persist_models_rdf(
+        json_path=mlmodels_json_path,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+    
+    logger.info(
+        f"RDF loading complete: {load_stats['models_processed']} models, "
+        f"{load_stats['triples_added']} triples, {load_stats['errors']} errors"
+    )
+    
+    # Write load report to both normalized and RDF folders
+    report = {
+        "input_file": mlmodels_json_path,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+    
+    # Save report to normalized folder
+    normalized_report_path = Path(normalized_folder) / "load_report.json"
+    with open(normalized_report_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Load report saved to: {normalized_report_path}")
+    
+    # Save report to RDF folder as well
+    rdf_report_path = rdf_run_folder / "load_report.json"
+    with open(rdf_report_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Load report also saved to: {rdf_report_path}")
+    
+    return (str(normalized_report_path), normalized_folder)
+

@@ -1,9 +1,11 @@
 """
-MLentory ETL - Loaders module.
+MLentory ETL Loaders.
 
-This module contains loaders for persisting FAIR4ML data to Neo4j,
-Elasticsearch, and RDF formats.
+This package contains loaders for persisting normalized FAIR4ML data
+into Neo4j (as RDF graphs) and Elasticsearch (for search indexing).
 """
 
-__version__ = "0.1.0"
-
+__all__ = [
+    "rdf_store",
+    "hf_rdf_loader",
+]
