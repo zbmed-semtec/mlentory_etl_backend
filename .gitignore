@@ -67,6 +67,9 @@ data/
 data/raw/
 data/normalized/
 data/rdf/
+data/1_raw/
+data/2_normalized/
+data/3_rdf/
 data/cache/
 !data/refs/
 !data/refs/**
@@ -75,6 +78,12 @@ data/cache/
 dagster_home/
 .dagster/
 runs/
+
+# Neo4j
+config/neo4j/data
+config/neo4j/logs
+config/neo4j/plugins
+config/neo4j/import
 
 # Logs
 *.log
