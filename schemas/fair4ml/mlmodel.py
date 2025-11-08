@@ -56,7 +56,8 @@ class MLModel(BaseModel):
     """
     
     # ========== Core Identification (schema.org) ==========
-    identifier: str = Field(
+    identifier: List[str] = Field(
+        default_factory=list,
         description="Unique identifier for the model (typically the HuggingFace URL)",
         alias="https://schema.org/identifier"
     )
@@ -121,7 +122,7 @@ class MLModel(BaseModel):
     )
     
     referencePublication: Optional[List[str]] = Field(
-        default=None,
+        default_factory=list,
         description="Reference publication for the model (schema:referencePublication)",
         alias="https://schema.org/referencePublication"
     )
@@ -132,7 +133,7 @@ class MLModel(BaseModel):
         description="ML task addressed by this model, e.g., 'text-generation', 'image-classification' (fair4ml:mlTask)",
         alias="https://w3id.org/fair4ml/mlTask"
     )
-    modelCategory: List[str] = Field(
+    modelCategory: Optional[List[str]] = Field(
         default_factory=list,
         description="Category/architecture of the model, e.g., 'transformer', 'CNN', 'LLM' (fair4ml:modelCategory)",
         alias="https://w3id.org/fair4ml/modelCategory"

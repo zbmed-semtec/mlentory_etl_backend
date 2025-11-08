@@ -14,6 +14,7 @@ import re
 from datetime import datetime
 from typing import Dict, Any, Optional
 import logging
+from etl_extractors.hf import HFHelper
 import pycountry
 
 from schemas.fair4ml import MLModel, ExtractionMetadata
@@ -127,6 +128,9 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         Dictionary with mapped fields and extraction_metadata
     """
     model_id = raw_model.get("modelId", "")
+    mlentory_id = raw_model.get("mlentory_id", "")
+    if not mlentory_id:
+        mlentory_id = HFHelper.generate_entity_hash('Model', model_id)
     author = raw_model.get("author", "")
     created_at = raw_model.get("createdAt")
     last_modified = raw_model.get("last_modified")
@@ -147,7 +151,7 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     # Build result with mapped fields
     result = {
         # Core identification
-        "identifier": hf_base_url or model_id,
+        "identifier": [hf_base_url or model_id, mlentory_id],
         "name": _extract_model_name(model_id),
         "url": hf_base_url or "",
         
@@ -176,7 +180,7 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
             method="Parsed_from_HF_dataset",
             confidence=1.0,
             source_field="modelId",
-            notes="Converted to HuggingFace URL format"
+            notes="Converted to HuggingFace URL format and mlentory_id"
         ),
         "name": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
