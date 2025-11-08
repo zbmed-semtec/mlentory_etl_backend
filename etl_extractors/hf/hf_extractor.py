@@ -137,7 +137,7 @@ class HFExtractor:
         return df, json_path
     
     def save_dataframe_to_json(self, df: pd.DataFrame, output_root: Path | None = None, save_csv: bool = False, suffix: str = "hf_models") -> Path:
-        output_dir = (output_root or Path("/data")).joinpath("raw", "hf")
+        output_dir = output_root
         output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         json_path = output_dir / f"{timestamp}_{suffix}.json"
