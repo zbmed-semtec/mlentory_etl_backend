@@ -36,9 +36,9 @@ project:
 structure:
   directories:
     - etl/               # Dagster pipelines and assets
-    - extractors/        # Source-specific scrapers/spiders
-    - transformers/      # FAIR4ML normalization logic we can have multiple modules for each source
-    - loaders/           # Loaders for Neo4j + Elasticsearch
+    - etl_extractors/        # Source-specific scrapers/spiders
+    - etl_transformers/      # FAIR4ML normalization logic we can have multiple modules for each source
+    - etl_loaders/           # Loaders for Neo4j + Elasticsearch
     - schemas/           # Shared Pydantic schema
     - deploy/            # Docker, compose, Dagster deployment, make file
     - tests/             # Unit and integration tests
