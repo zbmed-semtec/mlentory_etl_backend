@@ -38,7 +38,7 @@ class AI4LifeConfig:
 def ai4life_run_folder() -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_id = str(uuid.uuid4())[:8]
-    run_folder = Path("/data/raw/ai4life") / f"{timestamp}_{run_id}"
+    run_folder = Path("/data/1_raw/ai4life") / f"{timestamp}_{run_id}"
     run_folder.mkdir(parents=True, exist_ok=True)
     logger.info("Created AI4Life run folder: %s", run_folder)
     return str(run_folder)

@@ -77,7 +77,7 @@ def hf_normalized_run_folder(models_data: Tuple[str, str]) -> Tuple[str, str]:
     raw_folder_name = Path(raw_run_folder).name  # e.g., "2025-10-30_16-45-38_a510a3c3"
     
     # Create corresponding normalized folder
-    normalized_base = Path("/data/normalized/hf")
+    normalized_base = Path("/data/2_normalized/hf")
     normalized_run_folder = normalized_base / raw_folder_name
     normalized_run_folder.mkdir(parents=True, exist_ok=True)
     

@@ -64,7 +64,7 @@ def openml_run_folder() -> str:
     run_id = str(uuid.uuid4())[:8]
     run_folder_name = f"{timestamp}_{run_id}"
     
-    run_folder = Path("/data/raw/openml") / run_folder_name
+    run_folder = Path("/data/1_raw/openml") / run_folder_name
     run_folder.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Created run folder: {run_folder}")
