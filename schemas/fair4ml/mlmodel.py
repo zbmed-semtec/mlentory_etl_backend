@@ -124,7 +124,7 @@ class MLModel(BaseModel):
     referencePublication: Optional[List[str]] = Field(
         default_factory=list,
         description="Reference publication for the model (schema:referencePublication)",
-        alias="https://schema.org/referencePublication"
+        alias="https://w3id.org/codemeta/referencePublication"
     )
     
     # ========== ML Task & Category (fair4ml) ==========
