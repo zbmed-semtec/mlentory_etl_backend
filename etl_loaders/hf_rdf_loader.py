@@ -104,10 +104,11 @@ def mint_subject(model: Dict[str, Any]) -> str:
         identifiers = [identifiers]
     
     if identifiers and isinstance(identifiers, list):
-        first_id = identifiers[0]
-        if is_iri(first_id):
-            logger.debug(f"Using identifier as subject IRI: {first_id}")
-            return first_id
+        # use the first id that starts with https://w3id.org/mlentory/mlentory_graph/
+        for id in identifiers:
+            if id.startswith("https://w3id.org/mlentory/mlentory_graph") or id.startswith("<https://w3id.org/mlentory/mlentory_graph"):
+                return id
+        return identifiers[0]
     
     # Fallback: mint IRI from URL hash
     url = model.get("https://schema.org/url", "")
@@ -240,18 +241,228 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     
     # Description & documentation
     add_literal_or_iri(graph, subject, "https://schema.org/description", 
-                      model.get("https://schema.org/description"))
+                      model.get("https://schema.org/description"), datatype=XSD.string)
     add_literal_or_iri(graph, subject, "https://schema.org/discussionUrl", 
-                      model.get("https://schema.org/discussionUrl"))
+                      model.get("https://schema.org/discussionUrl"), datatype=XSD.string)
     add_literal_or_iri(graph, subject, "https://schema.org/archivedAt", 
-                      model.get("https://schema.org/archivedAt"))
+                      model.get("https://schema.org/archivedAt"), datatype=XSD.string)
     add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/readme", 
-                      model.get("https://w3id.org/codemeta/readme"))
+                      model.get("https://w3id.org/codemeta/readme"), datatype=XSD.string)
     add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/issueTracker", 
-                      model.get("https://w3id.org/codemeta/issueTracker"))
+                      model.get("https://w3id.org/codemeta/issueTracker"), datatype=XSD.string)
+    
+    # add related entities
+    add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/referencePublication",
+                       model.get("https://w3id.org/codemeta/referencePublication"))
     
     triples_added = len(graph) - triples_before
     return triples_added
+
+
+def mint_article_subject(article: Dict[str, Any]) -> str:
+    """
+    Mint a subject IRI for a scholarly article.
+    
+    Uses the first identifier if it's a valid IRI, otherwise creates
+    a stable hash-based IRI using the article URL.
+    
+    Args:
+        article: Article dictionary with Schema.org properties
+        
+    Returns:
+        Subject IRI string
+    """
+    # Try to use first identifier if it's an IRI
+    identifiers = article.get("https://schema.org/identifier", [])
+    if isinstance(identifiers, str):
+        identifiers = [identifiers]
+    
+    if identifiers and isinstance(identifiers, list):
+        # use the first id that starts with https://w3id.org/mlentory/mlentory_graph/
+        for id in identifiers:
+            if id.startswith("https://w3id.org/mlentory/mlentory_graph/"):
+                return id
+        # Otherwise use first identifier if it's an IRI
+        for id in identifiers:
+            if is_iri(id):
+                return id
+    
+    # Fallback: mint IRI from URL hash
+    url = article.get("https://schema.org/url", "")
+    if url:
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        minted_iri = f"https://w3id.org/mlentory/article/{url_hash}"
+        logger.debug(f"Minted article subject IRI from URL hash: {minted_iri}")
+        return minted_iri
+    
+    # Last resort: use a random hash
+    article_str = json.dumps(article, sort_keys=True)
+    article_hash = hashlib.sha256(article_str.encode()).hexdigest()
+    fallback_iri = f"https://w3id.org/mlentory/article/{article_hash}"
+    logger.warning(f"No URL found, using fallback IRI: {fallback_iri}")
+    return fallback_iri
+
+
+def build_article_triples(graph: Graph, article: Dict[str, Any]) -> int:
+    """
+    Build RDF triples for a single Schema.org ScholarlyArticle.
+    
+    Creates triples for core identification, authorship, temporal, description,
+    and publication context properties.
+    
+    Args:
+        graph: RDFLib Graph to add triples to
+        article: Article dictionary with Schema.org properties (using IRI aliases)
+        
+    Returns:
+        Number of triples added
+    """
+    triples_before = len(graph)
+    
+    # Mint subject IRI
+    subject_iri = mint_article_subject(article)
+    subject = URIRef(subject_iri)
+    
+    # Add rdf:type
+    graph.add((subject, namespaces["rdf"].type, namespaces["schema"].ScholarlyArticle))
+    
+    # Core identification properties
+    add_literal_or_iri(graph, subject, "https://schema.org/identifier", 
+                      article.get("https://schema.org/identifier"))
+    add_literal_or_iri(graph, subject, "https://schema.org/name", 
+                      article.get("https://schema.org/name"))
+    add_literal_or_iri(graph, subject, "https://schema.org/url", 
+                      article.get("https://schema.org/url"))
+    add_literal_or_iri(graph, subject, "https://schema.org/sameAs", 
+                      article.get("https://schema.org/sameAs"))
+    
+    # Description & content
+    add_literal_or_iri(graph, subject, "https://schema.org/description", 
+                      article.get("https://schema.org/description"))
+    add_literal_or_iri(graph, subject, "https://schema.org/about", 
+                      article.get("https://schema.org/about"))
+    
+    # Authorship
+    add_literal_or_iri(graph, subject, "https://schema.org/author", 
+                      article.get("https://schema.org/author"))
+    
+    # Temporal information (with xsd:dateTime conversion)
+    date_published = article.get("https://schema.org/datePublished")
+    if date_published:
+        dt_str = to_xsd_datetime(date_published)
+        if dt_str:
+            add_literal_or_iri(graph, subject, "https://schema.org/datePublished", 
+                             dt_str, datatype=XSD.dateTime)
+    
+    date_modified = article.get("https://schema.org/dateModified")
+    if date_modified:
+        dt_str = to_xsd_datetime(date_modified)
+        if dt_str:
+            add_literal_or_iri(graph, subject, "https://schema.org/dateModified", 
+                             dt_str, datatype=XSD.dateTime)
+    
+    # Publication context
+    add_literal_or_iri(graph, subject, "https://schema.org/isPartOf", 
+                      article.get("https://schema.org/isPartOf"))
+    add_literal_or_iri(graph, subject, "https://schema.org/comment", 
+                      article.get("https://schema.org/comment"))
+    
+    triples_added = len(graph) - triples_before
+    return triples_added
+
+
+def build_and_persist_articles_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build RDF triples from normalized articles and persist to Neo4j.
+    
+    Args:
+        json_path: Path to normalized articles JSON (articles.json)
+        config: Neo4jStoreConfig for connecting to Neo4j
+        output_ttl_path: Optional path to save Turtle file
+        
+    Returns:
+        Dict with loading statistics:
+        - articles_processed: Number of articles processed
+        - triples_added: Total number of triples added
+        - errors: Number of errors encountered
+        - ttl_path: Path to saved Turtle file (if requested)
+        
+    Raises:
+        FileNotFoundError: If json_path doesn't exist
+        ValueError: If JSON is invalid
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized articles file not found: {json_path}")
+    
+    logger.info(f"Loading normalized articles from {json_path}")
+    with open(json_file, 'r', encoding='utf-8') as f:
+        articles = json.load(f)
+    
+    if not isinstance(articles, list):
+        raise ValueError(f"Expected list of articles, got {type(articles)}")
+    
+    logger.info(f"Loaded {len(articles)} articles")
+    
+    # Open graph with Neo4j backend
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+    
+    # Build triples for each article
+    total_triples = 0
+    errors = 0
+    graph_closed = False
+    
+    try:
+        for idx, article in enumerate(articles):
+            try:
+                triples_added = build_article_triples(graph, article)
+                total_triples += triples_added
+                
+                if (idx + 1) % 50 == 0:
+                    logger.info(f"Processed {idx + 1}/{len(articles)} articles, "
+                              f"added {total_triples} triples")
+            except Exception as e:
+                errors += 1
+                article_id = article.get("https://schema.org/identifier", f"unknown_{idx}")
+                logger.error(f"Error building triples for article {article_id}: {e}", 
+                           exc_info=True)
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+        
+        logger.info(f"Finished building triples: {total_triples} triples for "
+                   f"{len(articles)} articles ({errors} errors)")
+        
+        # Save Turtle file via neosemantics export after flushing writes
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export...")
+            graph.close(True)
+            graph_closed = True
+            logger.info(f"Exporting graph to Turtle via neosemantics: {output_ttl_path}")
+            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
+            ttl_path = str(ttl_file)
+            logger.info(f"Saved Turtle file: {ttl_path}")
+        
+    finally:
+        # Close graph and flush commits to Neo4j if not already closed
+        if not graph_closed:
+            logger.info("Closing graph and flushing commits to Neo4j...")
+            graph.close(True)
+            logger.info("Graph closed, commits flushed")
+    
+    return {
+        "articles_processed": len(articles),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": datetime.now().isoformat(),
+    }
 
 
 def build_and_persist_models_rdf(
