@@ -67,7 +67,7 @@ class HFLanguagesClient:
             "name": getattr(language, "name", None) if language else None,
             "scope": getattr(language, "scope", None) if language else None,
             "type": getattr(language, "type", None) if language else None,
-            "mlentory_id": HFHelper.generate_entity_hash("Language", code),
+            "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Language", code),
             "enriched": language is not None,
             "entity_type": "Language",
             "platform": "HF",

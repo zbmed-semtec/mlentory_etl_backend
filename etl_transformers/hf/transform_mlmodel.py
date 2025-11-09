@@ -130,7 +130,7 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     model_id = raw_model.get("modelId", "")
     mlentory_id = raw_model.get("mlentory_id", "")
     if not mlentory_id:
-        mlentory_id = HFHelper.generate_entity_hash('Model', model_id)
+        mlentory_id = HFHelper.generate_mlentory_entity_hash_id('Model', model_id)
     author = raw_model.get("author", "")
     created_at = raw_model.get("createdAt")
     last_modified = raw_model.get("last_modified")

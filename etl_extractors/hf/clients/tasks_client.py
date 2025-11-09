@@ -59,7 +59,7 @@ class HFTasksClient:
         enriched_df = catalog_df.copy()
         enriched_df["url"] = enriched_df["task"].apply(lambda task: f"https://huggingface.co/tasks/{task}")
         enriched_df["mlentory_id"] = enriched_df["task"].apply(
-            lambda task: HFHelper.generate_entity_hash("Task", task)
+            lambda task: HFHelper.generate_mlentory_entity_hash_id("Task", task)
         )
         enriched_df["entity_type"] = "Task"
         enriched_df["platform"] = "HF"

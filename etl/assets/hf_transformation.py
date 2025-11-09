@@ -220,13 +220,13 @@ def hf_entity_linking(
     
     for model_id in model_datasets.keys():
         model_entities = {
-            "datasets": [HFHelper.generate_entity_hash('Dataset', x) for x in model_datasets[model_id]],
-            "articles": [HFHelper.generate_entity_hash('Article', x) for x in model_articles[model_id]],
-            "keywords": [HFHelper.generate_entity_hash('Keyword', x) for x in model_keywords[model_id]],
-            "licenses": [HFHelper.generate_entity_hash('License', x) for x in model_licenses[model_id]],
-            "base_models": [HFHelper.generate_entity_hash('Model', x) for x in model_base_models[model_id]],
-            "languages": [HFHelper.generate_entity_hash('Language', x) for x in model_languages[model_id]],
-            "tasks": [HFHelper.generate_entity_hash('Task', x) for x in model_tasks[model_id]],
+            "datasets": [HFHelper.generate_mlentory_entity_hash_id('Dataset', x) for x in model_datasets[model_id]],
+            "articles": [HFHelper.generate_mlentory_entity_hash_id('Article', x) for x in model_articles[model_id]],
+            "keywords": [HFHelper.generate_mlentory_entity_hash_id('Keyword', x) for x in model_keywords[model_id]],
+            "licenses": [HFHelper.generate_mlentory_entity_hash_id('License', x) for x in model_licenses[model_id]],
+            "base_models": [HFHelper.generate_mlentory_entity_hash_id('Model', x) for x in model_base_models[model_id]],
+            "languages": [HFHelper.generate_mlentory_entity_hash_id('Language', x) for x in model_languages[model_id]],
+            "tasks": [HFHelper.generate_mlentory_entity_hash_id('Task', x) for x in model_tasks[model_id]],
         }
 
         entity_linking[model_id] = model_entities
@@ -468,7 +468,7 @@ def _load_enriched_entity_mapping(json_path: str, entity_type: str) -> Dict[str,
 
                 if entity_id:
                     from etl_extractors.hf import HFHelper
-                    mlentory_id = HFHelper.generate_entity_hash(entity_type.rstrip("s").capitalize(), entity_id)
+                    mlentory_id = HFHelper.generate_mlentory_entity_hash_id(entity_type.rstrip("s").capitalize(), entity_id)
                     entity["mlentory_id"] = mlentory_id
                     entity_mapping[mlentory_id] = entity
 

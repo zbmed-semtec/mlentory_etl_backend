@@ -36,7 +36,7 @@ class HFLicenseClient:
         for license_id in license_ids:
             license_data: Dict[str, Any] = {
                 "Name": license_id,
-                "mlentory_id": HFHelper.generate_entity_hash("License", license_id),
+                "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("License", license_id),
                 "Identifier": None,
                 "OSI Approved": None,
                 "Deprecated": None,

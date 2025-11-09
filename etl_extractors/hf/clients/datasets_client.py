@@ -44,7 +44,7 @@ class HFDatasetsClient:
                 return None
             return {
                 "datasetId": dataset.id,
-                "mlentory_id": HFHelper.generate_entity_hash("Dataset", dataset.id),
+                "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Dataset", dataset.id),
                 "croissant_metadata": croissant_metadata,
                 "enriched": True,
                 "entity_type": "Dataset",
@@ -94,7 +94,7 @@ class HFDatasetsClient:
                     # Create stub entity for non-enriched dataset
                     return {
                         "datasetId": dataset_id,
-                        "mlentory_id": HFHelper.generate_entity_hash("Dataset", dataset_id),
+                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Dataset", dataset_id),
                         "croissant_metadata": None,
                         "enriched": False,
                         "entity_type": "Dataset",
@@ -107,7 +107,7 @@ class HFDatasetsClient:
                     }
                 return {
                     "datasetId": dataset_id,
-                    "mlentory_id": HFHelper.generate_entity_hash("Dataset", dataset_id),
+                    "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Dataset", dataset_id),
                     "croissant_metadata": croissant_metadata,
                     "enriched": True,
                     "entity_type": "Dataset",
@@ -123,7 +123,7 @@ class HFDatasetsClient:
                 # Create stub entity on error
                 return {
                     "datasetId": dataset_id,
-                    "mlentory_id": HFHelper.generate_entity_hash("Dataset", dataset_id),
+                    "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Dataset", dataset_id),
                     "croissant_metadata": None,
                     "enriched": False,
                     "entity_type": "Dataset",

@@ -132,7 +132,7 @@ class HFHelper:
         return df
 
     @staticmethod
-    def generate_entity_hash(entity_type: str, entity_id: str, platform: str = "HF") -> str:
+    def generate_mlentory_entity_hash_id(entity_type: str, entity_id: str, platform: str = "HF") -> str:
         """
         Generate a consistent hash from entity properties.
 
@@ -145,7 +145,7 @@ class HFHelper:
             str: A SHA-256 hash of the concatenated properties (mlentory_id)
 
         Example:
-            >>> hash_value = HFHelper.generate_entity_hash('Dataset', 'squad')
+            >>> hash_value = HFHelper.generate_mlentory_entity_hash_id('Dataset', 'squad')
             >>> print(hash_value)
             '8a1c0c50e3e4f0b8a9d5c9e8b7a6f5d4c3b2a1'
         """
@@ -161,4 +161,4 @@ class HFHelper:
 
         # Generate SHA-256 hash
         hash_obj = hashlib.sha256(properties_str.encode())
-        return hash_obj.hexdigest()
+        return "https://w3id.org/mlentory/mlentory_graph/"+hash_obj.hexdigest()

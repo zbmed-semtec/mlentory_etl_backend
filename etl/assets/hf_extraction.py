@@ -633,7 +633,7 @@ def hf_enriched_base_models(
     base_model_entities: Dict[str, Dict] = {}
 
     for base_model_id in sorted(unique_base_model_ids):
-        mlentory_id = HFHelper.generate_entity_hash("Model", base_model_id)
+        mlentory_id = HFHelper.generate_mlentory_entity_hash_id("Model", base_model_id)
         if base_model_id in ancestor_models_by_id:
             model_record = dict(ancestor_models_by_id[base_model_id])
             model_record["mlentory_id"] = model_record.get("mlentory_id", mlentory_id)

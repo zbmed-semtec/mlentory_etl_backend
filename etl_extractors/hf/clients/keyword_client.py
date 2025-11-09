@@ -65,7 +65,7 @@ class HFKeywordClient:
                 
                 self.curated_definitions[keyword] = {
                     'keyword': keyword,
-                    'mlentory_id': HFHelper.generate_entity_hash("Keyword", keyword),
+                    'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
                     'definition': row['definition'],
                     'aliases': aliases,
                     'source': 'curated_csv',
@@ -109,7 +109,7 @@ class HFKeywordClient:
                 # No data found, create stub entity
                 all_keyword_data.append({
                     'keyword': keyword,
-                    'mlentory_id': HFHelper.generate_entity_hash("Keyword", keyword),
+                    'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
                     'definition': None,
                     'source': 'not_found',
                     'url': None,
@@ -163,7 +163,7 @@ class HFKeywordClient:
             
             return {
                 'keyword': keyword,
-                'mlentory_id': HFHelper.generate_entity_hash("Keyword", keyword),
+                'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
                 'definition': definition,
                 'source': 'wikipedia',
                 'url': page.fullurl,

@@ -70,7 +70,7 @@ class HFModelsClient:
 
             model_info = {
                 "modelId": model.id,
-                "mlentory_id": HFHelper.generate_entity_hash("Model", model.id),
+                "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Model", model.id),
                 "author": model.author,
                 "last_modified": model.last_modified,
                 "downloads": model.downloads,
@@ -114,7 +114,7 @@ class HFModelsClient:
 
                 model_info = {
                     "modelId": model.id,
-                    "mlentory_id": HFHelper.generate_entity_hash("Model", model.id),
+                    "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Model", model.id),
                     "author": model.author,
                     "last_modified": model.last_modified,
                     "downloads": model.downloads,

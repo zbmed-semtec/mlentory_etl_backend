@@ -55,7 +55,7 @@ class HFArxivClient:
                 for arxiv_id in batch_ids:
                     arxiv_data.append({
                         "arxiv_id": arxiv_id,
-                        "mlentory_id": HFHelper.generate_entity_hash("Article", arxiv_id),
+                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Article", arxiv_id),
                         "title": None,
                         "enriched": False,
                         "entity_type": "Article",
@@ -101,7 +101,7 @@ class HFArxivClient:
 
                     paper_metadata = {
                         "arxiv_id": arxiv_id,
-                        "mlentory_id": HFHelper.generate_entity_hash("Article", arxiv_id),
+                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Article", arxiv_id),
                         "title": paper.title,
                         "published": published,
                         "updated": updated,
@@ -128,7 +128,7 @@ class HFArxivClient:
                     logger.warning("Error processing arXiv paper '%s': %s, creating stub", arxiv_id, e)
                     arxiv_data.append({
                         "arxiv_id": arxiv_id,
-                        "mlentory_id": HFHelper.generate_entity_hash("Article", arxiv_id),
+                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Article", arxiv_id),
                         "title": None,
                         "enriched": False,
                         "entity_type": "Article",
@@ -147,7 +147,7 @@ class HFArxivClient:
                     logger.warning("arXiv paper '%s' not found in results, creating stub", arxiv_id)
                     arxiv_data.append({
                         "arxiv_id": arxiv_id,
-                        "mlentory_id": HFHelper.generate_entity_hash("Article", arxiv_id),
+                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Article", arxiv_id),
                         "title": None,
                         "enriched": False,
                         "entity_type": "Article",
