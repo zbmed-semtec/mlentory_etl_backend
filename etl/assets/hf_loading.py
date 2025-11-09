@@ -19,7 +19,7 @@ from typing import Any, Dict, Tuple
 
 from dagster import AssetIn, asset
 
-from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf, build_and_persist_articles_rdf
 from etl_loaders.rdf_store import (
     get_neo4j_store_config_from_env,
     Neo4jConfig,
@@ -174,13 +174,114 @@ def hf_load_models_to_neo4j(
     }
     
     # Save report to normalized folder
-    normalized_report_path = Path(normalized_folder) / "load_report.json"
+    normalized_report_path = Path(normalized_folder) / "models_load_report.json"
+    with open(normalized_report_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Models load report saved to: {normalized_report_path}")
+    
+    # Save report to RDF folder as well
+    rdf_report_path = rdf_run_folder / "models_load_report.json"
+    with open(rdf_report_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Models load report also saved to: {rdf_report_path}")
+    
+    return (str(normalized_report_path), normalized_folder)
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "articles_normalized": AssetIn("hf_articles_normalized"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_load_articles_to_neo4j(
+    articles_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized articles as RDF triples into Neo4j.
+    
+    Builds RDF triples from Schema.org ScholarlyArticle entities and persists them
+    to Neo4j using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        articles_normalized: Path to normalized articles JSON (articles.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no articles
+        
+    Raises:
+        FileNotFoundError: If normalized articles file not found
+        Exception: If loading fails
+    """
+    # Handle empty articles case
+    if not articles_normalized or articles_normalized == "":
+        logger.info("No articles to load (empty input)")
+        return ("", "")
+    
+    articles_path = Path(articles_normalized)
+    if not articles_path.exists():
+        logger.warning(f"Articles JSON not found: {articles_normalized}")
+        return ("", "")
+    
+    normalized_folder = str(articles_path.parent)
+    
+    logger.info(f"Loading RDF from normalized articles: {articles_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+    
+    # Get Neo4j store config
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+    
+    # Create RDF output directory parallel to normalized
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "hf"  # /data/3_rdf/hf
+    rdf_run_folder = rdf_base / normalized_path.name  # Same run ID as normalized
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+    
+    logger.info(f"RDF outputs will be saved to: {rdf_run_folder}")
+    
+    # Output Turtle file path
+    ttl_path = rdf_run_folder / "articles.ttl"
+    
+    # Build and persist RDF
+    logger.info("Building and persisting RDF triples for articles...")
+    load_stats = build_and_persist_articles_rdf(
+        json_path=articles_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+    
+    logger.info(
+        f"RDF loading complete: {load_stats['articles_processed']} articles, "
+        f"{load_stats['triples_added']} triples, {load_stats['errors']} errors"
+    )
+    
+    # Write load report to both normalized and RDF folders
+    report = {
+        "input_file": articles_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+    
+    # Save report to normalized folder
+    normalized_report_path = Path(normalized_folder) / "articles_load_report.json"
     with open(normalized_report_path, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     logger.info(f"Load report saved to: {normalized_report_path}")
     
     # Save report to RDF folder as well
-    rdf_report_path = rdf_run_folder / "load_report.json"
+    rdf_report_path = rdf_run_folder / "articles_load_report.json"
     with open(rdf_report_path, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     logger.info(f"Load report also saved to: {rdf_report_path}")

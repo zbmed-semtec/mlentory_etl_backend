@@ -35,6 +35,7 @@ from dagster import asset, AssetIn
 from etl_extractors.hf import HFHelper
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from schemas.fair4ml import MLModel
+from schemas.schemaorg import ScholarlyArticle
 
 
 logger = logging.getLogger(__name__)
@@ -478,3 +479,218 @@ def _load_enriched_entity_mapping(json_path: str, entity_type: str) -> Dict[str,
     except Exception as e:
         logger.error(f"Error loading enriched {entity_type} from {json_path}: {e}")
         return {}
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "articles_json": AssetIn("hf_enriched_articles"),
+        "run_folder": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_articles_normalized(
+    articles_json: str,
+    run_folder: Tuple[str, str],
+) -> str:
+    """
+    Normalize arXiv articles from HF enrichment to Schema.org ScholarlyArticle format.
+    
+    Maps raw arXiv metadata extracted by HFArxivClient to IRI-aliased JSON
+    following the Schema.org ScholarlyArticle specification.
+    
+    Args:
+        articles_json: Path to enriched arXiv articles JSON (arxiv_articles.json)
+        run_folder: Tuple of (raw_data_json_path, normalized_folder)
+        
+    Returns:
+        Path to normalized articles JSON file
+    """
+    _, normalized_folder = run_folder
+    
+    # Handle empty articles case
+    if not articles_json or articles_json == "":
+        logger.info("No articles to normalize (empty input)")
+        return ""
+    
+    articles_path = Path(articles_json)
+    if not articles_path.exists():
+        logger.warning(f"Articles JSON not found: {articles_json}")
+        return ""
+    
+    # Load raw articles
+    logger.info(f"Loading raw articles from {articles_json}")
+    with open(articles_path, 'r', encoding='utf-8') as f:
+        raw_articles = json.load(f)
+    
+    if not raw_articles:
+        logger.info("No articles to normalize (empty list)")
+        return ""
+    
+    logger.info(f"Loaded {len(raw_articles)} raw articles")
+    
+    # Normalize each article
+    normalized_articles: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+    
+    for idx, raw_article in enumerate(raw_articles):
+        arxiv_id = raw_article.get("arxiv_id", f"unknown_{idx}")
+        
+        try:
+            # Build normalized article data
+            article_data = {}
+            
+            # Identifiers
+            identifiers = []
+            mlentory_id = raw_article.get("mlentory_id")
+            if mlentory_id:
+                identifiers.append(mlentory_id)
+            
+            if arxiv_id and arxiv_id != f"unknown_{idx}":
+                identifiers.append(f"https://arxiv.org/abs/{arxiv_id}")
+                identifiers.append(f"arXiv:{arxiv_id}")
+            
+            article_data["identifier"] = identifiers
+            
+            # Name (title)
+            article_data["name"] = raw_article.get("title") or f"Article {arxiv_id}"
+            
+            # URL
+            if arxiv_id and arxiv_id != f"unknown_{idx}":
+                article_data["url"] = f"https://arxiv.org/abs/{arxiv_id}"
+            else:
+                article_data["url"] = mlentory_id or ""
+            
+            # sameAs (DOI, PDF, other links)
+            same_as = []
+            doi = raw_article.get("doi")
+            if doi:
+                same_as.append(f"https://doi.org/{doi}")
+            
+            pdf_url = raw_article.get("pdf_url")
+            if pdf_url:
+                same_as.append(pdf_url)
+            
+            links = raw_article.get("links", [])
+            if links:
+                for link in links:
+                    if isinstance(link, str) and link.startswith("http"):
+                        same_as.append(link)
+            
+            article_data["sameAs"] = same_as
+            
+            # Description (summary)
+            article_data["description"] = raw_article.get("summary")
+            
+            # Authors
+            authors = []
+            authors_data = raw_article.get("authors", [])
+            if authors_data:
+                for author in authors_data:
+                    if isinstance(author, dict):
+                        author_name = author.get("name")
+                        if author_name:
+                            authors.append(author_name)
+                    elif isinstance(author, str):
+                        authors.append(author)
+            article_data["author"] = authors
+            
+            # Temporal information
+            published = raw_article.get("published")
+            if published:
+                try:
+                    # Parse date string to datetime
+                    if isinstance(published, str):
+                        # Handle various formats
+                        if 'T' in published:
+                            article_data["datePublished"] = datetime.fromisoformat(published.replace('Z', '+00:00'))
+                        else:
+                            article_data["datePublished"] = datetime.fromisoformat(f"{published}T00:00:00")
+                    elif isinstance(published, datetime):
+                        article_data["datePublished"] = published
+                except Exception as e:
+                    logger.warning(f"Failed to parse published date for {arxiv_id}: {e}")
+            
+            updated = raw_article.get("updated")
+            if updated:
+                try:
+                    if isinstance(updated, str):
+                        if 'T' in updated:
+                            article_data["dateModified"] = datetime.fromisoformat(updated.replace('Z', '+00:00'))
+                        else:
+                            article_data["dateModified"] = datetime.fromisoformat(f"{updated}T00:00:00")
+                    elif isinstance(updated, datetime):
+                        article_data["dateModified"] = updated
+                except Exception as e:
+                    logger.warning(f"Failed to parse updated date for {arxiv_id}: {e}")
+            
+            # About (categories)
+            about = []
+            categories = raw_article.get("categories", [])
+            if categories:
+                about.extend(categories)
+            
+            primary_category = raw_article.get("primary_category")
+            if primary_category and primary_category not in about:
+                about.append(primary_category)
+            
+            article_data["about"] = about
+            
+            # isPartOf (journal reference)
+            journal_ref = raw_article.get("journal_ref")
+            if journal_ref:
+                article_data["isPartOf"] = journal_ref
+            
+            # Comment
+            comment = raw_article.get("comment")
+            if comment:
+                article_data["comment"] = comment
+            
+            # Extraction metadata
+            extraction_metadata = raw_article.get("extraction_metadata", {})
+            article_data["extraction_metadata"] = extraction_metadata
+            
+            # Validate with Pydantic
+            scholarly_article = ScholarlyArticle(**article_data)
+            
+            # Convert to dict for JSON serialization using IRI aliases
+            normalized_articles.append(scholarly_article.model_dump(mode='json', by_alias=True))
+            
+            if (idx + 1) % 50 == 0:
+                logger.info(f"Normalized {idx + 1}/{len(raw_articles)} articles")
+                
+        except ValidationError as e:
+            logger.error(f"Validation error for article {arxiv_id}: {e}")
+            validation_errors.append({
+                "arxiv_id": arxiv_id,
+                "error": str(e),
+                "raw_data": raw_article
+            })
+        except Exception as e:
+            logger.error(f"Unexpected error normalizing article {arxiv_id}: {e}", exc_info=True)
+            validation_errors.append({
+                "arxiv_id": arxiv_id,
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+    
+    logger.info(f"Successfully normalized {len(normalized_articles)}/{len(raw_articles)} articles")
+    
+    if validation_errors:
+        logger.warning(f"Encountered {len(validation_errors)} validation errors")
+    
+    # Write normalized articles
+    output_path = Path(normalized_folder) / "articles.json"
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(normalized_articles, f, indent=2, ensure_ascii=False, default=_json_default)
+    
+    logger.info(f"Wrote {len(normalized_articles)} normalized articles to {output_path}")
+    
+    # Write errors if any
+    if validation_errors:
+        errors_path = Path(normalized_folder) / "articles_transformation_errors.json"
+        with open(errors_path, 'w', encoding='utf-8') as f:
+            json.dump(validation_errors, f, indent=2, ensure_ascii=False)
+        logger.info(f"Wrote {len(validation_errors)} errors to {errors_path}")
+    
+    return str(output_path)
