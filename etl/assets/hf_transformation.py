@@ -426,61 +426,6 @@ def hf_models_normalized(
     return (str(output_path), str(normalized_folder))
 
 
-
-def _load_enriched_entity_mapping(json_path: str, entity_type: str) -> Dict[str, Dict]:
-    """
-    Load enriched entity JSON file and create {entity_id: entity_data} mapping.
-
-    Args:
-        json_path: Path to the enriched entities JSON file
-        entity_type: Type of entity ("datasets", "articles", "keywords", "licenses")
-
-    Returns:
-        Dict mapping entity identifier to enriched entity data
-    """
-    if not json_path or not Path(json_path).exists():
-        logger.warning(f"Enriched {entity_type} file not found: {json_path}")
-        return {}
-
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            entities = json.load(f)
-
-        entity_mapping = {}
-
-        for entity in entities:
-            # Use mlentory_id as the key
-            mlentory_id = entity.get("mlentory_id")
-            if mlentory_id:
-                entity_mapping[mlentory_id] = entity
-            else:
-                # Fallback: generate mlentory_id if not present (for backward compatibility)
-                if entity_type == "datasets":
-                    entity_id = entity.get("datasetId")
-                elif entity_type == "articles":
-                    entity_id = entity.get("arxiv_id")
-                elif entity_type == "keywords":
-                    entity_id = entity.get("keyword")
-                elif entity_type == "licenses":
-                    entity_id = entity.get("Name") or entity.get("Identifier")
-                else:
-                    logger.warning(f"Unknown entity type: {entity_type}")
-                    continue
-
-                if entity_id:
-                    from etl_extractors.hf import HFHelper
-                    mlentory_id = HFHelper.generate_mlentory_entity_hash_id(entity_type.rstrip("s").capitalize(), entity_id)
-                    entity["mlentory_id"] = mlentory_id
-                    entity_mapping[mlentory_id] = entity
-
-        logger.info(f"Loaded {len(entity_mapping)} enriched {entity_type} entities")
-        return entity_mapping
-
-    except Exception as e:
-        logger.error(f"Error loading enriched {entity_type} from {json_path}: {e}")
-        return {}
-
-
 @asset(
     group_name="hf_transformation",
     ins={
