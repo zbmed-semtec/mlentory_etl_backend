@@ -158,12 +158,28 @@ def add_literal_or_iri(
     if isinstance(value, list):
         added = False
         for item in value:
-            if add_literal_or_iri(graph, subject, predicate_iri, item, datatype):
+            if create_triple(graph, subject, predicate, item, datatype):
                 added = True
         return added
     
+    return create_triple(graph, subject, predicate, value, datatype)
+    
+    
+
+def create_triple(graph: Graph, subject: URIRef, predicate: URIRef, value: Any, datatype: Optional[URIRef] = None) -> bool:
+    """
+    Create a triple with either a literal or IRI object.
+    
+    If value is a valid IRI, adds it as URIRef. Otherwise, adds as Literal.
+    Handles lists by adding multiple triples.
+    """
+    
+    
     # Convert value to string
     value_str = str(value) if not isinstance(value, str) else value
+    
+    if value is None or value == "" or value == []:
+        return False
     
     # Check if it's an IRI
     if is_iri(value_str):
@@ -178,7 +194,7 @@ def add_literal_or_iri(
         logger.debug(f"Added literal triple: <{subject}> <{predicate}> \"{value_str}\"")
     
     return True
-
+    
 
 def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     """
@@ -205,11 +221,11 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     
     # Core identification properties
     add_literal_or_iri(graph, subject, "https://schema.org/identifier", 
-                      model.get("https://schema.org/identifier"))
+                      model.get("https://schema.org/identifier"), datatype=XSD.string)
     add_literal_or_iri(graph, subject, "https://schema.org/name", 
-                      model.get("https://schema.org/name"))
+                      model.get("https://schema.org/name"), datatype=XSD.string)
     add_literal_or_iri(graph, subject, "https://schema.org/url", 
-                      model.get("https://schema.org/url"))
+                      model.get("https://schema.org/url"), datatype=XSD.string)
     
     # Authorship & provenance
     add_literal_or_iri(graph, subject, "https://schema.org/author", 
