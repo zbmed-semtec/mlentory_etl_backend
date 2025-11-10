@@ -73,6 +73,8 @@ class HFArxivClient:
             for paper in results:
                 try:
                     arxiv_id = str(paper).split("/")[-1].strip()
+                    if "v" in arxiv_id:
+                        arxiv_id = arxiv_id.split("v")[0]
                     retrieved_ids.add(arxiv_id)
                     
                     authors_data = []
