@@ -270,6 +270,10 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     # add related entities
     add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/referencePublication",
                        model.get("https://w3id.org/codemeta/referencePublication"))
+    add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/license",
+                       model.get("https://w3id.org/codemeta/license"))
+    add_literal_or_iri(graph, subject, "https://w3id.org/fair4ml/fineTunedFrom",
+                       model.get("https://w3id.org/fair4ml/fineTunedFrom"))
     
     triples_added = len(graph) - triples_before
     return triples_added
@@ -481,6 +485,166 @@ def build_and_persist_articles_rdf(
     }
 
 
+def mint_license_subject(license_data: Dict[str, Any]) -> str:
+    """
+    Mint a subject IRI for a CreativeWork license entity.
+    """
+    identifiers = license_data.get("https://schema.org/identifier", [])
+    if isinstance(identifiers, str):
+        identifiers = [identifiers]
+
+    if identifiers and isinstance(identifiers, list):
+        for identifier in identifiers:
+            if identifier.startswith("https://w3id.org/mlentory/mlentory_graph/"):
+                return identifier
+        for identifier in identifiers:
+            if is_iri(identifier):
+                return identifier
+
+    url = license_data.get("https://schema.org/url", "")
+    if url:
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        minted_iri = f"https://w3id.org/mlentory/license/{url_hash}"
+        logger.debug("Minted license subject IRI from URL hash: %s", minted_iri)
+        return minted_iri
+
+    payload_hash = hashlib.sha256(json.dumps(license_data, sort_keys=True).encode()).hexdigest()
+    fallback_iri = f"https://w3id.org/mlentory/license/{payload_hash}"
+    logger.warning("No identifiers found for license, using fallback IRI: %s", fallback_iri)
+    return fallback_iri
+
+
+def build_license_triples(graph: Graph, license_data: Dict[str, Any]) -> int:
+    """
+    Build RDF triples for a Schema.org CreativeWork representing a license.
+    """
+    triples_before = len(graph)
+
+    subject_iri = mint_license_subject(license_data)
+    subject = URIRef(subject_iri)
+
+    graph.add((subject, namespaces["rdf"].type, namespaces["schema"].CreativeWork))
+
+    add_literal_or_iri(graph, subject, "https://schema.org/identifier",
+                       license_data.get("https://schema.org/identifier"))
+    add_literal_or_iri(graph, subject, "https://schema.org/name",
+                       license_data.get("https://schema.org/name"))
+    add_literal_or_iri(graph, subject, "https://schema.org/url",
+                       license_data.get("https://schema.org/url"))
+    add_literal_or_iri(graph, subject, "https://schema.org/sameAs",
+                       license_data.get("https://schema.org/sameAs"))
+    add_literal_or_iri(graph, subject, "https://schema.org/alternateName",
+                       license_data.get("https://schema.org/alternateName"))
+
+    add_literal_or_iri(graph, subject, "https://schema.org/description",
+                       license_data.get("https://schema.org/description"))
+    add_literal_or_iri(graph, subject, "https://schema.org/abstract",
+                       license_data.get("https://schema.org/abstract"))
+    add_literal_or_iri(graph, subject, "https://schema.org/text",
+                       license_data.get("https://schema.org/text"))
+
+    add_literal_or_iri(graph, subject, "https://schema.org/license",
+                       license_data.get("https://schema.org/license"))
+    add_literal_or_iri(graph, subject, "https://schema.org/version",
+                       license_data.get("https://schema.org/version"))
+    add_literal_or_iri(graph, subject, "https://schema.org/copyrightNotice",
+                       license_data.get("https://schema.org/copyrightNotice"))
+    add_literal_or_iri(graph, subject, "https://schema.org/legislationJurisdiction",
+                       license_data.get("https://schema.org/legislationJurisdiction"))
+    add_literal_or_iri(graph, subject, "https://schema.org/legislationType",
+                       license_data.get("https://schema.org/legislationType"))
+
+    for temporal_predicate in (
+        "https://schema.org/dateCreated",
+        "https://schema.org/dateModified",
+        "https://schema.org/datePublished",
+    ):
+        date_value = license_data.get(temporal_predicate)
+        if date_value:
+            dt_str = to_xsd_datetime(date_value)
+            if dt_str:
+                add_literal_or_iri(graph, subject, temporal_predicate, dt_str, datatype=XSD.dateTime)
+
+    add_literal_or_iri(graph, subject, "https://schema.org/isBasedOn",
+                       license_data.get("https://schema.org/isBasedOn"))
+    add_literal_or_iri(graph, subject, "https://schema.org/subjectOf",
+                       license_data.get("https://schema.org/subjectOf"))
+
+    triples_added = len(graph) - triples_before
+    return triples_added
+
+
+def build_and_persist_licenses_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build RDF triples from normalized licenses and persist to Neo4j.
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized licenses file not found: {json_path}")
+
+    logger.info("Loading normalized licenses from %s", json_path)
+    with open(json_file, "r", encoding="utf-8") as f:
+        licenses = json.load(f)
+
+    if not isinstance(licenses, list):
+        raise ValueError(f"Expected list of licenses, got {type(licenses)}")
+
+    logger.info("Loaded %s licenses", len(licenses))
+
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+
+    total_triples = 0
+    errors = 0
+    graph_closed = False
+
+    try:
+        for idx, license_entry in enumerate(licenses):
+            try:
+                triples_added = build_license_triples(graph, license_entry)
+                total_triples += triples_added
+
+                if (idx + 1) % 50 == 0:
+                    logger.info("Processed %s/%s licenses, added %s triples",
+                                idx + 1, len(licenses), total_triples)
+            except Exception as exc:
+                errors += 1
+                identifier = license_entry.get("https://schema.org/identifier", f"unknown_{idx}")
+                logger.error("Error building triples for license %s: %s", identifier, exc, exc_info=True)
+                logger.error("Stack trace: %s", traceback.format_exc())
+
+        logger.info("Finished building license triples: %s triples for %s licenses (%s errors)",
+                    total_triples, len(licenses), errors)
+
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export...")
+            graph.close(True)
+            graph_closed = True
+            logger.info("Exporting license graph to Turtle via neosemantics: %s", output_ttl_path)
+            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
+            ttl_path = str(ttl_file)
+            logger.info("Saved license Turtle file: %s", ttl_path)
+
+    finally:
+        if not graph_closed:
+            logger.info("Closing graph and flushing commits to Neo4j...")
+            graph.close(True)
+            logger.info("Graph closed, commits flushed")
+
+    return {
+        "licenses_processed": len(licenses),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": datetime.now().isoformat(),
+    }
 def build_and_persist_models_rdf(
     json_path: str,
     config: Neo4jStoreConfig,

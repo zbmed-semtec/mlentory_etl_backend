@@ -19,7 +19,11 @@ from typing import Any, Dict, Tuple
 
 from dagster import AssetIn, asset
 
-from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf, build_and_persist_articles_rdf
+from etl_loaders.hf_rdf_loader import (
+    build_and_persist_models_rdf,
+    build_and_persist_articles_rdf,
+    build_and_persist_licenses_rdf,
+)
 from etl_loaders.rdf_store import (
     get_neo4j_store_config_from_env,
     Neo4jConfig,
@@ -286,5 +290,96 @@ def hf_load_articles_to_neo4j(
         json.dump(report, f, indent=2, ensure_ascii=False)
     logger.info(f"Load report also saved to: {rdf_report_path}")
     
+    return (str(normalized_report_path), normalized_folder)
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "licenses_normalized": AssetIn("hf_licenses_normalized"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_load_licenses_to_neo4j(
+    licenses_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized licenses as RDF triples into Neo4j.
+    
+    Builds RDF triples from Schema.org CreativeWork entities and persists them
+    to Neo4j using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        licenses_normalized: Path to normalized licenses JSON (licenses.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no licenses
+    """
+    if not licenses_normalized or licenses_normalized == "":
+        logger.info("No licenses to load (empty input)")
+        return ("", "")
+
+    licenses_path = Path(licenses_normalized)
+    if not licenses_path.exists():
+        logger.warning(f"Licenses JSON not found: {licenses_normalized}")
+        return ("", "")
+
+    normalized_folder = str(licenses_path.parent)
+
+    logger.info(f"Loading RDF from normalized licenses: {licenses_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "hf"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"License RDF outputs will be saved to: {rdf_run_folder}")
+
+    ttl_path = rdf_run_folder / "licenses.ttl"
+
+    logger.info("Building and persisting RDF triples for licenses...")
+    load_stats = build_and_persist_licenses_rdf(
+        json_path=licenses_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+
+    logger.info(
+        "RDF loading complete: %s licenses, %s triples, %s errors",
+        load_stats["licenses_processed"],
+        load_stats["triples_added"],
+        load_stats["errors"],
+    )
+
+    report = {
+        "input_file": licenses_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    normalized_report_path = Path(normalized_folder) / "licenses_load_report.json"
+    with open(normalized_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Licenses load report saved to: {normalized_report_path}")
+
+    rdf_report_path = rdf_run_folder / "licenses_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Licenses load report also saved to: {rdf_report_path}")
+
     return (str(normalized_report_path), normalized_folder)
 
