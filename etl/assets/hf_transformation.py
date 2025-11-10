@@ -303,93 +303,14 @@ def hf_models_normalized(
 
     # Create index mapping for efficient merging
     basic_props_by_index = {item["_index"]: item for item in basic_props}
-    # TODO: Create indices for other partial schemas
     
     # Merge partial schemas
     logger.info("Merging partial schemas...")
-    merged_schemas: List[Dict[str, Any]] = []
-    
-    for idx, raw_model in enumerate(raw_models):
-        model_id = raw_model.get("modelId", f"unknown_{idx}")
-        
-        try:
-            # Start with basic properties
-            merged = basic_props_by_index.get(idx, {}).copy()
-            # logger.info(f"Merged schemas: {merged}")
-            
-            # Remove internal fields used for merging
-            merged.pop("_model_id", None)
-            merged.pop("_index", None)
-            merged.pop("_error", None)
-
-            # Add platform-specific metrics
-            # merged["metrics"] = {
-            #     "downloads": raw_model.get("downloads", 0),
-            #     "likes": raw_model.get("likes", 0),
-            # }
-
-            # Add linked entities
-            if model_id in entity_linking_data:
-                model_entities = entity_linking_data[model_id]
-
-                # Add enriched datasets, articles, keywords, licenses
-                merged["license"] = model_entities["licenses"][0] if len(model_entities["licenses"]) > 0 else None
-                merged["trainedOn"] = model_entities["datasets"]
-                merged["testedOn"] = model_entities["datasets"]
-                merged["validatedOn"] = model_entities["datasets"]
-                merged["evaluatedOn"] = model_entities["datasets"]
-                merged["referencePublication"] = model_entities["articles"]
-                merged["keywords"] = model_entities["keywords"]
-                merged["fineTunedFrom"] = model_entities["base_models"]
-                merged["inLanguage"] = model_entities["languages"]
-                merged["mlTask"] = model_entities["tasks"]
-            
-            merged_schemas.append(merged)
-            
-            if (idx + 1) % 100 == 0:
-                logger.info(f"Merged schemas for {idx + 1}/{len(raw_models)} models")
-                
-        except Exception as e:
-            logger.error(f"Error merging schemas for model {model_id}: {e}", exc_info=True)
-            logger.error(f"Stack trace: {traceback.format_exc()}")
-    
-    logger.info(f"Merged {len(merged_schemas)} schemas")
+    merged_schemas = merge_model_partial_schemas(basic_props_by_index, entity_linking_data, raw_models)
     
     # Validate and create MLModel instances
     logger.info("Validating merged schemas...")
-    normalized_models: List[Dict[str, Any]] = []
-    validation_errors: List[Dict[str, Any]] = []
-    
-    for idx, merged_data in enumerate(merged_schemas):
-        model_id = merged_data.get("identifier", f"unknown_{idx}")
-        
-        try:
-            # Validate with Pydantic
-            mlmodel = MLModel(**merged_data)
-            
-            # Convert to dict for JSON serialization using IRI aliases
-            normalized_models.append(mlmodel.model_dump(mode='json', by_alias=True))
-            
-            if (idx + 1) % 100 == 0:
-                logger.info(f"Validated {idx + 1}/{len(merged_schemas)} models")
-                
-        except ValidationError as e:
-            logger.error(f"Validation error for model {model_id}: {e}")
-            logger.error(f"Stack trace: {traceback.format_exc()}")
-            validation_errors.append({
-                "modelId": model_id,
-                "error": str(e),
-                "merged_data": merged_data
-            })
-        except Exception as e:
-            logger.error(f"Unexpected error validating model {model_id}: {e}", exc_info=True)
-            validation_errors.append({
-                "modelId": model_id,
-                "error": str(e),
-                "error_type": type(e).__name__
-            })
-    
-    logger.info(f"Successfully validated {len(normalized_models)}/{len(merged_schemas)} models")
+    normalized_models, validation_errors = validate_model_schemas(merged_schemas)
     
     if validation_errors:
         logger.warning(f"Encountered {len(validation_errors)} validation errors")
@@ -425,6 +346,93 @@ def hf_models_normalized(
     
     return (str(output_path), str(normalized_folder))
 
+def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]], entity_linking_data: Dict[str, Dict[str, Any]], raw_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Merge partial schemas and create final FAIR4ML MLModel objects.
+    """
+    merged_schemas: List[Dict[str, Any]] = []
+    
+    for idx, raw_model in enumerate(raw_models):
+        model_id = raw_model.get("modelId", f"unknown_{idx}")
+        
+        try:
+            # Start with basic properties
+            merged = basic_props_by_index.get(idx, {}).copy()
+            # logger.info(f"Merged schemas: {merged}")
+            merged.pop("_model_id", None)
+            merged.pop("_index", None)
+            merged.pop("_error", None)
+
+            # Add linked entities
+            if model_id in entity_linking_data:
+                model_entities = entity_linking_data[model_id]
+
+                # Add enriched datasets, articles, keywords, licenses
+                merged["license"] = model_entities["licenses"][0] if len(model_entities["licenses"]) > 0 else None
+                merged["trainedOn"] = model_entities["datasets"]
+                merged["testedOn"] = model_entities["datasets"]
+                merged["validatedOn"] = model_entities["datasets"]
+                merged["evaluatedOn"] = model_entities["datasets"]
+                merged["referencePublication"] = model_entities["articles"]
+                merged["keywords"] = model_entities["keywords"]
+                merged["fineTunedFrom"] = model_entities["base_models"]
+                merged["inLanguage"] = model_entities["languages"]
+                merged["mlTask"] = model_entities["tasks"]
+                logger.info(f"Merged schemas for model {model_id}: {merged}")
+            
+            merged_schemas.append(merged)
+            
+            if (idx + 1) % 100 == 0:
+                logger.info(f"Merged schemas for {idx + 1}/{len(raw_models)} models")
+                
+        except Exception as e:
+            logger.error(f"Error merging schemas for model {model_id}: {e}", exc_info=True)
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            raise Exception(f"Error merging schemas for model {model_id}: {e}")
+        
+    
+    logger.info(f"Merged {len(merged_schemas)} schemas")
+    return merged_schemas
+
+def validate_model_schemas(merged_schemas: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Validate the merged schemas against the Pydantic MLModel schema.
+    """
+    normalized_models: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+    
+    for idx, merged_data in enumerate(merged_schemas):
+        model_id = merged_data.get("identifier", f"unknown_{idx}")
+        
+        try:
+            # Validate with Pydantic
+            mlmodel = MLModel(**merged_data)
+            
+            # Convert to dict for JSON serialization using IRI aliases
+            normalized_models.append(mlmodel.model_dump(mode='json', by_alias=True))
+            
+            if (idx + 1) % 100 == 0:
+                logger.info(f"Validated {idx + 1}/{len(merged_schemas)} models")
+                
+        except ValidationError as e:
+            logger.error(f"Validation error for model {model_id}: {e}")
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            validation_errors.append({
+                "modelId": model_id,
+                "error": str(e),
+                "merged_data": merged_data
+            })
+        except Exception as e:
+            logger.error(f"Unexpected error validating model {model_id}: {e}", exc_info=True)
+            validation_errors.append({
+                "modelId": model_id,
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+    
+    logger.info(f"Successfully validated {len(normalized_models)}/{len(merged_schemas)} models")
+    
+    return normalized_models, validation_errors
 
 @asset(
     group_name="hf_transformation",
@@ -601,7 +609,7 @@ def hf_articles_normalized(
             # Convert to dict for JSON serialization using IRI aliases
             normalized_articles.append(scholarly_article.model_dump(mode='json', by_alias=True))
             
-            if (idx + 1) % 50 == 0:
+            if (idx + 1) % 100 == 0:
                 logger.info(f"Normalized {idx + 1}/{len(raw_articles)} articles")
                 
         except ValidationError as e:
