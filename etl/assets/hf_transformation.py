@@ -24,7 +24,7 @@ import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 import logging
 
 import pandas as pd
@@ -35,7 +35,7 @@ from dagster import asset, AssetIn
 from etl_extractors.hf import HFHelper
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from schemas.fair4ml import MLModel
-from schemas.schemaorg import ScholarlyArticle
+from schemas.schemaorg import ScholarlyArticle, CreativeWork
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,87 @@ def _json_default(o):
     if isinstance(o, tuple):
         return list(o)
     return str(o)
+
+
+def _append_unique(container: List[str], value: Any) -> None:
+    """Append a stringified value to the container if it is non-empty and unique."""
+    if not value:
+        return
+    value_str = str(value).strip()
+    if value_str and value_str not in container:
+        container.append(value_str)
+
+
+def _load_entity_records(json_path: str, entity_label: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Load JSON records for an entity if the file exists and contains data.
+
+    Args:
+        json_path: Path to the JSON file.
+        entity_label: Label used for logging, e.g., "articles".
+
+    Returns:
+        The list of records if present, otherwise None.
+    """
+    if not json_path:
+        logger.info("No %s to normalize (empty input)", entity_label)
+        return None
+
+    path = Path(json_path)
+    if not path.exists():
+        logger.warning("%s JSON not found: %s", entity_label.capitalize(), json_path)
+        return None
+
+    logger.info("Loading raw %s from %s", entity_label, json_path)
+    with open(path, "r", encoding="utf-8") as file_handle:
+        records = json.load(file_handle)
+
+    if not records:
+        logger.info("No %s to normalize (empty list)", entity_label)
+        return None
+
+    logger.info("Loaded %s raw %s", len(records), entity_label)
+    return records
+
+
+def _write_normalization_results(
+    entity_label: str,
+    normalized_folder: str,
+    normalized_records: List[Dict[str, Any]],
+    validation_errors: List[Dict[str, Any]],
+) -> str:
+    """
+    Persist normalized entity data and optional validation errors to disk.
+
+    Args:
+        entity_label: Lowercase entity name used for filenames and logging.
+        normalized_folder: Destination folder for normalized outputs.
+        normalized_records: Validated records ready for serialization.
+        validation_errors: Validation errors encountered during processing.
+
+    Returns:
+        The string path to the primary normalized JSON file.
+    """
+    folder_path = Path(normalized_folder)
+    output_path = folder_path / f"{entity_label}.json"
+    with open(output_path, "w", encoding="utf-8") as file_handle:
+        json.dump(
+            normalized_records,
+            file_handle,
+            indent=2,
+            ensure_ascii=False,
+            default=_json_default,
+        )
+
+    logger.info("Wrote %s normalized %s to %s", len(normalized_records), entity_label, output_path)
+
+    if validation_errors:
+        errors_path = folder_path / f"{entity_label}_transformation_errors.json"
+        with open(errors_path, "w", encoding="utf-8") as file_handle:
+            json.dump(validation_errors, file_handle, indent=2, ensure_ascii=False)
+        logger.info("Wrote %s %s normalization errors to %s", len(validation_errors), entity_label, errors_path)
+
+    return str(output_path)
 
 @asset(
     group_name="hf_transformation",
@@ -460,28 +541,11 @@ def hf_articles_normalized(
         Path to normalized articles JSON file
     """
     _, normalized_folder = run_folder
-    
-    # Handle empty articles case
-    if not articles_json or articles_json == "":
-        logger.info("No articles to normalize (empty input)")
+
+    raw_articles = _load_entity_records(articles_json, "articles")
+    if raw_articles is None:
         return ""
-    
-    articles_path = Path(articles_json)
-    if not articles_path.exists():
-        logger.warning(f"Articles JSON not found: {articles_json}")
-        return ""
-    
-    # Load raw articles
-    logger.info(f"Loading raw articles from {articles_json}")
-    with open(articles_path, 'r', encoding='utf-8') as f:
-        raw_articles = json.load(f)
-    
-    if not raw_articles:
-        logger.info("No articles to normalize (empty list)")
-        return ""
-    
-    logger.info(f"Loaded {len(raw_articles)} raw articles")
-    
+
     # Normalize each article
     normalized_articles: List[Dict[str, Any]] = []
     validation_errors: List[Dict[str, Any]] = []
@@ -632,18 +696,153 @@ def hf_articles_normalized(
     if validation_errors:
         logger.warning(f"Encountered {len(validation_errors)} validation errors")
     
-    # Write normalized articles
-    output_path = Path(normalized_folder) / "articles.json"
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(normalized_articles, f, indent=2, ensure_ascii=False, default=_json_default)
+    return _write_normalization_results(
+        entity_label="articles",
+        normalized_folder=normalized_folder,
+        normalized_records=normalized_articles,
+        validation_errors=validation_errors,
+    )
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "licenses_json": AssetIn("hf_enriched_licenses"),
+        "run_folder": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_licenses_normalized(
+    licenses_json: str,
+    run_folder: Tuple[str, str],
+) -> str:
+    """
+    Normalize license metadata from HF enrichment to Schema.org CreativeWork format.
     
-    logger.info(f"Wrote {len(normalized_articles)} normalized articles to {output_path}")
-    
-    # Write errors if any
+    Args:
+        licenses_json: Path to enriched licenses JSON file
+        run_folder: Tuple of (raw_data_json_path, normalized_folder)
+        
+    Returns:
+        Path to normalized licenses JSON file
+    """
+    _, normalized_folder = run_folder
+
+    raw_licenses = _load_entity_records(licenses_json, "licenses")
+    if raw_licenses is None:
+        return ""
+
+    normalized_licenses: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+
+    for idx, license_record in enumerate(raw_licenses):
+        identifier_value = (
+            license_record.get("Identifier")
+            or license_record.get("Name")
+            or license_record.get("mlentory_id")
+            or f"license_{idx}"
+        )
+        display_id = identifier_value
+
+        try:
+            creative_work_data: Dict[str, Any] = {}
+
+            identifiers: List[str] = []
+            mlentory_id = license_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
+                "License", identifier_value
+            )
+            _append_unique(identifiers, mlentory_id)
+
+            license_url = license_record.get("URL")
+            if not license_url and license_record.get("Identifier"):
+                license_url = f"https://spdx.org/licenses/{license_record['Identifier']}.html"
+            if license_url:
+                _append_unique(identifiers, license_url)
+
+            _append_unique(identifiers, license_record.get("Identifier"))
+
+            creative_work_data["identifier"] = identifiers
+
+            name = license_record.get("Name") or license_record.get("Identifier") or display_id
+            creative_work_data["name"] = name
+            creative_work_data["url"] = license_url
+
+            same_as: List[str] = []
+            if license_url:
+                _append_unique(same_as, license_url)
+            sources = license_record.get("Sources") or license_record.get("Deprecated")
+            if isinstance(sources, list):
+                for source in sources:
+                    if isinstance(source, str) and source.startswith("http"):
+                        _append_unique(same_as, source)
+            elif isinstance(sources, str) and sources.startswith("http"):
+                _append_unique(same_as, sources)
+            creative_work_data["sameAs"] = same_as
+
+            alternate_names: List[str] = []
+            _append_unique(alternate_names, license_record.get("Identifier"))
+            alias_field = license_record.get("Other Names") or license_record.get("Aliases")
+            if isinstance(alias_field, list):
+                for alias in alias_field:
+                    _append_unique(alternate_names, alias)
+            creative_work_data["alternateName"] = alternate_names
+
+            creative_work_data["description"] = license_record.get("Notes")
+            creative_work_data["abstract"] = license_record.get("Notes")
+            creative_work_data["text"] = license_record.get("Text")
+
+            creative_work_data["license"] = license_record.get("URL")
+
+            version = license_record.get("Version")
+            if not version and isinstance(license_record.get("Identifier"), str):
+                parts = license_record["Identifier"].split("-")
+                if len(parts) > 1 and any(char.isdigit() for char in parts[-1]):
+                    version = parts[-1]
+            creative_work_data["version"] = version
+
+            jurisdiction = license_record.get("Jurisdiction") or license_record.get("legislationJurisdiction")
+            creative_work_data["legislationJurisdiction"] = jurisdiction
+
+            extraction_metadata = dict(license_record.get("extraction_metadata", {}))
+            extraction_metadata.setdefault("source_identifier", license_record.get("Identifier"))
+            extraction_metadata.setdefault("source_name", license_record.get("Name"))
+            extraction_metadata.setdefault("osi_approved", license_record.get("OSI Approved"))
+            extraction_metadata.setdefault("deprecated", license_record.get("Deprecated"))
+            creative_work_data["extraction_metadata"] = extraction_metadata
+
+            creative_work = CreativeWork(**creative_work_data)
+            normalized_licenses.append(creative_work.model_dump(mode="json", by_alias=True))
+
+            if (idx + 1) % 50 == 0:
+                logger.info("Normalized %s/%s licenses", idx + 1, len(raw_licenses))
+
+        except ValidationError as exc:
+            logger.error("Validation error for license %s: %s", display_id, exc)
+            validation_errors.append(
+                {
+                    "license_id": display_id,
+                    "error": str(exc),
+                    "raw_data": license_record,
+                }
+            )
+        except Exception as exc:
+            logger.error("Unexpected error normalizing license %s: %s", display_id, exc, exc_info=True)
+            validation_errors.append(
+                {
+                    "license_id": display_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    logger.info("Successfully normalized %s/%s licenses", len(normalized_licenses), len(raw_licenses))
+
     if validation_errors:
-        errors_path = Path(normalized_folder) / "articles_transformation_errors.json"
-        with open(errors_path, 'w', encoding='utf-8') as f:
-            json.dump(validation_errors, f, indent=2, ensure_ascii=False)
-        logger.info(f"Wrote {len(validation_errors)} errors to {errors_path}")
-    
-    return str(output_path)
+        logger.warning("Encountered %s validation errors during license normalization", len(validation_errors))
+
+    return _write_normalization_results(
+        entity_label="licenses",
+        normalized_folder=normalized_folder,
+        normalized_records=normalized_licenses,
+        validation_errors=validation_errors,
+    )
