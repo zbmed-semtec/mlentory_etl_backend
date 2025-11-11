@@ -219,61 +219,54 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     # Add rdf:type
     graph.add((subject, namespaces["rdf"].type, namespaces["fair4ml"].MLModel))
     
-    # Core identification properties
-    add_literal_or_iri(graph, subject, "https://schema.org/identifier", 
-                      model.get("https://schema.org/identifier"), datatype=XSD.string)
-    add_literal_or_iri(graph, subject, "https://schema.org/name", 
-                      model.get("https://schema.org/name"), datatype=XSD.string)
-    add_literal_or_iri(graph, subject, "https://schema.org/url", 
-                      model.get("https://schema.org/url"), datatype=XSD.string)
+    string_properties_lst = [
+        # Core identification properties
+        "https://schema.org/identifier",
+        "https://schema.org/name",
+        "https://schema.org/url",
+        
+        # Authorship & provenance
+        "https://schema.org/author",
+        "https://w3id.org/fair4ml/sharedBy",
+        
+        # Description & documentation
+        "https://schema.org/description",
+        "https://schema.org/discussionUrl",
+        "https://schema.org/archivedAt",
+        "https://w3id.org/codemeta/readme",
+        "https://w3id.org/codemeta/issueTracker",
+    ]
     
-    # Authorship & provenance
-    add_literal_or_iri(graph, subject, "https://schema.org/author", 
-                      model.get("https://schema.org/author"))
-    add_literal_or_iri(graph, subject, "https://w3id.org/fair4ml/sharedBy", 
-                      model.get("https://w3id.org/fair4ml/sharedBy"))
+    for string_property in string_properties_lst:
+        add_literal_or_iri(graph, subject, string_property,
+                           model.get(string_property), datatype=XSD.string)
     
-    # Temporal information (with xsd:dateTime conversion)
-    date_created = model.get("https://schema.org/dateCreated")
-    if date_created:
-        dt_str = to_xsd_datetime(date_created)
-        if dt_str:
-            add_literal_or_iri(graph, subject, "https://schema.org/dateCreated", 
-                             dt_str, datatype=XSD.dateTime)
-    
-    date_modified = model.get("https://schema.org/dateModified")
-    if date_modified:
-        dt_str = to_xsd_datetime(date_modified)
-        if dt_str:
-            add_literal_or_iri(graph, subject, "https://schema.org/dateModified", 
-                             dt_str, datatype=XSD.dateTime)
-    
-    date_published = model.get("https://schema.org/datePublished")
-    if date_published:
-        dt_str = to_xsd_datetime(date_published)
-        if dt_str:
-            add_literal_or_iri(graph, subject, "https://schema.org/datePublished", 
-                             dt_str, datatype=XSD.dateTime)
-    
-    # Description & documentation
-    add_literal_or_iri(graph, subject, "https://schema.org/description", 
-                      model.get("https://schema.org/description"), datatype=XSD.string)
-    add_literal_or_iri(graph, subject, "https://schema.org/discussionUrl", 
-                      model.get("https://schema.org/discussionUrl"), datatype=XSD.string)
-    add_literal_or_iri(graph, subject, "https://schema.org/archivedAt", 
-                      model.get("https://schema.org/archivedAt"), datatype=XSD.string)
-    add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/readme", 
-                      model.get("https://w3id.org/codemeta/readme"), datatype=XSD.string)
-    add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/issueTracker", 
-                      model.get("https://w3id.org/codemeta/issueTracker"), datatype=XSD.string)
+    date_properties_lst = [
+        "https://schema.org/dateCreated",
+        "https://schema.org/dateModified",
+        "https://schema.org/datePublished",
+    ]
+    for date_property in date_properties_lst:
+        add_literal_or_iri(graph, subject, date_property,
+                           model.get(date_property), datatype=XSD.dateTime)
     
     # add related entities
-    add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/referencePublication",
-                       model.get("https://w3id.org/codemeta/referencePublication"))
-    add_literal_or_iri(graph, subject, "https://w3id.org/codemeta/license",
-                       model.get("https://w3id.org/codemeta/license"))
-    add_literal_or_iri(graph, subject, "https://w3id.org/fair4ml/fineTunedFrom",
-                       model.get("https://w3id.org/fair4ml/fineTunedFrom"))
+    related_entities_lst = [
+        # Reference publication
+        "https://w3id.org/codemeta/referencePublication",
+        # License
+        "https://w3id.org/codemeta/license",
+        # Base models
+        "https://w3id.org/fair4ml/fineTunedFrom",
+        # Datasets
+        "https://w3id.org/fair4ml/trainedOn",
+        "https://w3id.org/fair4ml/testedOn",
+        "https://w3id.org/fair4ml/validatedOn",
+        "https://w3id.org/fair4ml/evaluatedOn",
+    ]
+    for related_entity in related_entities_lst:
+        add_literal_or_iri(graph, subject, related_entity,
+                           model.get(related_entity))
     
     triples_added = len(graph) - triples_before
     return triples_added
@@ -346,46 +339,32 @@ def build_article_triples(graph: Graph, article: Dict[str, Any]) -> int:
     # Add rdf:type
     graph.add((subject, namespaces["rdf"].type, namespaces["schema"].ScholarlyArticle))
     
-    # Core identification properties
-    add_literal_or_iri(graph, subject, "https://schema.org/identifier", 
-                      article.get("https://schema.org/identifier"))
-    add_literal_or_iri(graph, subject, "https://schema.org/name", 
-                      article.get("https://schema.org/name"))
-    add_literal_or_iri(graph, subject, "https://schema.org/url", 
-                      article.get("https://schema.org/url"))
-    add_literal_or_iri(graph, subject, "https://schema.org/sameAs", 
-                      article.get("https://schema.org/sameAs"))
+    string_properties_lst = [
+        "https://schema.org/identifier",
+        "https://schema.org/name",
+        "https://schema.org/url",
+        "https://schema.org/sameAs",
+        # Description & content
+        "https://schema.org/description",
+        "https://schema.org/about",
+        # Authorship
+        "https://schema.org/author",
+        # Publication context
+        "https://schema.org/isPartOf",
+        "https://schema.org/comment",
+    ]
+    for string_property in string_properties_lst:
+        add_literal_or_iri(graph, subject, string_property,
+                           article.get(string_property), datatype=XSD.string)
+
     
-    # Description & content
-    add_literal_or_iri(graph, subject, "https://schema.org/description", 
-                      article.get("https://schema.org/description"))
-    add_literal_or_iri(graph, subject, "https://schema.org/about", 
-                      article.get("https://schema.org/about"))
-    
-    # Authorship
-    add_literal_or_iri(graph, subject, "https://schema.org/author", 
-                      article.get("https://schema.org/author"))
-    
-    # Temporal information (with xsd:dateTime conversion)
-    date_published = article.get("https://schema.org/datePublished")
-    if date_published:
-        dt_str = to_xsd_datetime(date_published)
-        if dt_str:
-            add_literal_or_iri(graph, subject, "https://schema.org/datePublished", 
-                             dt_str, datatype=XSD.dateTime)
-    
-    date_modified = article.get("https://schema.org/dateModified")
-    if date_modified:
-        dt_str = to_xsd_datetime(date_modified)
-        if dt_str:
-            add_literal_or_iri(graph, subject, "https://schema.org/dateModified", 
-                             dt_str, datatype=XSD.dateTime)
-    
-    # Publication context
-    add_literal_or_iri(graph, subject, "https://schema.org/isPartOf", 
-                      article.get("https://schema.org/isPartOf"))
-    add_literal_or_iri(graph, subject, "https://schema.org/comment", 
-                      article.get("https://schema.org/comment"))
+    date_properties_lst = [
+        "https://schema.org/datePublished",
+        "https://schema.org/dateModified",
+    ]
+    for date_property in date_properties_lst:
+        add_literal_or_iri(graph, subject, date_property,
+                           article.get(date_property), datatype=XSD.dateTime)
     
     triples_added = len(graph) - triples_before
     return triples_added
@@ -645,6 +624,204 @@ def build_and_persist_licenses_rdf(
         "ttl_path": ttl_path,
         "timestamp": datetime.now().isoformat(),
     }
+
+
+def mint_dataset_subject(dataset_data: Dict[str, Any]) -> str:
+    """
+    Mint a subject IRI for a Croissant Dataset entity.
+    
+    Prefers identifiers in this order:
+    1. MLentory IRI from identifier list
+    2. Any other valid IRI from identifier list
+    3. Hash-based IRI from URL
+    4. Fallback hash-based IRI from payload
+    
+    Args:
+        dataset_data: Dataset dictionary with Croissant properties
+        
+    Returns:
+        Subject IRI string
+    """
+    identifiers = dataset_data.get("https://schema.org/identifier", [])
+    if isinstance(identifiers, str):
+        identifiers = [identifiers]
+
+    if identifiers and isinstance(identifiers, list):
+        # Prefer MLentory IRI
+        for identifier in identifiers:
+            if identifier.startswith("https://w3id.org/mlentory/mlentory_graph/"):
+                return identifier
+        # Otherwise use any valid IRI
+        for identifier in identifiers:
+            if is_iri(identifier):
+                return identifier
+
+    # Fall back to URL-based hash
+    url = dataset_data.get("https://schema.org/url", "")
+    if url:
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        minted_iri = f"https://w3id.org/mlentory/dataset/{url_hash}"
+        logger.debug("Minted dataset subject IRI from URL hash: %s", minted_iri)
+        return minted_iri
+
+    # Ultimate fallback: hash of entire payload
+    payload_hash = hashlib.sha256(json.dumps(dataset_data, sort_keys=True).encode()).hexdigest()
+    fallback_iri = f"https://w3id.org/mlentory/dataset/{payload_hash}"
+    logger.warning("No identifiers found for dataset, using fallback IRI: %s", fallback_iri)
+    return fallback_iri
+
+
+def build_dataset_triples(graph: Graph, dataset_data: Dict[str, Any]) -> int:
+    """
+    Build RDF triples for a Croissant Dataset (schema:Dataset).
+    
+    Args:
+        graph: RDFLib graph to add triples to
+        dataset_data: Normalized dataset dictionary with Croissant properties
+        
+    Returns:
+        Number of triples added
+    """
+    triples_before = len(graph)
+
+    subject_iri = mint_dataset_subject(dataset_data)
+    subject = URIRef(subject_iri)
+
+    # rdf:type
+    graph.add((subject, namespaces["rdf"].type, namespaces["schema"].Dataset))
+
+    # Core identification
+    add_literal_or_iri(graph, subject, "https://schema.org/identifier",
+                       dataset_data.get("https://schema.org/identifier"))
+    add_literal_or_iri(graph, subject, "https://schema.org/name",
+                       dataset_data.get("https://schema.org/name"))
+    add_literal_or_iri(graph, subject, "https://schema.org/url",
+                       dataset_data.get("https://schema.org/url"))
+    add_literal_or_iri(graph, subject, "https://schema.org/sameAs",
+                       dataset_data.get("https://schema.org/sameAs"))
+
+    # Description
+    add_literal_or_iri(graph, subject, "https://schema.org/description",
+                       dataset_data.get("https://schema.org/description"))
+
+    # Licensing
+    add_literal_or_iri(graph, subject, "https://schema.org/license",
+                       dataset_data.get("https://schema.org/license"))
+
+    # Croissant conformance (Dublin Core Terms)
+    conforms_to = dataset_data.get("http://purl.org/dc/terms/conformsTo")
+    if conforms_to:
+        add_literal_or_iri(graph, subject, "http://purl.org/dc/terms/conformsTo", conforms_to)
+
+    # Citation (Croissant)
+    cite_as = dataset_data.get("http://mlcommons.org/croissant/citeAs")
+    if cite_as:
+        add_literal_or_iri(graph, subject, "http://mlcommons.org/croissant/citeAs", cite_as)
+
+    # Keywords
+    add_literal_or_iri(graph, subject, "https://schema.org/keywords",
+                       dataset_data.get("https://schema.org/keywords"))
+
+    # Creator
+    add_literal_or_iri(graph, subject, "https://schema.org/creator",
+                       dataset_data.get("https://schema.org/creator"))
+
+    # Temporal properties
+    for temporal_predicate in (
+        "https://schema.org/datePublished",
+        "https://schema.org/dateModified",
+    ):
+        date_value = dataset_data.get(temporal_predicate)
+        if date_value:
+            dt_str = to_xsd_datetime(date_value)
+            if dt_str:
+                add_literal_or_iri(graph, subject, temporal_predicate, dt_str, datatype=XSD.dateTime)
+
+    triples_added = len(graph) - triples_before
+    return triples_added
+
+
+def build_and_persist_datasets_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build RDF triples from normalized Croissant datasets and persist to Neo4j.
+    
+    Args:
+        json_path: Path to normalized datasets JSON (datasets.json)
+        config: Neo4j store configuration
+        output_ttl_path: Optional path to export RDF as Turtle
+        
+    Returns:
+        Dictionary with load statistics
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized datasets file not found: {json_path}")
+
+    logger.info("Loading normalized datasets from %s", json_path)
+    with open(json_file, "r", encoding="utf-8") as f:
+        datasets = json.load(f)
+
+    if not isinstance(datasets, list):
+        raise ValueError(f"Expected list of datasets, got {type(datasets)}")
+
+    logger.info("Loaded %s datasets", len(datasets))
+
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+
+    total_triples = 0
+    errors = 0
+    graph_closed = False
+
+    try:
+        for idx, dataset_entry in enumerate(datasets):
+            try:
+                triples_added = build_dataset_triples(graph, dataset_entry)
+                total_triples += triples_added
+
+                if (idx + 1) % 50 == 0:
+                    logger.info("Processed %s/%s datasets, added %s triples",
+                                idx + 1, len(datasets), total_triples)
+            except Exception as exc:
+                errors += 1
+                identifier = dataset_entry.get("https://schema.org/identifier", f"unknown_{idx}")
+                logger.error("Error building triples for dataset %s: %s", identifier, exc, exc_info=True)
+                logger.error("Stack trace: %s", traceback.format_exc())
+
+        logger.info("Finished building dataset triples: %s triples for %s datasets (%s errors)",
+                    total_triples, len(datasets), errors)
+
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export...")
+            graph.close(True)
+            graph_closed = True
+            logger.info("Exporting dataset graph to Turtle via neosemantics: %s", output_ttl_path)
+            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
+            ttl_path = str(ttl_file)
+            logger.info("Saved dataset Turtle file: %s", ttl_path)
+
+    finally:
+        if not graph_closed:
+            logger.info("Closing graph and flushing commits to Neo4j...")
+            graph.close(True)
+            logger.info("Graph closed, commits flushed")
+
+    return {
+        "datasets_processed": len(datasets),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
 def build_and_persist_models_rdf(
     json_path: str,
     config: Neo4jStoreConfig,
