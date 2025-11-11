@@ -36,6 +36,7 @@ from etl_extractors.hf import HFHelper
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork
+from schemas.croissant import CroissantDataset
 
 
 logger = logging.getLogger(__name__)
@@ -844,5 +845,170 @@ def hf_licenses_normalized(
         entity_label="licenses",
         normalized_folder=normalized_folder,
         normalized_records=normalized_licenses,
+        validation_errors=validation_errors,
+    )
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "datasets_json": AssetIn("hf_enriched_datasets"),
+        "run_folder": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_datasets_normalized(
+    datasets_json: str,
+    run_folder: Tuple[str, str],
+) -> str:
+    """
+    Normalize HF dataset metadata to Croissant dataset-level format.
+    
+    Maps extracted HF dataset records (with Croissant metadata) to the
+    CroissantDataset Pydantic schema. For datasets without Croissant metadata,
+    creates a minimal stub entry.
+    
+    Args:
+        datasets_json: Path to enriched datasets JSON file
+        run_folder: Tuple of (raw_data_json_path, normalized_folder)
+        
+    Returns:
+        Path to normalized datasets JSON file
+    """
+    _, normalized_folder = run_folder
+
+    raw_datasets = _load_entity_records(datasets_json, "datasets")
+    if raw_datasets is None:
+        return ""
+
+    normalized_datasets: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+
+    for idx, dataset_record in enumerate(raw_datasets):
+        dataset_id = dataset_record.get("datasetId", f"dataset_{idx}")
+        mlentory_id = dataset_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
+            "Dataset", dataset_id
+        )
+
+        try:
+            croissant_meta = dataset_record.get("croissant_metadata") or {}
+            enriched = dataset_record.get("enriched", False)
+            
+            # Build identifier list (MLentory ID + primary URL)
+            identifiers = [mlentory_id]
+            dataset_url = f"https://huggingface.co/datasets/{dataset_id}"
+            identifiers.append(dataset_url)
+            
+            # Extract fields from Croissant metadata if present
+            name = croissant_meta.get("name") or croissant_meta.get("title") or dataset_id
+            description = croissant_meta.get("description")
+            license_url = None
+            cite_as = None
+            keywords = []
+            creator = None
+            date_published = None
+            date_modified = None
+            same_as = []
+            
+            if enriched and croissant_meta:
+                # Extract license
+                license_info = croissant_meta.get("license")
+                if isinstance(license_info, str):
+                    license_url = license_info
+                elif isinstance(license_info, list) and license_info:
+                    license_url = license_info[0] if isinstance(license_info[0], str) else None
+                elif isinstance(license_info, dict):
+                    license_url = license_info.get("@id") or license_info.get("url")
+                
+                # Extract citation
+                cite_as = croissant_meta.get("citation") or croissant_meta.get("citeAs")
+                
+                # Extract keywords
+                kw_field = croissant_meta.get("keywords")
+                if isinstance(kw_field, list):
+                    keywords = [str(k) for k in kw_field if k]
+                elif isinstance(kw_field, str):
+                    keywords = [kw_field]
+                
+                # Extract creator
+                creator_field = croissant_meta.get("creator")
+                if isinstance(creator_field, str):
+                    creator = creator_field
+                elif isinstance(creator_field, dict):
+                    creator = creator_field.get("name") or creator_field.get("@id")
+                elif isinstance(creator_field, list) and creator_field:
+                    first = creator_field[0]
+                    creator = first.get("name") if isinstance(first, dict) else str(first)
+                
+                # Extract dates
+                date_published = croissant_meta.get("datePublished")
+                date_modified = croissant_meta.get("dateModified")
+                
+                # Extract sameAs (additional URLs)
+                same_as_field = croissant_meta.get("sameAs")
+                if isinstance(same_as_field, list):
+                    same_as = [str(s) for s in same_as_field if s]
+                elif isinstance(same_as_field, str):
+                    same_as = [same_as_field]
+                
+                # Also include URL if present in metadata
+                url_field = croissant_meta.get("url")
+                if url_field and url_field not in identifiers and url_field not in same_as:
+                    same_as.append(url_field)
+            
+            # Build the CroissantDataset payload
+            dataset_data: Dict[str, Any] = {
+                "identifier": identifiers,
+                "name": name,
+                "url": dataset_url,
+                "description": description,
+                "license": license_url,
+                "conformsTo": "http://mlcommons.org/croissant/1.0",
+                "citeAs": cite_as,
+                "keywords": keywords,
+                "creator": creator,
+                "datePublished": date_published,
+                "dateModified": date_modified,
+                "sameAs": same_as,
+                "extraction_metadata": dataset_record.get("extraction_metadata", {}),
+            }
+            
+            # Validate with Pydantic
+            croissant_dataset = CroissantDataset(**dataset_data)
+            
+            # Convert to dict for JSON serialization using IRI aliases
+            normalized_datasets.append(croissant_dataset.model_dump(mode="json", by_alias=True))
+            
+            if (idx + 1) % 100 == 0:
+                logger.info("Normalized %s/%s datasets", idx + 1, len(raw_datasets))
+                
+        except ValidationError as exc:
+            logger.error("Validation error for dataset %s: %s", dataset_id, exc)
+            validation_errors.append(
+                {
+                    "dataset_id": dataset_id,
+                    "error": str(exc),
+                    "raw_data": dataset_record,
+                }
+            )
+        except Exception as exc:
+            logger.error("Unexpected error normalizing dataset %s: %s", dataset_id, exc, exc_info=True)
+            validation_errors.append(
+                {
+                    "dataset_id": dataset_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    logger.info("Successfully normalized %s/%s datasets", len(normalized_datasets), len(raw_datasets))
+
+    if validation_errors:
+        logger.warning("Encountered %s validation errors during dataset normalization", len(validation_errors))
+
+    return _write_normalization_results(
+        entity_label="datasets",
+        normalized_folder=normalized_folder,
+        normalized_records=normalized_datasets,
         validation_errors=validation_errors,
     )
