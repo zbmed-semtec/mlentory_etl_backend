@@ -49,6 +49,66 @@ def is_iri(value: str) -> bool:
         return False
 
 
+def _strip_angle_brackets(value: str) -> str:
+    """Return value without surrounding angle brackets if present."""
+    if isinstance(value, str) and value.startswith("<") and value.endswith(">"):
+        return value[1:-1]
+    return value
+
+
+def mint_subject_generic(
+    entity: Dict[str, Any],
+    kind: str,
+    identifier_predicate: str = "https://schema.org/identifier",
+    url_predicate: str = "https://schema.org/url",
+    mlentory_graph_prefix: str = "https://w3id.org/mlentory/mlentory_graph/",
+) -> str:
+    """
+    Mint a subject IRI for an entity with consistent, centralized logic.
+    
+    Preference order:
+      1) An identifier that is an MLentory graph IRI (starts with mlentory_graph/).
+      2) Any other valid IRI from the identifiers list.
+      3) Hash-based IRI derived from the URL predicate.
+      4) Fallback hash-based IRI derived from the full payload.
+    
+    Args:
+        entity: Entity payload
+        kind: Kind label used in minted fallback IRIs (e.g., "model")
+        identifier_predicate: Predicate for identifiers
+        url_predicate: Predicate for the canonical URL
+        mlentory_graph_prefix: MLentory IRI prefix to prioritize
+    
+    Returns:
+        Subject IRI as a string
+    """
+    identifiers = entity.get(identifier_predicate, [])
+    if isinstance(identifiers, str):
+        identifiers = [identifiers]
+    
+    # Prefer MLentory IRIs
+    if identifiers and isinstance(identifiers, list):
+        for identifier in identifiers:
+            normalized = _strip_angle_brackets(identifier)
+            if isinstance(normalized, str) and normalized.startswith(mlentory_graph_prefix):
+                return normalized
+        # Otherwise any valid IRI
+        for identifier in identifiers:
+            normalized = _strip_angle_brackets(identifier)
+            if is_iri(normalized):
+                return normalized
+    
+    # Fallback: mint IRI from URL
+    url = entity.get(url_predicate, "")
+    if isinstance(url, str) and url:
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        return f"https://w3id.org/mlentory/{kind}/{url_hash}"
+    
+    # Ultimate fallback: hash of entire payload
+    payload_hash = hashlib.sha256(json.dumps(entity, sort_keys=True).encode()).hexdigest()
+    return f"https://w3id.org/mlentory/{kind}/{payload_hash}"
+
+
 def to_xsd_datetime(value: Any) -> Optional[str]:
     """
     Convert various datetime formats to xsd:dateTime string.
@@ -89,41 +149,15 @@ def mint_subject(model: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a model.
     
-    Uses the first identifier if it's a valid IRI, otherwise creates
-    a stable hash-based IRI using the model URL.
-    
-    Args:
-        model: Model dictionary with FAIR4ML properties
-        
-    Returns:
-        Subject IRI string
+    Uses centralized logic shared across entity types.
     """
-    # Try to use first identifier if it's an IRI
-    identifiers = model.get("https://schema.org/identifier", [])
-    if isinstance(identifiers, str):
-        identifiers = [identifiers]
-    
-    if identifiers and isinstance(identifiers, list):
-        # use the first id that starts with https://w3id.org/mlentory/mlentory_graph/
-        for id in identifiers:
-            if id.startswith("https://w3id.org/mlentory/mlentory_graph") or id.startswith("<https://w3id.org/mlentory/mlentory_graph"):
-                return id
-        return identifiers[0]
-    
-    # Fallback: mint IRI from URL hash
-    url = model.get("https://schema.org/url", "")
-    if url:
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        minted_iri = f"https://w3id.org/mlentory/model/{url_hash}"
-        logger.debug(f"Minted subject IRI from URL hash: {minted_iri}")
-        return minted_iri
-    
-    # Last resort: use a random hash
-    model_str = json.dumps(model, sort_keys=True)
-    model_hash = hashlib.sha256(model_str.encode()).hexdigest()
-    fallback_iri = f"https://w3id.org/mlentory/model/{model_hash}"
-    logger.warning(f"No URL found, using fallback IRI: {fallback_iri}")
-    return fallback_iri
+    return mint_subject_generic(
+        entity=model,
+        kind="model",
+        identifier_predicate="https://schema.org/identifier",
+        url_predicate="https://schema.org/url",
+        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
+    )
 
 
 def add_literal_or_iri(
@@ -276,44 +310,15 @@ def mint_article_subject(article: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a scholarly article.
     
-    Uses the first identifier if it's a valid IRI, otherwise creates
-    a stable hash-based IRI using the article URL.
-    
-    Args:
-        article: Article dictionary with Schema.org properties
-        
-    Returns:
-        Subject IRI string
+    Uses centralized logic shared across entity types.
     """
-    # Try to use first identifier if it's an IRI
-    identifiers = article.get("https://schema.org/identifier", [])
-    if isinstance(identifiers, str):
-        identifiers = [identifiers]
-    
-    if identifiers and isinstance(identifiers, list):
-        # use the first id that starts with https://w3id.org/mlentory/mlentory_graph/
-        for id in identifiers:
-            if id.startswith("https://w3id.org/mlentory/mlentory_graph/"):
-                return id
-        # Otherwise use first identifier if it's an IRI
-        for id in identifiers:
-            if is_iri(id):
-                return id
-    
-    # Fallback: mint IRI from URL hash
-    url = article.get("https://schema.org/url", "")
-    if url:
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        minted_iri = f"https://w3id.org/mlentory/article/{url_hash}"
-        logger.debug(f"Minted article subject IRI from URL hash: {minted_iri}")
-        return minted_iri
-    
-    # Last resort: use a random hash
-    article_str = json.dumps(article, sort_keys=True)
-    article_hash = hashlib.sha256(article_str.encode()).hexdigest()
-    fallback_iri = f"https://w3id.org/mlentory/article/{article_hash}"
-    logger.warning(f"No URL found, using fallback IRI: {fallback_iri}")
-    return fallback_iri
+    return mint_subject_generic(
+        entity=article,
+        kind="article",
+        identifier_predicate="https://schema.org/identifier",
+        url_predicate="https://schema.org/url",
+        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
+    )
 
 
 def build_article_triples(graph: Graph, article: Dict[str, Any]) -> int:
@@ -468,29 +473,13 @@ def mint_license_subject(license_data: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a CreativeWork license entity.
     """
-    identifiers = license_data.get("https://schema.org/identifier", [])
-    if isinstance(identifiers, str):
-        identifiers = [identifiers]
-
-    if identifiers and isinstance(identifiers, list):
-        for identifier in identifiers:
-            if identifier.startswith("https://w3id.org/mlentory/mlentory_graph/"):
-                return identifier
-        for identifier in identifiers:
-            if is_iri(identifier):
-                return identifier
-
-    url = license_data.get("https://schema.org/url", "")
-    if url:
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        minted_iri = f"https://w3id.org/mlentory/license/{url_hash}"
-        logger.debug("Minted license subject IRI from URL hash: %s", minted_iri)
-        return minted_iri
-
-    payload_hash = hashlib.sha256(json.dumps(license_data, sort_keys=True).encode()).hexdigest()
-    fallback_iri = f"https://w3id.org/mlentory/license/{payload_hash}"
-    logger.warning("No identifiers found for license, using fallback IRI: %s", fallback_iri)
-    return fallback_iri
+    return mint_subject_generic(
+        entity=license_data,
+        kind="license",
+        identifier_predicate="https://schema.org/identifier",
+        url_predicate="https://schema.org/url",
+        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
+    )
 
 
 def build_license_triples(graph: Graph, license_data: Dict[str, Any]) -> int:
@@ -630,45 +619,15 @@ def mint_dataset_subject(dataset_data: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a Croissant Dataset entity.
     
-    Prefers identifiers in this order:
-    1. MLentory IRI from identifier list
-    2. Any other valid IRI from identifier list
-    3. Hash-based IRI from URL
-    4. Fallback hash-based IRI from payload
-    
-    Args:
-        dataset_data: Dataset dictionary with Croissant properties
-        
-    Returns:
-        Subject IRI string
+    Uses centralized logic shared across entity types.
     """
-    identifiers = dataset_data.get("https://schema.org/identifier", [])
-    if isinstance(identifiers, str):
-        identifiers = [identifiers]
-
-    if identifiers and isinstance(identifiers, list):
-        # Prefer MLentory IRI
-        for identifier in identifiers:
-            if identifier.startswith("https://w3id.org/mlentory/mlentory_graph/"):
-                return identifier
-        # Otherwise use any valid IRI
-        for identifier in identifiers:
-            if is_iri(identifier):
-                return identifier
-
-    # Fall back to URL-based hash
-    url = dataset_data.get("https://schema.org/url", "")
-    if url:
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        minted_iri = f"https://w3id.org/mlentory/dataset/{url_hash}"
-        logger.debug("Minted dataset subject IRI from URL hash: %s", minted_iri)
-        return minted_iri
-
-    # Ultimate fallback: hash of entire payload
-    payload_hash = hashlib.sha256(json.dumps(dataset_data, sort_keys=True).encode()).hexdigest()
-    fallback_iri = f"https://w3id.org/mlentory/dataset/{payload_hash}"
-    logger.warning("No identifiers found for dataset, using fallback IRI: %s", fallback_iri)
-    return fallback_iri
+    return mint_subject_generic(
+        entity=dataset_data,
+        kind="dataset",
+        identifier_predicate="https://schema.org/identifier",
+        url_predicate="https://schema.org/url",
+        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
+    )
 
 
 def build_dataset_triples(graph: Graph, dataset_data: Dict[str, Any]) -> int:
