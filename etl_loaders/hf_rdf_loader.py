@@ -26,208 +26,6 @@ from rdflib_neo4j import Neo4jStoreConfig
 from etl_loaders.rdf_store import namespaces, open_graph, export_graph_neosemantics
 
 logger = logging.getLogger(__name__)
-
-
-def is_iri(value: str) -> bool:
-    """
-    Check if a string is a valid IRI.
-    
-    Args:
-        value: String to check
-        
-    Returns:
-        True if value is a valid IRI, False otherwise
-    """
-    if not value or not isinstance(value, str):
-        return False
-    
-    try:
-        result = urlparse(value)
-        # Check if it has a scheme (http, https, etc.) and netloc (domain)
-        return bool(result.scheme and result.netloc)
-    except Exception:
-        return False
-
-
-def _strip_angle_brackets(value: str) -> str:
-    """Return value without surrounding angle brackets if present."""
-    if isinstance(value, str) and value.startswith("<") and value.endswith(">"):
-        return value[1:-1]
-    return value
-
-
-def mint_subject_generic(
-    entity: Dict[str, Any],
-    kind: str,
-    identifier_predicate: str = "https://schema.org/identifier",
-    url_predicate: str = "https://schema.org/url",
-    mlentory_graph_prefix: str = "https://w3id.org/mlentory/mlentory_graph/",
-) -> str:
-    """
-    Mint a subject IRI for an entity with consistent, centralized logic.
-    
-    Preference order:
-      1) An identifier that is an MLentory graph IRI (starts with mlentory_graph/).
-      2) Any other valid IRI from the identifiers list.
-      3) Hash-based IRI derived from the URL predicate.
-      4) Fallback hash-based IRI derived from the full payload.
-    
-    Args:
-        entity: Entity payload
-        kind: Kind label used in minted fallback IRIs (e.g., "model")
-        identifier_predicate: Predicate for identifiers
-        url_predicate: Predicate for the canonical URL
-        mlentory_graph_prefix: MLentory IRI prefix to prioritize
-    
-    Returns:
-        Subject IRI as a string
-    """
-    identifiers = entity.get(identifier_predicate, [])
-    if isinstance(identifiers, str):
-        identifiers = [identifiers]
-    
-    # Prefer MLentory IRIs
-    if identifiers and isinstance(identifiers, list):
-        for identifier in identifiers:
-            normalized = _strip_angle_brackets(identifier)
-            if isinstance(normalized, str) and normalized.startswith(mlentory_graph_prefix):
-                return normalized
-        # Otherwise any valid IRI
-        for identifier in identifiers:
-            normalized = _strip_angle_brackets(identifier)
-            if is_iri(normalized):
-                return normalized
-    
-    # Fallback: mint IRI from URL
-    url = entity.get(url_predicate, "")
-    if isinstance(url, str) and url:
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        return f"https://w3id.org/mlentory/{kind}/{url_hash}"
-    
-    # Ultimate fallback: hash of entire payload
-    payload_hash = hashlib.sha256(json.dumps(entity, sort_keys=True).encode()).hexdigest()
-    return f"https://w3id.org/mlentory/{kind}/{payload_hash}"
-
-
-def to_xsd_datetime(value: Any) -> Optional[str]:
-    """
-    Convert various datetime formats to xsd:dateTime string.
-    
-    Args:
-        value: Datetime value (string, datetime, or timestamp)
-        
-    Returns:
-        ISO 8601 datetime string or None if conversion fails
-    """
-    if not value:
-        return None
-    
-    try:
-        if isinstance(value, datetime):
-            return value.isoformat()
-        elif isinstance(value, str):
-            # Try parsing and re-formatting to ensure ISO format
-            # Handle various formats: "2021-01-01T00:00:00Z", "2021-01-01", etc.
-            if 'T' in value:
-                # Already ISO format, potentially with Z suffix
-                return value.replace('Z', '+00:00') if value.endswith('Z') else value
-            else:
-                # Date only, add time
-                return f"{value}T00:00:00"
-        elif isinstance(value, (int, float)):
-            # Unix timestamp
-            return datetime.fromtimestamp(value).isoformat()
-        else:
-            logger.warning(f"Unsupported datetime type: {type(value)}")
-            return None
-    except Exception as e:
-        logger.warning(f"Failed to convert to xsd:dateTime: {value} - {e}")
-        return None
-
-
-def mint_subject(model: Dict[str, Any]) -> str:
-    """
-    Mint a subject IRI for a model.
-    
-    Uses centralized logic shared across entity types.
-    """
-    return mint_subject_generic(
-        entity=model,
-        kind="model",
-        identifier_predicate="https://schema.org/identifier",
-        url_predicate="https://schema.org/url",
-        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
-    )
-
-
-def add_literal_or_iri(
-    graph: Graph,
-    subject: URIRef,
-    predicate_iri: str,
-    value: Any,
-    datatype: Optional[URIRef] = None,
-) -> bool:
-    """
-    Add a triple with either a literal or IRI object.
-    
-    If value is a valid IRI, adds it as URIRef. Otherwise, adds as Literal.
-    Handles lists by adding multiple triples.
-    
-    Args:
-        graph: RDFLib Graph
-        subject: Subject URIRef
-        predicate_iri: Full predicate IRI string
-        value: Value to add (string, list, or other)
-        datatype: Optional XSD datatype for literals
-        
-    Returns:
-        True if at least one triple was added, False otherwise
-    """
-    if value is None or value == "" or value == []:
-        return False
-    
-    predicate = URIRef(predicate_iri)
-    
-    # Handle lists by recursing
-    if isinstance(value, list):
-        added = False
-        for item in value:
-            if create_triple(graph, subject, predicate, item, datatype):
-                added = True
-        return added
-    
-    return create_triple(graph, subject, predicate, value, datatype)
-    
-    
-
-def create_triple(graph: Graph, subject: URIRef, predicate: URIRef, value: Any, datatype: Optional[URIRef] = None) -> bool:
-    """
-    Create a triple with either a literal or IRI object.
-    
-    If value is a valid IRI, adds it as URIRef. Otherwise, adds as Literal.
-    Handles lists by adding multiple triples.
-    """
-    
-    
-    # Convert value to string
-    value_str = str(value) if not isinstance(value, str) else value
-    
-    if value is None or value == "" or value == []:
-        return False
-    
-    # Check if it's an IRI
-    if is_iri(value_str):
-        graph.add((subject, predicate, URIRef(value_str)))
-        logger.debug(f"Added IRI triple: <{subject}> <{predicate}> <{value_str}>")
-    else:
-        # Add as literal
-        if datatype:
-            graph.add((subject, predicate, Literal(value_str, datatype=datatype)))
-        else:
-            graph.add((subject, predicate, Literal(value_str, datatype=XSD.string)))
-        logger.debug(f"Added literal triple: <{subject}> <{predicate}> \"{value_str}\"")
-    
-    return True
     
 
 def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
@@ -305,6 +103,98 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     triples_added = len(graph) - triples_before
     return triples_added
 
+def build_and_persist_models_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build RDF triples from normalized HF models and persist to Neo4j.
+    
+    Args:
+        json_path: Path to normalized models JSON (mlmodels.json)
+        config: Neo4jStoreConfig for connecting to Neo4j
+        output_ttl_path: Optional path to save Turtle file
+        
+    Returns:
+        Dict with loading statistics:
+        - models_processed: Number of models processed
+        - triples_added: Total number of triples added
+        - errors: Number of errors encountered
+        - ttl_path: Path to saved Turtle file (if requested)
+        
+    Raises:
+        FileNotFoundError: If json_path doesn't exist
+        ValueError: If JSON is invalid
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized models file not found: {json_path}")
+    
+    logger.info(f"Loading normalized models from {json_path}")
+    with open(json_file, 'r', encoding='utf-8') as f:
+        models = json.load(f)
+    
+    if not isinstance(models, list):
+        raise ValueError(f"Expected list of models, got {type(models)}")
+    
+    logger.info(f"Loaded {len(models)} models")
+    
+    # Open graph with Neo4j backend
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+    
+    # Build triples for each model
+    total_triples = 0
+    errors = 0
+    graph_closed = False
+    
+    try:
+        for idx, model in enumerate(models):
+            try:
+                triples_added = build_model_triples(graph, model)
+                total_triples += triples_added
+                
+                if (idx + 1) % 100 == 0:
+                    logger.info(f"Processed {idx + 1}/{len(models)} models, "
+                              f"added {total_triples} triples")
+            except Exception as e:
+                errors += 1
+                model_id = model.get("https://schema.org/identifier", f"unknown_{idx}")
+                logger.error(f"Error building triples for model {model_id}: {e}", 
+                           exc_info=True)
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+        
+        logger.info(f"Finished building triples: {total_triples} triples for "
+                   f"{len(models)} models ({errors} errors)")
+        
+        # Save Turtle file via neosemantics export after flushing writes
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export...")
+            graph.close(True)
+            graph_closed = True
+            logger.info(f"Exporting graph to Turtle via neosemantics: {output_ttl_path}")
+            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
+            ttl_path = str(ttl_file)
+            logger.info(f"Saved Turtle file: {ttl_path}")
+        
+    finally:
+        # Close graph and flush commits to Neo4j if not already closed
+        if not graph_closed:
+            logger.info("Closing graph and flushing commits to Neo4j...")
+            graph.close(True)
+            logger.info("Graph closed, commits flushed")
+    
+    return {
+        "models_processed": len(models),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": datetime.now().isoformat(),
+    }
 
 def mint_article_subject(article: Dict[str, Any]) -> str:
     """
@@ -492,52 +382,38 @@ def build_license_triples(graph: Graph, license_data: Dict[str, Any]) -> int:
     subject = URIRef(subject_iri)
 
     graph.add((subject, namespaces["rdf"].type, namespaces["schema"].CreativeWork))
-
-    add_literal_or_iri(graph, subject, "https://schema.org/identifier",
-                       license_data.get("https://schema.org/identifier"))
-    add_literal_or_iri(graph, subject, "https://schema.org/name",
-                       license_data.get("https://schema.org/name"))
-    add_literal_or_iri(graph, subject, "https://schema.org/url",
-                       license_data.get("https://schema.org/url"))
-    add_literal_or_iri(graph, subject, "https://schema.org/sameAs",
-                       license_data.get("https://schema.org/sameAs"))
-    add_literal_or_iri(graph, subject, "https://schema.org/alternateName",
-                       license_data.get("https://schema.org/alternateName"))
-
-    add_literal_or_iri(graph, subject, "https://schema.org/description",
-                       license_data.get("https://schema.org/description"))
-    add_literal_or_iri(graph, subject, "https://schema.org/abstract",
-                       license_data.get("https://schema.org/abstract"))
-    add_literal_or_iri(graph, subject, "https://schema.org/text",
-                       license_data.get("https://schema.org/text"))
-
-    add_literal_or_iri(graph, subject, "https://schema.org/license",
-                       license_data.get("https://schema.org/license"))
-    add_literal_or_iri(graph, subject, "https://schema.org/version",
-                       license_data.get("https://schema.org/version"))
-    add_literal_or_iri(graph, subject, "https://schema.org/copyrightNotice",
-                       license_data.get("https://schema.org/copyrightNotice"))
-    add_literal_or_iri(graph, subject, "https://schema.org/legislationJurisdiction",
-                       license_data.get("https://schema.org/legislationJurisdiction"))
-    add_literal_or_iri(graph, subject, "https://schema.org/legislationType",
-                       license_data.get("https://schema.org/legislationType"))
-
-    for temporal_predicate in (
+    
+    string_properties_lst = [
+        "https://schema.org/identifier",
+        "https://schema.org/name",
+        "https://schema.org/url",
+        "https://schema.org/sameAs",
+        "https://schema.org/alternateName",
+        "https://schema.org/description",
+        "https://schema.org/abstract",
+        "https://schema.org/text",
+        "https://schema.org/license",
+        "https://schema.org/version",
+        "https://schema.org/copyrightNotice",
+        "https://schema.org/legislationJurisdiction",
+        "https://schema.org/legislationType",
+        "https://schema.org/isBasedOn",
+        "https://schema.org/subjectOf",
+    ]
+    for string_property in string_properties_lst:
+        add_literal_or_iri(graph, subject, string_property,
+                           license_data.get(string_property), datatype=XSD.string)
+        
+    
+    date_properties_lst = [
         "https://schema.org/dateCreated",
         "https://schema.org/dateModified",
         "https://schema.org/datePublished",
-    ):
-        date_value = license_data.get(temporal_predicate)
-        if date_value:
-            dt_str = to_xsd_datetime(date_value)
-            if dt_str:
-                add_literal_or_iri(graph, subject, temporal_predicate, dt_str, datatype=XSD.dateTime)
-
-    add_literal_or_iri(graph, subject, "https://schema.org/isBasedOn",
-                       license_data.get("https://schema.org/isBasedOn"))
-    add_literal_or_iri(graph, subject, "https://schema.org/subjectOf",
-                       license_data.get("https://schema.org/subjectOf"))
-
+    ]
+    for date_property in date_properties_lst:
+        add_literal_or_iri(graph, subject, date_property,
+                           license_data.get(date_property), datatype=XSD.dateTime)
+        
     triples_added = len(graph) - triples_before
     return triples_added
 
@@ -648,43 +524,38 @@ def build_dataset_triples(graph: Graph, dataset_data: Dict[str, Any]) -> int:
 
     # rdf:type
     graph.add((subject, namespaces["rdf"].type, namespaces["schema"].Dataset))
-
-    # Core identification
-    add_literal_or_iri(graph, subject, "https://schema.org/identifier",
-                       dataset_data.get("https://schema.org/identifier"))
-    add_literal_or_iri(graph, subject, "https://schema.org/name",
-                       dataset_data.get("https://schema.org/name"))
-    add_literal_or_iri(graph, subject, "https://schema.org/url",
-                       dataset_data.get("https://schema.org/url"))
-    add_literal_or_iri(graph, subject, "https://schema.org/sameAs",
-                       dataset_data.get("https://schema.org/sameAs"))
-
-    # Description
-    add_literal_or_iri(graph, subject, "https://schema.org/description",
-                       dataset_data.get("https://schema.org/description"))
-
-    # Licensing
-    add_literal_or_iri(graph, subject, "https://schema.org/license",
-                       dataset_data.get("https://schema.org/license"))
+    
+    string_properties_lst = [
+        "https://schema.org/identifier",
+        "https://schema.org/name",
+        "https://schema.org/url",
+        "https://schema.org/sameAs",
+        "https://schema.org/description",
+        "https://schema.org/license",
+    ]
+    for string_property in string_properties_lst:
+        add_literal_or_iri(graph, subject, string_property,
+                           dataset_data.get(string_property), datatype=XSD.string)
 
     # Croissant conformance (Dublin Core Terms)
-    conforms_to = dataset_data.get("http://purl.org/dc/terms/conformsTo")
-    if conforms_to:
-        add_literal_or_iri(graph, subject, "http://purl.org/dc/terms/conformsTo", conforms_to)
-
-    # Citation (Croissant)
-    cite_as = dataset_data.get("http://mlcommons.org/croissant/citeAs")
-    if cite_as:
-        add_literal_or_iri(graph, subject, "http://mlcommons.org/croissant/citeAs", cite_as)
-
-    # Keywords
-    add_literal_or_iri(graph, subject, "https://schema.org/keywords",
-                       dataset_data.get("https://schema.org/keywords"))
-
-    # Creator
-    add_literal_or_iri(graph, subject, "https://schema.org/creator",
-                       dataset_data.get("https://schema.org/creator"))
-
+    optional_properties_lst = [
+        "http://purl.org/dc/terms/conformsTo",
+        "http://mlcommons.org/croissant/citeAs",
+        "https://schema.org/creator"
+    ]
+    for optional_property in optional_properties_lst:
+        if optional_property in dataset_data:
+            add_literal_or_iri(graph, subject, optional_property,
+                           dataset_data.get(optional_property), datatype=XSD.string)
+    
+    external_properties_lst = [
+        "https://schema.org/keywords",
+        "https://schema.org/license",
+    ]
+    for external_property in external_properties_lst:
+        add_literal_or_iri(graph, subject, external_property,
+                           dataset_data.get(external_property))
+    
     # Temporal properties
     for temporal_predicate in (
         "https://schema.org/datePublished",
@@ -781,96 +652,201 @@ def build_and_persist_datasets_rdf(
     }
 
 
-def build_and_persist_models_rdf(
-    json_path: str,
-    config: Neo4jStoreConfig,
-    output_ttl_path: Optional[str] = None,
-) -> Dict[str, Any]:
+def is_iri(value: str) -> bool:
     """
-    Build RDF triples from normalized HF models and persist to Neo4j.
+    Check if a string is a valid IRI.
     
     Args:
-        json_path: Path to normalized models JSON (mlmodels.json)
-        config: Neo4jStoreConfig for connecting to Neo4j
-        output_ttl_path: Optional path to save Turtle file
+        value: String to check
         
     Returns:
-        Dict with loading statistics:
-        - models_processed: Number of models processed
-        - triples_added: Total number of triples added
-        - errors: Number of errors encountered
-        - ttl_path: Path to saved Turtle file (if requested)
-        
-    Raises:
-        FileNotFoundError: If json_path doesn't exist
-        ValueError: If JSON is invalid
+        True if value is a valid IRI, False otherwise
     """
-    json_file = Path(json_path)
-    if not json_file.exists():
-        raise FileNotFoundError(f"Normalized models file not found: {json_path}")
-    
-    logger.info(f"Loading normalized models from {json_path}")
-    with open(json_file, 'r', encoding='utf-8') as f:
-        models = json.load(f)
-    
-    if not isinstance(models, list):
-        raise ValueError(f"Expected list of models, got {type(models)}")
-    
-    logger.info(f"Loaded {len(models)} models")
-    
-    # Open graph with Neo4j backend
-    logger.info("Opening RDF graph with Neo4j backend...")
-    graph = open_graph(config=config)
-    
-    # Build triples for each model
-    total_triples = 0
-    errors = 0
-    graph_closed = False
+    if not value or not isinstance(value, str):
+        return False
     
     try:
-        for idx, model in enumerate(models):
-            try:
-                triples_added = build_model_triples(graph, model)
-                total_triples += triples_added
-                
-                if (idx + 1) % 100 == 0:
-                    logger.info(f"Processed {idx + 1}/{len(models)} models, "
-                              f"added {total_triples} triples")
-            except Exception as e:
-                errors += 1
-                model_id = model.get("https://schema.org/identifier", f"unknown_{idx}")
-                logger.error(f"Error building triples for model {model_id}: {e}", 
-                           exc_info=True)
-                logger.error(f"Stack trace: {traceback.format_exc()}")
-        
-        logger.info(f"Finished building triples: {total_triples} triples for "
-                   f"{len(models)} models ({errors} errors)")
-        
-        # Save Turtle file via neosemantics export after flushing writes
-        ttl_path = None
-        if output_ttl_path:
-            ttl_file = Path(output_ttl_path)
-            ttl_file.parent.mkdir(parents=True, exist_ok=True)
-            logger.info("Flushing graph writes before TTL export...")
-            graph.close(True)
-            graph_closed = True
-            logger.info(f"Exporting graph to Turtle via neosemantics: {output_ttl_path}")
-            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
-            ttl_path = str(ttl_file)
-            logger.info(f"Saved Turtle file: {ttl_path}")
-        
-    finally:
-        # Close graph and flush commits to Neo4j if not already closed
-        if not graph_closed:
-            logger.info("Closing graph and flushing commits to Neo4j...")
-            graph.close(True)
-            logger.info("Graph closed, commits flushed")
-    
-    return {
-        "models_processed": len(models),
-        "triples_added": total_triples,
-        "errors": errors,
-        "ttl_path": ttl_path,
-        "timestamp": datetime.now().isoformat(),
-    }
+        result = urlparse(value)
+        # Check if it has a scheme (http, https, etc.) and netloc (domain)
+        return bool(result.scheme and result.netloc)
+    except Exception:
+        return False
 
+
+def _strip_angle_brackets(value: str) -> str:
+    """Return value without surrounding angle brackets if present."""
+    if isinstance(value, str) and value.startswith("<") and value.endswith(">"):
+        return value[1:-1]
+    return value
+
+
+def mint_subject_generic(
+    entity: Dict[str, Any],
+    kind: str,
+    identifier_predicate: str = "https://schema.org/identifier",
+    url_predicate: str = "https://schema.org/url",
+    mlentory_graph_prefix: str = "https://w3id.org/mlentory/mlentory_graph/",
+) -> str:
+    """
+    Mint a subject IRI for an entity with consistent, centralized logic.
+    
+    Preference order:
+      1) An identifier that is an MLentory graph IRI (starts with mlentory_graph/).
+      2) Any other valid IRI from the identifiers list.
+      3) Hash-based IRI derived from the URL predicate.
+      4) Fallback hash-based IRI derived from the full payload.
+    
+    Args:
+        entity: Entity payload
+        kind: Kind label used in minted fallback IRIs (e.g., "model")
+        identifier_predicate: Predicate for identifiers
+        url_predicate: Predicate for the canonical URL
+        mlentory_graph_prefix: MLentory IRI prefix to prioritize
+    
+    Returns:
+        Subject IRI as a string
+    """
+    identifiers = entity.get(identifier_predicate, [])
+    if isinstance(identifiers, str):
+        identifiers = [identifiers]
+    
+    # Prefer MLentory IRIs
+    if identifiers and isinstance(identifiers, list):
+        for identifier in identifiers:
+            normalized = _strip_angle_brackets(identifier)
+            if isinstance(normalized, str) and normalized.startswith(mlentory_graph_prefix):
+                return normalized
+        # Otherwise any valid IRI
+        for identifier in identifiers:
+            normalized = _strip_angle_brackets(identifier)
+            if is_iri(normalized):
+                return normalized
+    
+    # Fallback: mint IRI from URL
+    url = entity.get(url_predicate, "")
+    if isinstance(url, str) and url:
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        return f"https://w3id.org/mlentory/{kind}/{url_hash}"
+    
+    # Ultimate fallback: hash of entire payload
+    payload_hash = hashlib.sha256(json.dumps(entity, sort_keys=True).encode()).hexdigest()
+    return f"https://w3id.org/mlentory/{kind}/{payload_hash}"
+
+
+def to_xsd_datetime(value: Any) -> Optional[str]:
+    """
+    Convert various datetime formats to xsd:dateTime string.
+    
+    Args:
+        value: Datetime value (string, datetime, or timestamp)
+        
+    Returns:
+        ISO 8601 datetime string or None if conversion fails
+    """
+    if not value:
+        return None
+    
+    try:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        elif isinstance(value, str):
+            # Try parsing and re-formatting to ensure ISO format
+            # Handle various formats: "2021-01-01T00:00:00Z", "2021-01-01", etc.
+            if 'T' in value:
+                # Already ISO format, potentially with Z suffix
+                return value.replace('Z', '+00:00') if value.endswith('Z') else value
+            else:
+                # Date only, add time
+                return f"{value}T00:00:00"
+        elif isinstance(value, (int, float)):
+            # Unix timestamp
+            return datetime.fromtimestamp(value).isoformat()
+        else:
+            logger.warning(f"Unsupported datetime type: {type(value)}")
+            return None
+    except Exception as e:
+        logger.warning(f"Failed to convert to xsd:dateTime: {value} - {e}")
+        return None
+
+
+def mint_subject(model: Dict[str, Any]) -> str:
+    """
+    Mint a subject IRI for a model.
+    
+    Uses centralized logic shared across entity types.
+    """
+    return mint_subject_generic(
+        entity=model,
+        kind="model",
+        identifier_predicate="https://schema.org/identifier",
+        url_predicate="https://schema.org/url",
+        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
+    )
+
+
+def add_literal_or_iri(
+    graph: Graph,
+    subject: URIRef,
+    predicate_iri: str,
+    value: Any,
+    datatype: Optional[URIRef] = None,
+) -> bool:
+    """
+    Add a triple with either a literal or IRI object.
+    
+    If value is a valid IRI, adds it as URIRef. Otherwise, adds as Literal.
+    Handles lists by adding multiple triples.
+    
+    Args:
+        graph: RDFLib Graph
+        subject: Subject URIRef
+        predicate_iri: Full predicate IRI string
+        value: Value to add (string, list, or other)
+        datatype: Optional XSD datatype for literals
+        
+    Returns:
+        True if at least one triple was added, False otherwise
+    """
+    if value is None or value == "" or value == []:
+        return False
+    
+    predicate = URIRef(predicate_iri)
+    
+    # Handle lists by recursing
+    if isinstance(value, list):
+        added = False
+        for item in value:
+            if create_triple(graph, subject, predicate, item, datatype):
+                added = True
+        return added
+    
+    return create_triple(graph, subject, predicate, value, datatype)
+
+def create_triple(graph: Graph, subject: URIRef, predicate: URIRef, value: Any, datatype: Optional[URIRef] = None) -> bool:
+    """
+    Create a triple with either a literal or IRI object.
+    
+    If value is a valid IRI, adds it as URIRef. Otherwise, adds as Literal.
+    Handles lists by adding multiple triples.
+    """
+    
+    
+    # Convert value to string
+    value_str = str(value) if not isinstance(value, str) else value
+    
+    if value is None or value == "" or value == []:
+        return False
+    
+    # Check if it's an IRI
+    if is_iri(value_str):
+        graph.add((subject, predicate, URIRef(value_str)))
+        logger.debug(f"Added IRI triple: <{subject}> <{predicate}> <{value_str}>")
+    else:
+        # Add as literal
+        if datatype:
+            graph.add((subject, predicate, Literal(value_str, datatype=datatype)))
+        else:
+            graph.add((subject, predicate, Literal(value_str, datatype=XSD.string)))
+        logger.debug(f"Added literal triple: <{subject}> <{predicate}> \"{value_str}\"")
+    
+    return True
