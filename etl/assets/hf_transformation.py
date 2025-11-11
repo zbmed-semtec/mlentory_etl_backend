@@ -35,7 +35,7 @@ from dagster import asset, AssetIn
 from etl_extractors.hf import HFHelper
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from schemas.fair4ml import MLModel
-from schemas.schemaorg import ScholarlyArticle, CreativeWork
+from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
 from schemas.croissant import CroissantDataset
 
 
@@ -867,11 +867,11 @@ def hf_datasets_normalized(
     Maps extracted HF dataset records (with Croissant metadata) to the
     CroissantDataset Pydantic schema. For datasets without Croissant metadata,
     creates a minimal stub entry.
-    
+
     Args:
         datasets_json: Path to enriched datasets JSON file
         run_folder: Tuple of (raw_data_json_path, normalized_folder)
-        
+
     Returns:
         Path to normalized datasets JSON file
     """
@@ -1010,5 +1010,252 @@ def hf_datasets_normalized(
         entity_label="datasets",
         normalized_folder=normalized_folder,
         normalized_records=normalized_datasets,
+        validation_errors=validation_errors,
+    )
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "tasks_json": AssetIn("hf_enriched_tasks"),
+        "run_folder": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_tasks_normalized(
+    tasks_json: str,
+    run_folder: Tuple[str, str],
+) -> str:
+    """
+    Normalize HF task metadata to Schema.org DefinedTerm format.
+    
+    Maps extracted HF task records (with definitions and metadata) to the
+    DefinedTerm Pydantic schema.
+
+    Args:
+        tasks_json: Path to enriched tasks JSON file
+        run_folder: Tuple of (raw_data_json_path, normalized_folder)
+
+    Returns:
+        Path to normalized tasks JSON file
+    """
+    _, normalized_folder = run_folder
+
+    raw_tasks = _load_entity_records(tasks_json, "tasks")
+    if raw_tasks is None:
+        return ""
+
+    normalized_tasks: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+
+    for idx, task_record in enumerate(raw_tasks):
+        task_slug = task_record.get("task", f"task_{idx}")
+        mlentory_id = task_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
+            "Task", task_slug
+        )
+
+        try:
+            # Build identifier list (MLentory ID + URL)
+            identifiers = [mlentory_id]
+            task_url = task_record.get("url") or f"https://huggingface.co/tasks/{task_slug}"
+            identifiers.append(task_url)
+            
+            # Use task slug as name (keeping it simple and readable)
+            name = task_slug
+            
+            # Build sameAs list
+            same_as = []
+            
+            # Add definition URL if present
+            definition_url = task_record.get("definition_url")
+            if definition_url and definition_url not in same_as:
+                same_as.append(definition_url)
+            
+            # Add Wikidata URL if QID present
+            wikidata_qid = task_record.get("definition_wikidata_qid")
+            if wikidata_qid:
+                wikidata_url = f"https://www.wikidata.org/wiki/{wikidata_qid}"
+                if wikidata_url not in same_as:
+                    same_as.append(wikidata_url)
+            
+            # Build inDefinedTermSet list
+            in_defined_term_set = ["https://huggingface.co/tasks"]
+            category = task_record.get("category")
+            if category:
+                in_defined_term_set.append(f"https://huggingface.co/tasks/{category}")
+            
+            # Build alternateName list from definition_aliases
+            alternate_names = []
+            definition_aliases = task_record.get("definition_aliases")
+            if definition_aliases:
+                if isinstance(definition_aliases, list):
+                    alternate_names = [str(alias) for alias in definition_aliases if alias]
+                elif isinstance(definition_aliases, str):
+                    # Handle comma-separated string
+                    alternate_names = [alias.strip() for alias in definition_aliases.split(",") if alias.strip()]
+            
+            # Build the DefinedTerm payload
+            term_data: Dict[str, Any] = {
+                "identifier": identifiers,
+                "name": name,
+                "url": task_url,
+                "termCode": task_slug,
+                "description": task_record.get("definition"),
+                "sameAs": same_as,
+                "alternateName": alternate_names,
+                "inDefinedTermSet": in_defined_term_set,
+                "extraction_metadata": task_record.get("extraction_metadata", {}),
+            }
+            
+            # Validate with Pydantic
+            defined_term = DefinedTerm(**term_data)
+            
+            # Convert to dict for JSON serialization using IRI aliases
+            normalized_tasks.append(defined_term.model_dump(mode="json", by_alias=True))
+            
+            if (idx + 1) % 100 == 0:
+                logger.info("Normalized %s/%s tasks", idx + 1, len(raw_tasks))
+                
+        except ValidationError as exc:
+            logger.error("Validation error for task %s: %s", task_slug, exc)
+            validation_errors.append(
+                {
+                    "task_slug": task_slug,
+                    "error": str(exc),
+                    "raw_data": task_record,
+                }
+            )
+        except Exception as exc:
+            logger.error("Unexpected error normalizing task %s: %s", task_slug, exc, exc_info=True)
+            validation_errors.append(
+                {
+                    "task_slug": task_slug,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    logger.info("Successfully normalized %s/%s tasks", len(normalized_tasks), len(raw_tasks))
+
+    if validation_errors:
+        logger.warning("Encountered %s validation errors during task normalization", len(validation_errors))
+
+    return _write_normalization_results(
+        entity_label="tasks",
+        normalized_folder=normalized_folder,
+        normalized_records=normalized_tasks,
+        validation_errors=validation_errors,
+    )
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "languages_json": AssetIn("hf_enriched_languages"),
+        "run_folder": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_languages_normalized(
+    languages_json: str,
+    run_folder: Tuple[str, str],
+) -> str:
+    """
+    Normalize HF language metadata to Schema.org Language format.
+    
+    Maps extracted HF language records (from pycountry) to the Language
+    Pydantic schema.
+    
+    Args:
+        languages_json: Path to enriched languages JSON file
+        run_folder: Tuple of (raw_data_json_path, normalized_folder)
+        
+    Returns:
+        Path to normalized languages JSON file
+    """
+    _, normalized_folder = run_folder
+
+    raw_languages = _load_entity_records(languages_json, "languages")
+    if raw_languages is None:
+        return ""
+
+    normalized_languages: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+
+    for idx, lang_record in enumerate(raw_languages):
+        code = lang_record.get("code", f"lang_{idx}")
+        mlentory_id = lang_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
+            "Language", code
+        )
+
+        try:
+            # Build identifier list (MLentory ID)
+            identifiers = [mlentory_id]
+            
+            # Use name if present, else code
+            name = lang_record.get("name") or code
+            
+            # Build alternateName list with available codes (BCP 47, ISO 639-1, ISO 639-2)
+            alternate_names = []
+            for field in ["code", "alpha_2", "alpha_3"]:
+                value = lang_record.get(field)
+                if value and value not in alternate_names:
+                    alternate_names.append(value)
+            
+            # Build description from scope and type if available
+            description = None
+            scope = lang_record.get("scope")
+            lang_type = lang_record.get("type")
+            if scope or lang_type:
+                parts = []
+                if scope:
+                    parts.append(scope)
+                if lang_type:
+                    parts.append(lang_type)
+                description = f"ISO language ({', '.join(parts)})"
+            
+            # Build sameAs list (optional Wikidata reference)
+            same_as = []
+            # We could add Wikidata later if needed, for now keep it empty
+            
+            # Build the Language payload
+            language_data: Dict[str, Any] = {
+                "identifier": identifiers,
+                "name": name,
+                "url": None,  # No external URL for now
+                "alternateName": alternate_names,
+                "description": description,
+                "sameAs": same_as,
+                "extraction_metadata": lang_record.get("extraction_metadata", {}),
+            }
+            
+            # Validate with Pydantic
+            language = Language(**language_data)
+            
+            # Convert to dict for JSON serialization using IRI aliases
+            normalized_languages.append(language.model_dump(mode="json", by_alias=True))
+            
+            if (idx + 1) % 100 == 0:
+                logger.info("Normalized %s/%s languages", idx + 1, len(raw_languages))
+
+        except Exception as exc:
+            logger.error("Unexpected error normalizing language %s: %s", code, exc, exc_info=True)
+            validation_errors.append(
+                {
+                    "language_code": code,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    logger.info("Successfully normalized %s/%s languages", len(normalized_languages), len(raw_languages))
+
+    if validation_errors:
+        logger.warning("Encountered %s validation errors during language normalization", len(validation_errors))
+
+    return _write_normalization_results(
+        entity_label="languages",
+        normalized_folder=normalized_folder,
+        normalized_records=normalized_languages,
         validation_errors=validation_errors,
     )

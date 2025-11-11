@@ -850,3 +850,272 @@ def create_triple(graph: Graph, subject: URIRef, predicate: URIRef, value: Any, 
         logger.debug(f"Added literal triple: <{subject}> <{predicate}> \"{value_str}\"")
     
     return True
+
+
+def mint_defined_term_subject(term_data: Dict[str, Any]) -> str:
+    """
+    Mint a subject IRI for a DefinedTerm entity.
+    
+    Uses centralized logic shared across entity types.
+    """
+    return mint_subject_generic(
+        entity=term_data,
+        kind="term",
+        identifier_predicate="https://schema.org/identifier",
+        url_predicate="https://schema.org/url",
+        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
+    )
+
+
+def build_defined_term_triples(graph: Graph, term_data: Dict[str, Any]) -> int:
+    """
+    Build RDF triples for a Schema.org DefinedTerm.
+    
+    Args:
+        graph: RDFLib graph to add triples to
+        term_data: Normalized term dictionary with Schema.org properties
+        
+    Returns:
+        Number of triples added
+    """
+    triples_before = len(graph)
+
+    subject_iri = mint_defined_term_subject(term_data)
+    subject = URIRef(subject_iri)
+
+    # rdf:type
+    graph.add((subject, namespaces["rdf"].type, namespaces["schema"].DefinedTerm))
+
+    string_properties_lst = [
+        "https://schema.org/identifier",
+        "https://schema.org/name",
+        "https://schema.org/url",
+        "https://schema.org/sameAs",
+        "https://schema.org/description",
+        "https://schema.org/termCode",
+        "https://schema.org/alternateName",
+    ]
+    for string_property in string_properties_lst:
+        add_literal_or_iri(graph, subject, string_property,
+                           term_data.get(string_property), datatype=XSD.string)
+
+    # inDefinedTermSet can be either URL or literal
+    in_defined_term_set = term_data.get("https://schema.org/inDefinedTermSet")
+    if in_defined_term_set:
+        add_literal_or_iri(graph, subject, "https://schema.org/inDefinedTermSet",
+                           in_defined_term_set)
+
+    triples_added = len(graph) - triples_before
+    return triples_added
+
+
+def build_and_persist_tasks_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build RDF triples from normalized DefinedTerm tasks and persist to Neo4j.
+    
+    Args:
+        json_path: Path to normalized tasks JSON (tasks.json)
+        config: Neo4j store configuration
+        output_ttl_path: Optional path to export RDF as Turtle
+        
+    Returns:
+        Dictionary with load statistics
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized tasks file not found: {json_path}")
+
+    logger.info("Loading normalized tasks from %s", json_path)
+    with open(json_file, "r", encoding="utf-8") as f:
+        tasks = json.load(f)
+
+    if not isinstance(tasks, list):
+        raise ValueError(f"Expected list of tasks, got {type(tasks)}")
+
+    logger.info("Loaded %s tasks", len(tasks))
+
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+
+    total_triples = 0
+    errors = 0
+    graph_closed = False
+
+    try:
+        for idx, task_entry in enumerate(tasks):
+            try:
+                triples_added = build_defined_term_triples(graph, task_entry)
+                total_triples += triples_added
+
+                if (idx + 1) % 50 == 0:
+                    logger.info("Processed %s/%s tasks, added %s triples",
+                                idx + 1, len(tasks), total_triples)
+            except Exception as exc:
+                errors += 1
+                identifier = task_entry.get("https://schema.org/identifier", f"unknown_{idx}")
+                logger.error("Error building triples for task %s: %s", identifier, exc, exc_info=True)
+                logger.error("Stack trace: %s", traceback.format_exc())
+
+        logger.info("Finished building task triples: %s triples for %s tasks (%s errors)",
+                    total_triples, len(tasks), errors)
+
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export...")
+            graph.close(True)
+            graph_closed = True
+            logger.info("Exporting task graph to Turtle via neosemantics: %s", output_ttl_path)
+            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
+            ttl_path = str(ttl_file)
+            logger.info("Saved task Turtle file: %s", ttl_path)
+
+    finally:
+        if not graph_closed:
+            logger.info("Closing graph and flushing commits to Neo4j...")
+            graph.close(True)
+            logger.info("Graph closed, commits flushed")
+
+    return {
+        "tasks_processed": len(tasks),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def mint_language_subject(language_data: Dict[str, Any]) -> str:
+    """
+    Mint a subject IRI for a Language entity.
+    
+    Uses centralized logic shared across entity types.
+    """
+    return mint_subject_generic(
+        entity=language_data,
+        kind="language",
+        identifier_predicate="https://schema.org/identifier",
+        url_predicate="https://schema.org/url",
+        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
+    )
+
+
+def build_language_triples(graph: Graph, language_data: Dict[str, Any]) -> int:
+    """
+    Build RDF triples for a Schema.org Language.
+    
+    Args:
+        graph: RDFLib graph to add triples to
+        language_data: Normalized language dictionary with Schema.org properties
+        
+    Returns:
+        Number of triples added
+    """
+    triples_before = len(graph)
+
+    subject_iri = mint_language_subject(language_data)
+    subject = URIRef(subject_iri)
+
+    # rdf:type
+    graph.add((subject, namespaces["rdf"].type, namespaces["schema"].Language))
+
+    string_properties_lst = [
+        "https://schema.org/identifier",
+        "https://schema.org/name",
+        "https://schema.org/url",
+        "https://schema.org/sameAs",
+        "https://schema.org/alternateName",
+        "https://schema.org/description",
+    ]
+    for string_property in string_properties_lst:
+        add_literal_or_iri(graph, subject, string_property,
+                           language_data.get(string_property), datatype=XSD.string)
+
+    triples_added = len(graph) - triples_before
+    return triples_added
+
+
+def build_and_persist_languages_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build RDF triples from normalized Language entities and persist to Neo4j.
+    
+    Args:
+        json_path: Path to normalized languages JSON (languages.json)
+        config: Neo4j store configuration
+        output_ttl_path: Optional path to export RDF as Turtle
+        
+    Returns:
+        Dictionary with load statistics
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized languages file not found: {json_path}")
+
+    logger.info("Loading normalized languages from %s", json_path)
+    with open(json_file, "r", encoding="utf-8") as f:
+        languages = json.load(f)
+
+    if not isinstance(languages, list):
+        raise ValueError(f"Expected list of languages, got {type(languages)}")
+
+    logger.info("Loaded %s languages", len(languages))
+
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+
+    total_triples = 0
+    errors = 0
+    graph_closed = False
+
+    try:
+        for idx, language_entry in enumerate(languages):
+            try:
+                triples_added = build_language_triples(graph, language_entry)
+                total_triples += triples_added
+
+                if (idx + 1) % 50 == 0:
+                    logger.info("Processed %s/%s languages, added %s triples",
+                                idx + 1, len(languages), total_triples)
+            except Exception as exc:
+                errors += 1
+                identifier = language_entry.get("https://schema.org/identifier", f"unknown_{idx}")
+                logger.error("Error building triples for language %s: %s", identifier, exc, exc_info=True)
+                logger.error("Stack trace: %s", traceback.format_exc())
+
+        logger.info("Finished building language triples: %s triples for %s languages (%s errors)",
+                    total_triples, len(languages), errors)
+
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export...")
+            graph.close(True)
+            graph_closed = True
+            logger.info("Exporting language graph to Turtle via neosemantics: %s", output_ttl_path)
+            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
+            ttl_path = str(ttl_file)
+            logger.info("Saved language Turtle file: %s", ttl_path)
+
+    finally:
+        if not graph_closed:
+            logger.info("Closing graph and flushing commits to Neo4j...")
+            graph.close(True)
+            logger.info("Graph closed, commits flushed")
+
+    return {
+        "languages_processed": len(languages),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": datetime.now().isoformat(),
+    }

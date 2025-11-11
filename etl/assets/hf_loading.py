@@ -24,6 +24,8 @@ from etl_loaders.hf_rdf_loader import (
     build_and_persist_articles_rdf,
     build_and_persist_licenses_rdf,
     build_and_persist_datasets_rdf,
+    build_and_persist_tasks_rdf,
+    build_and_persist_languages_rdf,
 )
 from etl_loaders.rdf_store import (
     get_neo4j_store_config_from_env,
@@ -450,6 +452,178 @@ def hf_load_datasets_to_neo4j(
     with open(rdf_report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     logger.info(f"Datasets load report also saved to: {rdf_report_path}")
+
+    return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "tasks_normalized": AssetIn("hf_tasks_normalized"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_load_tasks_to_neo4j(
+    tasks_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized DefinedTerm tasks as RDF triples into Neo4j.
+    
+    Builds RDF triples from Schema.org DefinedTerm entities and persists
+    them to Neo4j using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        tasks_normalized: Path to normalized tasks JSON (tasks.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no tasks
+    """
+    if not tasks_normalized or tasks_normalized == "":
+        logger.info("No tasks to load (empty input)")
+        return ("", "")
+
+    tasks_path = Path(tasks_normalized)
+    if not tasks_path.exists():
+        logger.warning(f"Tasks JSON not found: {tasks_normalized}")
+        return ("", "")
+
+    normalized_folder = str(tasks_path.parent)
+
+    logger.info(f"Loading RDF from normalized tasks: {tasks_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "hf"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Task RDF outputs will be saved to: {rdf_run_folder}")
+
+    ttl_path = rdf_run_folder / "tasks.ttl"
+
+    logger.info("Building and persisting RDF triples for tasks...")
+    load_stats = build_and_persist_tasks_rdf(
+        json_path=tasks_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+
+    logger.info(
+        "RDF loading complete: %s tasks, %s triples, %s errors",
+        load_stats["tasks_processed"],
+        load_stats["triples_added"],
+        load_stats["errors"],
+    )
+
+    report = {
+        "input_file": tasks_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "tasks_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Tasks load report also saved to: {rdf_report_path}")
+
+    return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "languages_normalized": AssetIn("hf_languages_normalized"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_load_languages_to_neo4j(
+    languages_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized Language entities as RDF triples into Neo4j.
+    
+    Builds RDF triples from Schema.org Language entities and persists
+    them to Neo4j using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        languages_normalized: Path to normalized languages JSON (languages.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no languages
+    """
+    if not languages_normalized or languages_normalized == "":
+        logger.info("No languages to load (empty input)")
+        return ("", "")
+
+    languages_path = Path(languages_normalized)
+    if not languages_path.exists():
+        logger.warning(f"Languages JSON not found: {languages_normalized}")
+        return ("", "")
+
+    normalized_folder = str(languages_path.parent)
+
+    logger.info(f"Loading RDF from normalized languages: {languages_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "hf"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Language RDF outputs will be saved to: {rdf_run_folder}")
+
+    ttl_path = rdf_run_folder / "languages.ttl"
+
+    logger.info("Building and persisting RDF triples for languages...")
+    load_stats = build_and_persist_languages_rdf(
+        json_path=languages_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+
+    logger.info(
+        "RDF loading complete: %s languages, %s triples, %s errors",
+        load_stats["languages_processed"],
+        load_stats["triples_added"],
+        load_stats["errors"],
+    )
+
+    report = {
+        "input_file": languages_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "languages_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Languages load report also saved to: {rdf_report_path}")
 
     return (str(rdf_report_path), normalized_folder)
 
