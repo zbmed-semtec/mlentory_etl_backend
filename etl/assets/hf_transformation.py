@@ -1259,3 +1259,141 @@ def hf_languages_normalized(
         normalized_records=normalized_languages,
         validation_errors=validation_errors,
     )
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "keywords_json": AssetIn("hf_enriched_keywords"),
+        "run_folder": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_keywords_normalized(
+    keywords_json: str,
+    run_folder: Tuple[str, str],
+) -> str:
+    """
+    Normalize HF keyword metadata to Schema.org DefinedTerm format.
+    
+    Maps extracted HF keyword records (from CSV cache or Wikipedia/Wikidata) to the
+    DefinedTerm Pydantic schema, similar to tasks.
+    
+    Args:
+        keywords_json: Path to enriched keywords JSON file
+        run_folder: Tuple of (raw_data_json_path, normalized_folder)
+        
+    Returns:
+        Path to normalized keywords JSON file
+    """
+    _, normalized_folder = run_folder
+
+    raw_keywords = _load_entity_records(keywords_json, "keywords")
+    if raw_keywords is None:
+        return ""
+
+    normalized_keywords: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+
+    for idx, keyword_record in enumerate(raw_keywords):
+        keyword = keyword_record.get("keyword", f"keyword_{idx}")
+        mlentory_id = keyword_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
+            "Keyword", keyword
+        )
+
+        try:
+            # Build identifier list (MLentory ID + URL if present)
+            identifiers = [mlentory_id]
+            keyword_url = keyword_record.get("url")
+            if keyword_url:
+                identifiers.append(keyword_url)
+            
+            # Use keyword as name
+            name = keyword
+            
+            # Build sameAs list
+            same_as = []
+            
+            # Add source URL if present and not already in identifiers
+            source_url = keyword_record.get("url")
+            if source_url and source_url not in identifiers and source_url not in same_as:
+                same_as.append(source_url)
+            
+            # Add Wikidata URL if QID present
+            wikidata_qid = keyword_record.get("wikidata_qid")
+            if wikidata_qid:
+                wikidata_url = f"https://www.wikidata.org/wiki/{wikidata_qid}"
+                if wikidata_url not in same_as:
+                    same_as.append(wikidata_url)
+            
+            # Build inDefinedTermSet list (generic HF keywords set)
+            in_defined_term_set = ["https://huggingface.co/models/tags"]
+            
+            # Build alternateName list from aliases
+            alternate_names = []
+            aliases = keyword_record.get("aliases")
+            if aliases:
+                if isinstance(aliases, list):
+                    alternate_names = [str(alias) for alias in aliases if alias]
+                elif isinstance(aliases, str):
+                    # Handle comma-separated string or JSON string
+                    try:
+                        import json as json_module
+                        parsed = json_module.loads(aliases)
+                        if isinstance(parsed, list):
+                            alternate_names = [str(alias) for alias in parsed if alias]
+                    except (json_module.JSONDecodeError, ValueError):
+                        alternate_names = [alias.strip() for alias in aliases.split(",") if alias.strip()]
+            
+            # Build the DefinedTerm payload
+            term_data: Dict[str, Any] = {
+                "identifier": identifiers,
+                "name": name,
+                "url": keyword_url,
+                "termCode": keyword,
+                "description": keyword_record.get("definition"),
+                "sameAs": same_as,
+                "alternateName": alternate_names,
+                "inDefinedTermSet": in_defined_term_set,
+                "extraction_metadata": keyword_record.get("extraction_metadata", {}),
+            }
+            
+            # Validate with Pydantic
+            defined_term = DefinedTerm(**term_data)
+            
+            # Convert to dict for JSON serialization using IRI aliases
+            normalized_keywords.append(defined_term.model_dump(mode="json", by_alias=True))
+            
+            if (idx + 1) % 100 == 0:
+                logger.info("Normalized %s/%s keywords", idx + 1, len(raw_keywords))
+                
+        except ValidationError as exc:
+            logger.error("Validation error for keyword %s: %s", keyword, exc)
+            validation_errors.append(
+                {
+                    "keyword": keyword,
+                    "error": str(exc),
+                    "raw_data": keyword_record,
+                }
+            )
+        except Exception as exc:
+            logger.error("Unexpected error normalizing keyword %s: %s", keyword, exc, exc_info=True)
+            validation_errors.append(
+                {
+                    "keyword": keyword,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    logger.info("Successfully normalized %s/%s keywords", len(normalized_keywords), len(raw_keywords))
+
+    if validation_errors:
+        logger.warning("Encountered %s validation errors during keyword normalization", len(validation_errors))
+
+    return _write_normalization_results(
+        entity_label="keywords",
+        normalized_folder=normalized_folder,
+        normalized_records=normalized_keywords,
+        validation_errors=validation_errors,
+    )

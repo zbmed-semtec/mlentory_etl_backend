@@ -990,6 +990,91 @@ def build_and_persist_tasks_rdf(
     }
 
 
+def build_and_persist_defined_terms_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+    entity_label: str = "terms",
+) -> Dict[str, Any]:
+    """
+    Generic function to build RDF triples from normalized DefinedTerm entities and persist to Neo4j.
+    
+    This function can be used for any entity type that uses the DefinedTerm schema (tasks, keywords, etc.).
+    
+    Args:
+        json_path: Path to normalized terms JSON file
+        config: Neo4j store configuration
+        output_ttl_path: Optional path to export RDF as Turtle
+        entity_label: Label for logging (e.g., "keywords", "tasks")
+        
+    Returns:
+        Dictionary with load statistics
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized {entity_label} file not found: {json_path}")
+
+    logger.info("Loading normalized %s from %s", entity_label, json_path)
+    with open(json_file, "r", encoding="utf-8") as f:
+        terms = json.load(f)
+
+    if not isinstance(terms, list):
+        raise ValueError(f"Expected list of {entity_label}, got {type(terms)}")
+
+    logger.info("Loaded %s %s", len(terms), entity_label)
+
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+
+    total_triples = 0
+    errors = 0
+    graph_closed = False
+
+    try:
+        for idx, term_entry in enumerate(terms):
+            try:
+                triples_added = build_defined_term_triples(graph, term_entry)
+                total_triples += triples_added
+
+                if (idx + 1) % 50 == 0:
+                    logger.info("Processed %s/%s %s, added %s triples",
+                                idx + 1, len(terms), entity_label, total_triples)
+            except Exception as exc:
+                errors += 1
+                identifier = term_entry.get("https://schema.org/identifier", f"unknown_{idx}")
+                logger.error("Error building triples for %s %s: %s", entity_label, identifier, exc, exc_info=True)
+                logger.error("Stack trace: %s", traceback.format_exc())
+
+        logger.info("Finished building %s triples: %s triples for %s %s (%s errors)",
+                    entity_label, total_triples, len(terms), entity_label, errors)
+
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export...")
+            graph.close(True)
+            graph_closed = True
+            logger.info("Exporting %s graph to Turtle via neosemantics: %s", entity_label, output_ttl_path)
+            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
+            ttl_path = str(ttl_file)
+            logger.info("Saved %s Turtle file: %s", entity_label, ttl_path)
+
+    finally:
+        if not graph_closed:
+            logger.info("Closing graph and flushing commits to Neo4j...")
+            graph.close(True)
+            logger.info("Graph closed, commits flushed")
+
+    return {
+        f"{entity_label}_processed": len(terms),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
 def mint_language_subject(language_data: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a Language entity.

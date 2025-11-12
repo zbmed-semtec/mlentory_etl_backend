@@ -26,6 +26,7 @@ from etl_loaders.hf_rdf_loader import (
     build_and_persist_datasets_rdf,
     build_and_persist_tasks_rdf,
     build_and_persist_languages_rdf,
+    build_and_persist_defined_terms_rdf,
 )
 from etl_loaders.rdf_store import (
     get_neo4j_store_config_from_env,
@@ -624,6 +625,93 @@ def hf_load_languages_to_neo4j(
     with open(rdf_report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     logger.info(f"Languages load report also saved to: {rdf_report_path}")
+
+    return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "keywords_normalized": AssetIn("hf_keywords_normalized"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_load_keywords_to_neo4j(
+    keywords_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized DefinedTerm keywords as RDF triples into Neo4j.
+    
+    Builds RDF triples from Schema.org DefinedTerm entities (keywords) and persists
+    them to Neo4j using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        keywords_normalized: Path to normalized keywords JSON (keywords.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no keywords
+    """
+    if not keywords_normalized or keywords_normalized == "":
+        logger.info("No keywords to load (empty input)")
+        return ("", "")
+
+    keywords_path = Path(keywords_normalized)
+    if not keywords_path.exists():
+        logger.warning(f"Keywords JSON not found: {keywords_normalized}")
+        return ("", "")
+
+    normalized_folder = str(keywords_path.parent)
+
+    logger.info(f"Loading RDF from normalized keywords: {keywords_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "hf"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Keyword RDF outputs will be saved to: {rdf_run_folder}")
+
+    ttl_path = rdf_run_folder / "keywords.ttl"
+
+    logger.info("Building and persisting RDF triples for keywords...")
+    load_stats = build_and_persist_defined_terms_rdf(
+        json_path=keywords_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+        entity_label="keywords",
+    )
+
+    logger.info(
+        "RDF loading complete: %s keywords, %s triples, %s errors",
+        load_stats["keywords_processed"],
+        load_stats["triples_added"],
+        load_stats["errors"],
+    )
+
+    report = {
+        "input_file": keywords_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "keywords_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Keywords load report also saved to: {rdf_report_path}")
 
     return (str(rdf_report_path), normalized_folder)
 
