@@ -26,6 +26,36 @@ from rdflib_neo4j import Neo4jStoreConfig
 from etl_loaders.rdf_store import namespaces, open_graph, export_graph_neosemantics
 
 logger = logging.getLogger(__name__)
+
+
+def build_subject_scoped_cypher(subject_uris: List[str]) -> str:
+    """
+    Build a Cypher query to export triples for specific subject URIs.
+    
+    Returns all triples where the subject is in the provided list of URIs.
+    
+    Args:
+        subject_uris: List of subject URIs to filter by
+        
+    Returns:
+        Cypher query string for neosemantics export
+    """
+    if not subject_uris:
+        # Return query that matches nothing
+        return "MATCH (s:Resource) WHERE false RETURN s, null as r, null as o"
+    
+    # Escape single quotes in URIs and build list literal
+    escaped_uris = [uri.replace("'", "\\'") for uri in subject_uris]
+    uri_list = ", ".join(f"'{uri}'" for uri in escaped_uris)
+    
+    cypher = f"""
+WITH [{uri_list}] AS uris
+MATCH (s:Resource)-[r]->(o)
+WHERE s.uri IN uris
+RETURN s, r, o
+""".strip()
+    
+    return cypher
     
 
 def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
@@ -144,14 +174,17 @@ def build_and_persist_models_rdf(
     logger.info("Opening RDF graph with Neo4j backend...")
     graph = open_graph(config=config)
     
-    # Build triples for each model
+    # Build triples for each model and collect subject URIs
     total_triples = 0
     errors = 0
     graph_closed = False
+    subject_uris = []
     
     try:
         for idx, model in enumerate(models):
             try:
+                subject_uri = mint_subject(model)
+                subject_uris.append(subject_uri)
                 triples_added = build_model_triples(graph, model)
                 total_triples += triples_added
                 
@@ -176,10 +209,15 @@ def build_and_persist_models_rdf(
             logger.info("Flushing graph writes before TTL export...")
             graph.close(True)
             graph_closed = True
-            logger.info(f"Exporting graph to Turtle via neosemantics: {output_ttl_path}")
-            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
-            ttl_path = str(ttl_file)
-            logger.info(f"Saved Turtle file: {ttl_path}")
+            
+            if subject_uris:
+                logger.info(f"Exporting {len(subject_uris)} model subjects to Turtle via neosemantics: {output_ttl_path}")
+                scoped_cypher = build_subject_scoped_cypher(subject_uris)
+                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                ttl_path = str(ttl_file)
+                logger.info(f"Saved Turtle file: {ttl_path}")
+            else:
+                logger.warning("No model subjects to export, skipping TTL generation")
         
     finally:
         # Close graph and flush commits to Neo4j if not already closed
@@ -306,14 +344,17 @@ def build_and_persist_articles_rdf(
     logger.info("Opening RDF graph with Neo4j backend...")
     graph = open_graph(config=config)
     
-    # Build triples for each article
+    # Build triples for each article and collect subject URIs
     total_triples = 0
     errors = 0
     graph_closed = False
+    subject_uris = []
     
     try:
         for idx, article in enumerate(articles):
             try:
+                subject_uri = mint_article_subject(article)
+                subject_uris.append(subject_uri)
                 triples_added = build_article_triples(graph, article)
                 total_triples += triples_added
                 
@@ -338,10 +379,15 @@ def build_and_persist_articles_rdf(
             logger.info("Flushing graph writes before TTL export...")
             graph.close(True)
             graph_closed = True
-            logger.info(f"Exporting graph to Turtle via neosemantics: {output_ttl_path}")
-            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
-            ttl_path = str(ttl_file)
-            logger.info(f"Saved Turtle file: {ttl_path}")
+            
+            if subject_uris:
+                logger.info(f"Exporting {len(subject_uris)} article subjects to Turtle via neosemantics: {output_ttl_path}")
+                scoped_cypher = build_subject_scoped_cypher(subject_uris)
+                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                ttl_path = str(ttl_file)
+                logger.info(f"Saved Turtle file: {ttl_path}")
+            else:
+                logger.warning("No article subjects to export, skipping TTL generation")
         
     finally:
         # Close graph and flush commits to Neo4j if not already closed
@@ -445,10 +491,13 @@ def build_and_persist_licenses_rdf(
     total_triples = 0
     errors = 0
     graph_closed = False
+    subject_uris = []
 
     try:
         for idx, license_entry in enumerate(licenses):
             try:
+                subject_uri = mint_license_subject(license_entry)
+                subject_uris.append(subject_uri)
                 triples_added = build_license_triples(graph, license_entry)
                 total_triples += triples_added
 
@@ -471,10 +520,15 @@ def build_and_persist_licenses_rdf(
             logger.info("Flushing graph writes before TTL export...")
             graph.close(True)
             graph_closed = True
-            logger.info("Exporting license graph to Turtle via neosemantics: %s", output_ttl_path)
-            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
-            ttl_path = str(ttl_file)
-            logger.info("Saved license Turtle file: %s", ttl_path)
+            
+            if subject_uris:
+                logger.info("Exporting %s license subjects to Turtle via neosemantics: %s", len(subject_uris), output_ttl_path)
+                scoped_cypher = build_subject_scoped_cypher(subject_uris)
+                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                ttl_path = str(ttl_file)
+                logger.info("Saved license Turtle file: %s", ttl_path)
+            else:
+                logger.warning("No license subjects to export, skipping TTL generation")
 
     finally:
         if not graph_closed:
@@ -606,10 +660,13 @@ def build_and_persist_datasets_rdf(
     total_triples = 0
     errors = 0
     graph_closed = False
+    subject_uris = []
 
     try:
         for idx, dataset_entry in enumerate(datasets):
             try:
+                subject_uri = mint_dataset_subject(dataset_entry)
+                subject_uris.append(subject_uri)
                 triples_added = build_dataset_triples(graph, dataset_entry)
                 total_triples += triples_added
 
@@ -632,10 +689,15 @@ def build_and_persist_datasets_rdf(
             logger.info("Flushing graph writes before TTL export...")
             graph.close(True)
             graph_closed = True
-            logger.info("Exporting dataset graph to Turtle via neosemantics: %s", output_ttl_path)
-            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
-            ttl_path = str(ttl_file)
-            logger.info("Saved dataset Turtle file: %s", ttl_path)
+            
+            if subject_uris:
+                logger.info("Exporting %s dataset subjects to Turtle via neosemantics: %s", len(subject_uris), output_ttl_path)
+                scoped_cypher = build_subject_scoped_cypher(subject_uris)
+                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                ttl_path = str(ttl_file)
+                logger.info("Saved dataset Turtle file: %s", ttl_path)
+            else:
+                logger.warning("No dataset subjects to export, skipping TTL generation")
 
     finally:
         if not graph_closed:
@@ -944,10 +1006,13 @@ def build_and_persist_tasks_rdf(
     total_triples = 0
     errors = 0
     graph_closed = False
+    subject_uris = []
 
     try:
         for idx, task_entry in enumerate(tasks):
             try:
+                subject_uri = mint_defined_term_subject(task_entry)
+                subject_uris.append(subject_uri)
                 triples_added = build_defined_term_triples(graph, task_entry)
                 total_triples += triples_added
 
@@ -970,10 +1035,15 @@ def build_and_persist_tasks_rdf(
             logger.info("Flushing graph writes before TTL export...")
             graph.close(True)
             graph_closed = True
-            logger.info("Exporting task graph to Turtle via neosemantics: %s", output_ttl_path)
-            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
-            ttl_path = str(ttl_file)
-            logger.info("Saved task Turtle file: %s", ttl_path)
+            
+            if subject_uris:
+                logger.info("Exporting %s task subjects to Turtle via neosemantics: %s", len(subject_uris), output_ttl_path)
+                scoped_cypher = build_subject_scoped_cypher(subject_uris)
+                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                ttl_path = str(ttl_file)
+                logger.info("Saved task Turtle file: %s", ttl_path)
+            else:
+                logger.warning("No task subjects to export, skipping TTL generation")
 
     finally:
         if not graph_closed:
@@ -1029,10 +1099,13 @@ def build_and_persist_defined_terms_rdf(
     total_triples = 0
     errors = 0
     graph_closed = False
+    subject_uris = []
 
     try:
         for idx, term_entry in enumerate(terms):
             try:
+                subject_uri = mint_defined_term_subject(term_entry)
+                subject_uris.append(subject_uri)
                 triples_added = build_defined_term_triples(graph, term_entry)
                 total_triples += triples_added
 
@@ -1055,10 +1128,15 @@ def build_and_persist_defined_terms_rdf(
             logger.info("Flushing graph writes before TTL export...")
             graph.close(True)
             graph_closed = True
-            logger.info("Exporting %s graph to Turtle via neosemantics: %s", entity_label, output_ttl_path)
-            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
-            ttl_path = str(ttl_file)
-            logger.info("Saved %s Turtle file: %s", entity_label, ttl_path)
+            
+            if subject_uris:
+                logger.info("Exporting %s %s subjects to Turtle via neosemantics: %s", len(subject_uris), entity_label, output_ttl_path)
+                scoped_cypher = build_subject_scoped_cypher(subject_uris)
+                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                ttl_path = str(ttl_file)
+                logger.info("Saved %s Turtle file: %s", entity_label, ttl_path)
+            else:
+                logger.warning("No %s subjects to export, skipping TTL generation", entity_label)
 
     finally:
         if not graph_closed:
@@ -1160,10 +1238,13 @@ def build_and_persist_languages_rdf(
     total_triples = 0
     errors = 0
     graph_closed = False
+    subject_uris = []
 
     try:
         for idx, language_entry in enumerate(languages):
             try:
+                subject_uri = mint_language_subject(language_entry)
+                subject_uris.append(subject_uri)
                 triples_added = build_language_triples(graph, language_entry)
                 total_triples += triples_added
 
@@ -1186,10 +1267,15 @@ def build_and_persist_languages_rdf(
             logger.info("Flushing graph writes before TTL export...")
             graph.close(True)
             graph_closed = True
-            logger.info("Exporting language graph to Turtle via neosemantics: %s", output_ttl_path)
-            export_graph_neosemantics(file_path=str(ttl_file), format="Turtle")
-            ttl_path = str(ttl_file)
-            logger.info("Saved language Turtle file: %s", ttl_path)
+            
+            if subject_uris:
+                logger.info("Exporting %s language subjects to Turtle via neosemantics: %s", len(subject_uris), output_ttl_path)
+                scoped_cypher = build_subject_scoped_cypher(subject_uris)
+                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                ttl_path = str(ttl_file)
+                logger.info("Saved language Turtle file: %s", ttl_path)
+            else:
+                logger.warning("No language subjects to export, skipping TTL generation")
 
     finally:
         if not graph_closed:
