@@ -96,6 +96,7 @@ services:
       - DAGSTER_POSTGRES_DB=${DAGSTER_POSTGRES_DB:-dagster}
       - DAGSTER_POSTGRES_HOST=dagster-postgres
       - DATA_DIR=${DATA_DIR:-/data}
+      - APP_CYPHER_QUERY_MAX_LEN=10000
     volumes:
       - ./etl:/opt/dagster/app/etl
       - ./etl_extractors:/opt/dagster/app/etl_extractors
