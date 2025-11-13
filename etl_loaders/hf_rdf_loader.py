@@ -23,39 +23,11 @@ from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, XSD
 from rdflib_neo4j import Neo4jStoreConfig
 
-from etl_loaders.rdf_store import namespaces, open_graph, export_graph_neosemantics
+from etl_loaders.rdf_store import namespaces, open_graph, export_graph_neosemantics_batched
 
 logger = logging.getLogger(__name__)
 
 
-def build_subject_scoped_cypher(subject_uris: List[str]) -> str:
-    """
-    Build a Cypher query to export triples for specific subject URIs.
-    
-    Returns all triples where the subject is in the provided list of URIs.
-    
-    Args:
-        subject_uris: List of subject URIs to filter by
-        
-    Returns:
-        Cypher query string for neosemantics export
-    """
-    if not subject_uris:
-        # Return query that matches nothing
-        return "MATCH (s:Resource) WHERE false RETURN s, null as r, null as o"
-    
-    # Escape single quotes in URIs and build list literal
-    escaped_uris = [uri.replace("'", "\\'") for uri in subject_uris]
-    uri_list = ", ".join(f"'{uri}'" for uri in escaped_uris)
-    
-    cypher = f"""
-WITH [{uri_list}] AS uris
-MATCH (s:Resource)-[r]->(o)
-WHERE s.uri IN uris
-RETURN s, r, o
-""".strip()
-    
-    return cypher
     
 
 def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
@@ -212,8 +184,7 @@ def build_and_persist_models_rdf(
             
             if subject_uris:
                 logger.info(f"Exporting {len(subject_uris)} model subjects to Turtle via neosemantics: {output_ttl_path}")
-                scoped_cypher = build_subject_scoped_cypher(subject_uris)
-                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                export_graph_neosemantics_batched(subject_uris=subject_uris, file_path=str(ttl_file), format="Turtle")
                 ttl_path = str(ttl_file)
                 logger.info(f"Saved Turtle file: {ttl_path}")
             else:
@@ -382,8 +353,7 @@ def build_and_persist_articles_rdf(
             
             if subject_uris:
                 logger.info(f"Exporting {len(subject_uris)} article subjects to Turtle via neosemantics: {output_ttl_path}")
-                scoped_cypher = build_subject_scoped_cypher(subject_uris)
-                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                export_graph_neosemantics_batched(subject_uris=subject_uris, file_path=str(ttl_file), format="Turtle")
                 ttl_path = str(ttl_file)
                 logger.info(f"Saved Turtle file: {ttl_path}")
             else:
@@ -523,8 +493,7 @@ def build_and_persist_licenses_rdf(
             
             if subject_uris:
                 logger.info("Exporting %s license subjects to Turtle via neosemantics: %s", len(subject_uris), output_ttl_path)
-                scoped_cypher = build_subject_scoped_cypher(subject_uris)
-                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                export_graph_neosemantics_batched(subject_uris=subject_uris, file_path=str(ttl_file), format="Turtle")
                 ttl_path = str(ttl_file)
                 logger.info("Saved license Turtle file: %s", ttl_path)
             else:
@@ -692,8 +661,7 @@ def build_and_persist_datasets_rdf(
             
             if subject_uris:
                 logger.info("Exporting %s dataset subjects to Turtle via neosemantics: %s", len(subject_uris), output_ttl_path)
-                scoped_cypher = build_subject_scoped_cypher(subject_uris)
-                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                export_graph_neosemantics_batched(subject_uris=subject_uris, file_path=str(ttl_file), format="Turtle")
                 ttl_path = str(ttl_file)
                 logger.info("Saved dataset Turtle file: %s", ttl_path)
             else:
@@ -1038,8 +1006,7 @@ def build_and_persist_tasks_rdf(
             
             if subject_uris:
                 logger.info("Exporting %s task subjects to Turtle via neosemantics: %s", len(subject_uris), output_ttl_path)
-                scoped_cypher = build_subject_scoped_cypher(subject_uris)
-                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                export_graph_neosemantics_batched(subject_uris=subject_uris, file_path=str(ttl_file), format="Turtle")
                 ttl_path = str(ttl_file)
                 logger.info("Saved task Turtle file: %s", ttl_path)
             else:
@@ -1131,8 +1098,7 @@ def build_and_persist_defined_terms_rdf(
             
             if subject_uris:
                 logger.info("Exporting %s %s subjects to Turtle via neosemantics: %s", len(subject_uris), entity_label, output_ttl_path)
-                scoped_cypher = build_subject_scoped_cypher(subject_uris)
-                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                export_graph_neosemantics_batched(subject_uris=subject_uris, file_path=str(ttl_file), format="Turtle")
                 ttl_path = str(ttl_file)
                 logger.info("Saved %s Turtle file: %s", entity_label, ttl_path)
             else:
@@ -1270,8 +1236,7 @@ def build_and_persist_languages_rdf(
             
             if subject_uris:
                 logger.info("Exporting %s language subjects to Turtle via neosemantics: %s", len(subject_uris), output_ttl_path)
-                scoped_cypher = build_subject_scoped_cypher(subject_uris)
-                export_graph_neosemantics(file_path=str(ttl_file), format="Turtle", cypher_query=scoped_cypher)
+                export_graph_neosemantics_batched(subject_uris=subject_uris, file_path=str(ttl_file), format="Turtle")
                 ttl_path = str(ttl_file)
                 logger.info("Saved language Turtle file: %s", ttl_path)
             else:

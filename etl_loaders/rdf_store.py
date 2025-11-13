@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Any, Dict, List, Union
 from urllib.parse import urlparse
 
@@ -394,4 +395,167 @@ def export_graph_neosemantics(
         raise RuntimeError(f"Failed to connect to Neosemantics endpoint: {e}")
     except Exception as e:
         raise RuntimeError(f"Failed to export graph using Neosemantics: {e}")
+
+
+def export_graph_neosemantics_batched(
+    subject_uris: List[str],
+    file_path: str,
+    format: str = "Turtle",
+    cfg: Optional[Neo4jConfig] = None,
+    max_chars_per_batch: int = 9500,  # Leave buffer under 10k limit
+) -> Dict[str, Any]:
+    """
+    Export graph triples for specific subjects in batches to avoid Neo4j character limits.
+
+    Neo4j has a ~10k character limit on Cypher queries. This function splits subject URIs
+    into batches to ensure each export stays under the limit.
+
+    Args:
+        subject_uris: List of subject URIs to export triples for
+        file_path: Path to write combined RDF output
+        format: RDF serialization format ("Turtle", etc.)
+        cfg: Neo4j configuration
+        max_chars_per_batch: Maximum characters per batch (default: 9500)
+
+    Returns:
+        Dict with export statistics
+    """
+    if not subject_uris:
+        logger.warning("No subject URIs provided for batched export")
+        # Write empty file
+        Path(file_path).write_text("", encoding="utf-8")
+        return {
+            "file_path": file_path,
+            "batches": 0,
+            "total_subjects": 0,
+            "success": True,
+        }
+
+    env_cfg = cfg or Neo4jConfig.from_env()
+    base_url = _build_http_base_url(env_cfg)
+    endpoint = f"{base_url}/rdf/{env_cfg.database}/cypher"
+
+    # Split URIs into batches based on estimated query length
+    batches = _batch_uris_by_query_length(subject_uris, max_chars_per_batch)
+    logger.info(f"Split {len(subject_uris)} subjects into {len(batches)} batches for export")
+
+    all_rdf_parts = []
+    total_chars = 0
+
+    for batch_idx, batch_uris in enumerate(batches):
+        logger.info(f"Exporting batch {batch_idx + 1}/{len(batches)} with {len(batch_uris)} subjects")
+
+        # Build scoped Cypher query for this batch
+        cypher = _build_batched_cypher_query(batch_uris)
+        payload = {"cypher": cypher, "format": format}
+
+        try:
+            response = requests.post(
+                endpoint,
+                json=payload,
+                auth=(env_cfg.user, env_cfg.password),
+                headers={"Content-Type": "application/json"},
+                timeout=120,  # Longer timeout for batches
+            )
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Batch {batch_idx + 1} failed: Neosemantics returned {response.status_code}: {response.text}"
+                )
+
+            rdf_content = response.text
+            batch_chars = len(rdf_content)
+            total_chars += batch_chars
+
+            logger.info(f"Batch {batch_idx + 1} exported {batch_chars} characters")
+            all_rdf_parts.append(rdf_content)
+
+        except requests.RequestException as e:
+            raise RuntimeError(f"Failed to export batch {batch_idx + 1}: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to export batch {batch_idx + 1}: {e}")
+
+    # Combine all RDF parts
+    combined_rdf = "\n".join(all_rdf_parts)
+
+    # Write to file
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(combined_rdf)
+
+    logger.info(
+        f"Successfully exported {len(subject_uris)} subjects in {len(batches)} batches "
+        f"({total_chars} total characters) to {file_path}"
+    )
+
+    return {
+        "file_path": file_path,
+        "format": format,
+        "batches": len(batches),
+        "total_subjects": len(subject_uris),
+        "total_characters": total_chars,
+        "endpoint": endpoint,
+        "success": True,
+    }
+
+
+def _batch_uris_by_query_length(uris: List[str], max_chars: int) -> List[List[str]]:
+    """
+    Split URIs into batches where each batch's Cypher query won't exceed max_chars.
+
+    Estimates query length based on URI lengths plus overhead.
+    """
+    if not uris:
+        return []
+
+    batches = []
+    current_batch = []
+    current_length = 0
+
+    # Base query overhead (excluding URIs)
+    base_query = """
+    WITH [] AS uris
+    MATCH (s:Resource)-[r]->(o)
+    WHERE s.uri IN uris
+    RETURN s, r, o
+    """.strip()
+    base_overhead = len(base_query) + 50  # Buffer for formatting
+
+    for uri in uris:
+        # Estimate length this URI adds: quoted + escaped + comma + space
+        uri_length = len(f"'{uri.replace(chr(39), chr(92) + chr(39))}'") + 2
+
+        # If adding this URI would exceed limit, start new batch
+        if current_batch and (current_length + uri_length + base_overhead > max_chars):
+            batches.append(current_batch)
+            current_batch = [uri]
+            current_length = uri_length
+        else:
+            current_batch.append(uri)
+            current_length += uri_length
+
+    # Add final batch
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
+
+
+def _build_batched_cypher_query(subject_uris: List[str]) -> str:
+    """
+    Build a Cypher query for a batch of subject URIs.
+    """
+    if not subject_uris:
+        return "MATCH (s:Resource) WHERE false RETURN s, null as r, null as o"
+
+    # Escape single quotes in URIs and build list literal
+    escaped_uris = [uri.replace("'", "\\'") for uri in subject_uris]
+    uri_list = ", ".join(f"'{uri}'" for uri in escaped_uris)
+
+    cypher = f"""
+    WITH [{uri_list}] AS uris
+    MATCH (s:Resource)-[r]->(o)
+    WHERE s.uri IN uris
+    RETURN s, r, o
+    """.strip()
+
+    return cypher
 
