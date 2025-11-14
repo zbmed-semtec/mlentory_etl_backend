@@ -10,20 +10,20 @@ description, and documentation properties.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
 import traceback
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, XSD
 from rdflib_neo4j import Neo4jStoreConfig
 
 from etl_loaders.rdf_store import namespaces, open_graph, export_graph_neosemantics_batched
+from etl_loaders.metadata_graph import ensure_metadata_graph_constraints, write_mlmodel_metadata
+from etl_loaders.load_helpers import LoadHelpers
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     triples_before = len(graph)
     
     # Mint subject IRI
-    subject_iri = mint_subject(model)
+    subject_iri = LoadHelpers.mint_subject(model)
     subject = URIRef(subject_iri)
     
     # Add rdf:type
@@ -109,22 +109,25 @@ def build_and_persist_models_rdf(
     json_path: str,
     config: Neo4jStoreConfig,
     output_ttl_path: Optional[str] = None,
+    write_metadata: bool = True,
 ) -> Dict[str, Any]:
     """
     Build RDF triples from normalized HF models and persist to Neo4j.
-    
+
     Args:
         json_path: Path to normalized models JSON (mlmodels.json)
         config: Neo4jStoreConfig for connecting to Neo4j
         output_ttl_path: Optional path to save Turtle file
-        
+        write_metadata: Whether to write metadata to parallel property graph (default: True)
+
     Returns:
         Dict with loading statistics:
         - models_processed: Number of models processed
         - triples_added: Total number of triples added
         - errors: Number of errors encountered
         - ttl_path: Path to saved Turtle file (if requested)
-        
+        - metadata_relationships: Number of metadata relationships created (if write_metadata=True)
+
     Raises:
         FileNotFoundError: If json_path doesn't exist
         ValueError: If JSON is invalid
@@ -145,21 +148,33 @@ def build_and_persist_models_rdf(
     # Open graph with Neo4j backend
     logger.info("Opening RDF graph with Neo4j backend...")
     graph = open_graph(config=config)
-    
+
+    # Ensure metadata graph constraints exist if writing metadata
+    if write_metadata:
+        logger.info("Ensuring metadata graph constraints...")
+        ensure_metadata_graph_constraints()
+
     # Build triples for each model and collect subject URIs
     total_triples = 0
     errors = 0
     graph_closed = False
     subject_uris = []
+    total_metadata_relationships = 0
+    run_timestamp = datetime.now()
     
     try:
         for idx, model in enumerate(models):
             try:
-                subject_uri = mint_subject(model)
+                subject_uri = LoadHelpers.mint_subject(model)
                 subject_uris.append(subject_uri)
                 triples_added = build_model_triples(graph, model)
                 total_triples += triples_added
-                
+
+                # Write metadata to parallel property graph if enabled
+                if write_metadata:
+                    metadata_relationships = write_mlmodel_metadata(model, run_timestamp)
+                    total_metadata_relationships += metadata_relationships
+
                 if (idx + 1) % 100 == 0:
                     logger.info(f"Processed {idx + 1}/{len(models)} models, "
                               f"added {total_triples} triples")
@@ -197,27 +212,26 @@ def build_and_persist_models_rdf(
             graph.close(True)
             logger.info("Graph closed, commits flushed")
     
-    return {
+    result = {
         "models_processed": len(models),
         "triples_added": total_triples,
         "errors": errors,
         "ttl_path": ttl_path,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": run_timestamp.isoformat(),
     }
+
+    if write_metadata:
+        result["metadata_relationships"] = total_metadata_relationships
+
+    return result
 
 def mint_article_subject(article: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a scholarly article.
-    
+
     Uses centralized logic shared across entity types.
     """
-    return mint_subject_generic(
-        entity=article,
-        kind="article",
-        identifier_predicate="https://schema.org/identifier",
-        url_predicate="https://schema.org/url",
-        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
-    )
+    return LoadHelpers.mint_article_subject(article)
 
 
 def build_article_triples(graph: Graph, article: Dict[str, Any]) -> int:
@@ -379,13 +393,7 @@ def mint_license_subject(license_data: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a CreativeWork license entity.
     """
-    return mint_subject_generic(
-        entity=license_data,
-        kind="license",
-        identifier_predicate="https://schema.org/identifier",
-        url_predicate="https://schema.org/url",
-        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
-    )
+    return LoadHelpers.mint_license_subject(license_data)
 
 
 def build_license_triples(graph: Graph, license_data: Dict[str, Any]) -> int:
@@ -517,16 +525,10 @@ def build_and_persist_licenses_rdf(
 def mint_dataset_subject(dataset_data: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a Croissant Dataset entity.
-    
+
     Uses centralized logic shared across entity types.
     """
-    return mint_subject_generic(
-        entity=dataset_data,
-        kind="dataset",
-        identifier_predicate="https://schema.org/identifier",
-        url_predicate="https://schema.org/url",
-        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
-    )
+    return LoadHelpers.mint_dataset_subject(dataset_data)
 
 
 def build_dataset_triples(graph: Graph, dataset_data: Dict[str, Any]) -> int:
@@ -682,85 +684,6 @@ def build_and_persist_datasets_rdf(
     }
 
 
-def is_iri(value: str) -> bool:
-    """
-    Check if a string is a valid IRI.
-    
-    Args:
-        value: String to check
-        
-    Returns:
-        True if value is a valid IRI, False otherwise
-    """
-    if not value or not isinstance(value, str):
-        return False
-    
-    try:
-        result = urlparse(value)
-        # Check if it has a scheme (http, https, etc.) and netloc (domain)
-        return bool(result.scheme and result.netloc)
-    except Exception:
-        return False
-
-
-def _strip_angle_brackets(value: str) -> str:
-    """Return value without surrounding angle brackets if present."""
-    if isinstance(value, str) and value.startswith("<") and value.endswith(">"):
-        return value[1:-1]
-    return value
-
-
-def mint_subject_generic(
-    entity: Dict[str, Any],
-    kind: str,
-    identifier_predicate: str = "https://schema.org/identifier",
-    url_predicate: str = "https://schema.org/url",
-    mlentory_graph_prefix: str = "https://w3id.org/mlentory/mlentory_graph/",
-) -> str:
-    """
-    Mint a subject IRI for an entity with consistent, centralized logic.
-    
-    Preference order:
-      1) An identifier that is an MLentory graph IRI (starts with mlentory_graph/).
-      2) Any other valid IRI from the identifiers list.
-      3) Hash-based IRI derived from the URL predicate.
-      4) Fallback hash-based IRI derived from the full payload.
-    
-    Args:
-        entity: Entity payload
-        kind: Kind label used in minted fallback IRIs (e.g., "model")
-        identifier_predicate: Predicate for identifiers
-        url_predicate: Predicate for the canonical URL
-        mlentory_graph_prefix: MLentory IRI prefix to prioritize
-    
-    Returns:
-        Subject IRI as a string
-    """
-    identifiers = entity.get(identifier_predicate, [])
-    if isinstance(identifiers, str):
-        identifiers = [identifiers]
-    
-    # Prefer MLentory IRIs
-    if identifiers and isinstance(identifiers, list):
-        for identifier in identifiers:
-            normalized = _strip_angle_brackets(identifier)
-            if isinstance(normalized, str) and normalized.startswith(mlentory_graph_prefix):
-                return normalized
-        # Otherwise any valid IRI
-        for identifier in identifiers:
-            normalized = _strip_angle_brackets(identifier)
-            if is_iri(normalized):
-                return normalized
-    
-    # Fallback: mint IRI from URL
-    url = entity.get(url_predicate, "")
-    if isinstance(url, str) and url:
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        return f"https://w3id.org/mlentory/{kind}/{url_hash}"
-    
-    # Ultimate fallback: hash of entire payload
-    payload_hash = hashlib.sha256(json.dumps(entity, sort_keys=True).encode()).hexdigest()
-    return f"https://w3id.org/mlentory/{kind}/{payload_hash}"
 
 
 def to_xsd_datetime(value: Any) -> Optional[str]:
@@ -799,19 +722,6 @@ def to_xsd_datetime(value: Any) -> Optional[str]:
         return None
 
 
-def mint_subject(model: Dict[str, Any]) -> str:
-    """
-    Mint a subject IRI for a model.
-    
-    Uses centralized logic shared across entity types.
-    """
-    return mint_subject_generic(
-        entity=model,
-        kind="model",
-        identifier_predicate="https://schema.org/identifier",
-        url_predicate="https://schema.org/url",
-        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
-    )
 
 
 def add_literal_or_iri(
@@ -868,7 +778,7 @@ def create_triple(graph: Graph, subject: URIRef, predicate: URIRef, value: Any, 
         return False
     
     # Check if it's an IRI
-    if is_iri(value_str):
+    if LoadHelpers.is_iri(value_str):
         graph.add((subject, predicate, URIRef(value_str)))
         logger.debug(f"Added IRI triple: <{subject}> <{predicate}> <{value_str}>")
     else:
@@ -885,16 +795,10 @@ def create_triple(graph: Graph, subject: URIRef, predicate: URIRef, value: Any, 
 def mint_defined_term_subject(term_data: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a DefinedTerm entity.
-    
+
     Uses centralized logic shared across entity types.
     """
-    return mint_subject_generic(
-        entity=term_data,
-        kind="term",
-        identifier_predicate="https://schema.org/identifier",
-        url_predicate="https://schema.org/url",
-        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
-    )
+    return LoadHelpers.mint_defined_term_subject(term_data)
 
 
 def build_defined_term_triples(graph: Graph, term_data: Dict[str, Any]) -> int:
@@ -1122,16 +1026,10 @@ def build_and_persist_defined_terms_rdf(
 def mint_language_subject(language_data: Dict[str, Any]) -> str:
     """
     Mint a subject IRI for a Language entity.
-    
+
     Uses centralized logic shared across entity types.
     """
-    return mint_subject_generic(
-        entity=language_data,
-        kind="language",
-        identifier_predicate="https://schema.org/identifier",
-        url_predicate="https://schema.org/url",
-        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
-    )
+    return LoadHelpers.mint_language_subject(language_data)
 
 
 def build_language_triples(graph: Graph, language_data: Dict[str, Any]) -> int:
