@@ -28,6 +28,11 @@ from etl_loaders.hf_rdf_loader import (
     build_and_persist_languages_rdf,
     build_and_persist_defined_terms_rdf,
 )
+from etl_loaders.metadata_graph import (
+    ensure_metadata_graph_constraints,
+    cleanup_metadata_graph,
+    build_and_export_metadata_rdf,
+)
 from etl_loaders.rdf_store import (
     get_neo4j_store_config_from_env,
     Neo4jConfig,
@@ -188,6 +193,88 @@ def hf_load_models_to_neo4j(
     logger.info(f"Models load report also saved to: {rdf_report_path}")
     
     return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "models_loaded": AssetIn("hf_load_models_to_neo4j"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_export_metadata_rdf(
+    models_loaded: Tuple[str, str],
+    store_ready: Dict[str, Any],
+) -> str:
+    """
+    Export the MLModel metadata property graph as RDF triples.
+
+    Converts the parallel Neo4j property graph containing extraction metadata
+    for MLModel properties into RDF triples and saves them as a Turtle file.
+
+    Args:
+        models_loaded: Tuple from hf_load_models_to_neo4j (report_path, normalized_folder)
+        store_ready: Store readiness status from hf_rdf_store_ready
+
+    Returns:
+        Path to the metadata RDF export report
+
+    Raises:
+        Exception: If metadata export fails
+    """
+    models_report_path, normalized_folder = models_loaded
+
+    logger.info(f"Exporting metadata RDF from models loaded in: {models_report_path}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    # Get Neo4j store config
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    # Create RDF output directory parallel to normalized
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "hf"
+    rdf_run_folder = rdf_base / normalized_path.name  # Same run ID as normalized
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Metadata RDF outputs will be saved to: {rdf_run_folder}")
+
+    # Output Turtle file path
+    ttl_path = rdf_run_folder / "metadata.ttl"
+
+    # Export metadata as RDF
+    logger.info("Exporting metadata property graph as RDF triples...")
+    export_stats = build_and_export_metadata_rdf(
+        output_ttl_path=str(ttl_path),
+        cfg=config,
+    )
+
+    logger.info(
+        f"Metadata RDF export complete: {export_stats['triples_added']} triples"
+    )
+
+    # Write export report
+    report = {
+        "models_report_input": models_report_path,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **export_stats,
+    }
+
+    # Save report to RDF folder
+    rdf_report_path = rdf_run_folder / "metadata_export_report.json"
+    with open(rdf_report_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Metadata export report saved to: {rdf_report_path}")
+
+    return str(rdf_report_path)
 
 
 @asset(
