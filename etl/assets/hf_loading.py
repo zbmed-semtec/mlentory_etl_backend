@@ -79,7 +79,7 @@ def hf_rdf_store_ready() -> Dict[str, Any]:
         # Initialize/ensure n10s according to environment flag
         reset_flag = os.getenv("N10S_RESET_ON_CONFIG_CHANGE", "false").lower() == "true"
         desired_cfg = {"keepCustomDataTypes": True, "handleVocabUris": "SHORTEN"}
-        reset_database(drop_config=False)
+
         if reset_flag:
             logger.warning("N10S_RESET_ON_CONFIG_CHANGE=true → resetting database and re-initializing n10s")
             reset_database(drop_config=True)
