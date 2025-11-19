@@ -3,7 +3,7 @@ MLModel Metadata Property Graph.
 
 Provides a parallel Neo4j property graph to track extraction metadata for all
 MLModel properties and relations, enabling reconstruction of MLModel states
-at specific points in time.
+at specific points in time using validity intervals.
 
 This graph tracks how and when each property was extracted, allowing for
 provenance and temporal reconstruction of MLModel entities.
@@ -11,6 +11,8 @@ provenance and temporal reconstruction of MLModel entities.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -28,11 +30,36 @@ logger = logging.getLogger(__name__)
 METADATA_ALIAS = "https://w3id.org/mlentory/mlentory_graph/meta/"
 
 
+def _generate_snapshot_hash(snapshot: Dict[str, Any]) -> str:
+    """
+    Generate a deterministic hash for a property snapshot.
+
+    Args:
+        snapshot: Dictionary containing snapshot properties
+
+    Returns:
+        SHA256 hash string representing the snapshot content
+    """
+    # Create a normalized representation for hashing
+    hash_data = {
+        "predicate_iri": snapshot["predicate_iri"],
+        "value": snapshot.get("value"),
+        "value_uri": snapshot.get("value_uri"),
+        "extraction_method": snapshot.get("extraction_method"),
+        "confidence": snapshot.get("confidence"),
+        "notes": snapshot.get("notes"),
+    }
+
+    # Convert to JSON string with sorted keys for deterministic hashing
+    hash_str = json.dumps(hash_data, sort_keys=True, default=str)
+    return hashlib.sha256(hash_str.encode('utf-8')).hexdigest()
+
+
 def ensure_metadata_graph_constraints(cfg: Optional[Neo4jConfig] = None) -> None:
     """
-    Ensure Neo4j constraints exist for the metadata property graph.
+    Ensure Neo4j constraints exist for the temporal metadata property graph.
 
-    Creates unique constraints on MLModelMeta.uri and MLModelProperty.iri
+    Creates unique constraints on MLModel.uri and indexes on MLModelPropertySnapshot
     to ensure data integrity and enable efficient lookups.
 
     Args:
@@ -40,62 +67,71 @@ def ensure_metadata_graph_constraints(cfg: Optional[Neo4jConfig] = None) -> None
     """
     env_cfg = cfg or Neo4jConfig.from_env()
 
-    # Create unique constraint for MLModelMeta nodes
+    # Create unique constraint for MLModel nodes
     _run_cypher(
         """
-        CREATE CONSTRAINT mlmodel_meta_unique IF NOT EXISTS
-        FOR (m:MLModelMeta) REQUIRE m.uri IS UNIQUE
+        CREATE CONSTRAINT mlmodel_unique IF NOT EXISTS
+        FOR (m:MLModel) REQUIRE m.uri IS UNIQUE
         """,
         cfg=env_cfg,
     )
 
-    # Create unique constraint for MLModelProperty nodes
+    # Create index on MLModelPropertySnapshot predicate_iri for faster diffing
     _run_cypher(
         """
-        CREATE CONSTRAINT mlmodel_property_unique IF NOT EXISTS
-        FOR (p:MLModelProperty) REQUIRE p.iri IS UNIQUE
+        CREATE INDEX mlmodel_property_snapshot_predicate IF NOT EXISTS
+        FOR (p:MLModelPropertySnapshot) ON (p.predicate_iri)
         """,
         cfg=env_cfg,
     )
 
-    logger.info("Ensured metadata graph constraints exist")
+    # # Create index on MLModelPropertySnapshot value for faster diffing
+    # _run_cypher(
+    #     """
+    #     CREATE INDEX mlmodel_property_snapshot_value IF NOT EXISTS
+    #     FOR (p:MLModelPropertySnapshot) ON (p.value)
+    #     """,
+    #     cfg=env_cfg,
+    # )
+
+    # # Create index on MLModelPropertySnapshot value_uri for faster diffing
+    # _run_cypher(
+    #     """
+    #     CREATE INDEX mlmodel_property_snapshot_value_uri IF NOT EXISTS
+    #     FOR (p:MLModelPropertySnapshot) ON (p.value_uri)
+    #     """,
+    #     cfg=env_cfg,
+    # )
+
+    # Create index on MLModelPropertySnapshot snapshot_hash for fast change detection
+    _run_cypher(
+        """
+        CREATE INDEX mlmodel_property_snapshot_hash IF NOT EXISTS
+        FOR (p:MLModelPropertySnapshot) ON (p.snapshot_hash)
+        """,
+        cfg=env_cfg,
+    )
+
+    logger.info("Ensured temporal metadata graph constraints exist")
 
 
-def write_mlmodel_metadata(
+def _extract_property_snapshots(
     model: Dict[str, Any],
-    extracted_at: datetime,
-    cfg: Optional[Neo4jConfig] = None,
-) -> int:
+    extraction_meta: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     """
-    Write metadata for all properties of an MLModel to the property graph.
-
-    For each property in the model (excluding metadata), creates or updates
-    the metadata graph with extraction information including timestamp,
-    method, confidence, and notes.
+    Extract property-value snapshots from a model dictionary.
 
     Args:
-        model: Normalized MLModel dictionary with FAIR4ML properties
-        extracted_at: Timestamp when this extraction occurred
-        cfg: Neo4j configuration. If None, loads from environment.
+        model: Normalized MLModel dictionary
+        extraction_meta: Metadata dictionary for properties
 
     Returns:
-        Number of HAS_PROPERTY relationships created
-
-    Raises:
-        ValueError: If model is missing required identifier/name fields
+        List of snapshot dictionaries with keys: predicate_iri, value, value_uri,
+        extraction_method, confidence, notes
     """
+    snapshots = []
 
-    env_cfg = cfg or Neo4jConfig.from_env()
-
-    # Get the model URI using the same logic as RDF loader
-    model_uri = LoadHelpers.mint_subject(model)
-
-    # Get extraction metadata if available
-    extraction_meta = model.get(METADATA_ALIAS, {})
-
-    relationships_created = 0
-
-    # Iterate through all model properties that look like IRIs (exclude metadata)
     for predicate_iri, value in model.items():
         if not isinstance(predicate_iri, str):
             continue
@@ -106,12 +142,18 @@ def write_mlmodel_metadata(
 
         # Get extraction metadata for this property
         prop_meta = extraction_meta.get(predicate_iri)
-        if prop_meta:
-            extraction_method = getattr(prop_meta, 'extraction_method', 'unknown')
-            confidence = getattr(prop_meta, 'confidence', 1.0)
-            notes = getattr(prop_meta, 'notes', None)
+        if isinstance(prop_meta, dict):
+            # Metadata provided as a plain dictionary
+            extraction_method = prop_meta.get("extraction_method", "unknown")
+            confidence = prop_meta.get("confidence", 1.0)
+            notes = prop_meta.get("notes")
+        elif prop_meta is not None:
+            # Fallback for object-style metadata (with attributes)
+            extraction_method = getattr(prop_meta, "extraction_method", "unknown")
+            confidence = getattr(prop_meta, "confidence", 1.0)
+            notes = getattr(prop_meta, "notes", None)
         else:
-            extraction_method = 'unknown'
+            extraction_method = "unknown"
             confidence = 1.0
             notes = None
 
@@ -121,7 +163,7 @@ def write_mlmodel_metadata(
         else:
             values = value
 
-        # Write metadata for each value
+        # Create snapshot for each value
         for val in values:
             if val is None:
                 continue
@@ -134,36 +176,149 @@ def write_mlmodel_metadata(
                 value_param = str(val)
                 value_uri_param = None
 
-            # Create the HAS_PROPERTY relationship
+            snapshot = {
+                "predicate_iri": predicate_iri,
+                "value": value_param,
+                "value_uri": value_uri_param,
+                "extraction_method": extraction_method,
+                "confidence": confidence,
+                "notes": notes,
+            }
+            snapshot["snapshot_hash"] = _generate_snapshot_hash(snapshot)
+            snapshots.append(snapshot)
+
+    return snapshots
+
+
+def write_mlmodel_metadata(
+    model: Dict[str, Any],
+    extracted_at: datetime,
+    cfg: Optional[Neo4jConfig] = None,
+) -> int:
+    """
+    Write metadata for all properties of an MLModel to the temporal property graph.
+
+    Only creates new property snapshots when properties actually change, using
+    validity intervals to track temporal changes efficiently.
+
+    Args:
+        model: Normalized MLModel dictionary with FAIR4ML properties
+        extracted_at: Timestamp when this extraction occurred
+        cfg: Neo4j configuration. If None, loads from environment.
+
+    Returns:
+        Number of new HAS_PROPERTY_SNAPSHOT relationships created
+
+    Raises:
+        ValueError: If model is missing required identifier/name fields
+    """
+    env_cfg = cfg or Neo4jConfig.from_env()
+
+    # Get the model URI using the same logic as RDF loader
+    model_uri = LoadHelpers.mint_subject(model)
+
+    # Get extraction metadata if available
+    extraction_meta = model.get(METADATA_ALIAS, {})
+
+    # Extract current property snapshots
+    current_snapshots = _extract_property_snapshots(model, extraction_meta)
+
+    # Query existing active snapshots (valid_to is null) and their hashes
+    existing_results = _run_cypher(
+        """
+        MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+        WHERE r.valid_to IS NULL
+        RETURN p.snapshot_hash as snapshot_hash, id(p) as snapshot_id
+        """,
+        {"model_uri": model_uri},
+        cfg=env_cfg,
+    )
+
+    # Create set of existing snapshot hashes for fast lookup
+    existing_hashes = {record["snapshot_hash"] for record in existing_results}
+    existing_snapshot_ids = {record["snapshot_hash"]: record["snapshot_id"] for record in existing_results}
+
+    # Create set of current snapshot hashes
+    current_hashes = {snapshot["snapshot_hash"] for snapshot in current_snapshots}
+
+    relationships_created = 0
+
+    # Process current snapshots
+    for snapshot in current_snapshots:
+        snapshot_hash = snapshot["snapshot_hash"]
+
+        if snapshot_hash in existing_hashes:
+            # Snapshot already exists and is identical, keep it active
+            continue
+        else:
+            # Check if this exact snapshot existed before (but was closed)
+            # If so, we need to close the old one first
+            if snapshot_hash in existing_snapshot_ids:
+                # Close the existing relationship for this hash
+                _run_cypher(
+                    """
+                    MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+                    WHERE id(p) = $snapshot_id
+                    SET r.valid_to = datetime($extracted_at)
+                    """,
+                    {
+                        "model_uri": model_uri,
+                        "snapshot_id": existing_snapshot_ids[snapshot_hash],
+                        "extracted_at": extracted_at.isoformat(),
+                    },
+                    cfg=env_cfg,
+                )
+
+            # Create new snapshot node and relationship
             _run_cypher(
                 """
-                MERGE (m:MLModelMeta {uri: $model_uri})
-                MERGE (p:MLModelProperty {iri: $predicate_iri})
-                CREATE (m)-[:HAS_PROPERTY {
+                MERGE (m:MLModel {uri: $model_uri})
+                CREATE (m)-[:HAS_PROPERTY_SNAPSHOT {
+                    valid_from: datetime($extracted_at),
+                    valid_to: null
+                }]->(:MLModelPropertySnapshot {
+                    predicate_iri: $predicate_iri,
                     value: $value,
                     value_uri: $value_uri,
-                    extracted_at: datetime($extracted_at),
                     extraction_method: $extraction_method,
                     confidence: $confidence,
-                    notes: $notes
-                }]->(p)
+                    notes: $notes,
+                    snapshot_hash: $snapshot_hash
+                })
                 """,
                 {
                     "model_uri": model_uri,
-                    "predicate_iri": predicate_iri,
-                    "value": value_param,
-                    "value_uri": value_uri_param,
+                    "predicate_iri": snapshot["predicate_iri"],
+                    "value": snapshot["value"],
+                    "value_uri": snapshot["value_uri"],
+                    "extraction_method": snapshot["extraction_method"],
+                    "confidence": snapshot["confidence"],
+                    "notes": snapshot["notes"],
+                    "snapshot_hash": snapshot_hash,
                     "extracted_at": extracted_at.isoformat(),
-                    "extraction_method": extraction_method,
-                    "confidence": confidence,
-                    "notes": notes,
+                },
+                cfg=env_cfg,
+            )
+            relationships_created += 1
+
+    # Close validity intervals for removed properties (snapshots that existed but are no longer present)
+    for existing_hash in existing_hashes:
+        if existing_hash not in current_hashes:
+            _run_cypher(
+                """
+                MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+                WHERE p.snapshot_hash = $snapshot_hash AND r.valid_to IS NULL
+                SET r.valid_to = datetime($extracted_at)
+                """,
+                {
+                    "model_uri": model_uri,
+                    "snapshot_hash": existing_hash,
+                    "extracted_at": extracted_at.isoformat(),
                 },
                 cfg=env_cfg,
             )
 
-            relationships_created += 1
-
-    logger.debug(f"Created {relationships_created} metadata relationships for model {model_uri}")
+    logger.debug(f"Created {relationships_created} new metadata snapshots for model {model_uri}")
     return relationships_created
 
 
@@ -173,15 +328,14 @@ def reconstruct_mlmodel_at(
     cfg: Optional[Neo4jConfig] = None,
 ) -> Dict[str, List[str]]:
     """
-    Reconstruct an MLModel's state at a specific point in time.
+    Reconstruct an MLModel's state at a specific point in time using validity intervals.
 
-    For each property, finds all relationships with extracted_at <= the given
-    timestamp and returns the values from the most recent extraction for each
-    property at that time.
+    For each property, finds all active HAS_PROPERTY_SNAPSHOT relationships
+    where valid_from <= timestamp and (valid_to is null or valid_to > timestamp).
 
     Args:
         model_uri: URI of the MLModel to reconstruct
-        at: Timestamp to reconstruct state at (inclusive)
+        at: Timestamp to reconstruct state at (inclusive for valid_from, exclusive for valid_to)
         cfg: Neo4j configuration. If None, loads from environment.
 
     Returns:
@@ -192,12 +346,9 @@ def reconstruct_mlmodel_at(
 
     results = _run_cypher(
         """
-        MATCH (m:MLModelMeta {uri: $model_uri})-[r:HAS_PROPERTY]->(p:MLModelProperty)
-        WHERE r.extracted_at <= datetime($at)
-        WITH p, max(r.extracted_at) AS latest_ts
-        MATCH (m:MLModelMeta {uri: $model_uri})-[r:HAS_PROPERTY]->(p:MLModelProperty)
-        WHERE r.extracted_at = latest_ts
-        RETURN p.iri AS predicate, collect(coalesce(r.value, r.value_uri)) AS values
+        MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+        WHERE r.valid_from <= datetime($at) AND (r.valid_to IS NULL OR r.valid_to > datetime($at))
+        RETURN p.predicate_iri AS predicate, collect(coalesce(p.value, p.value_uri)) AS values
         """,
         {
             "model_uri": model_uri,
@@ -218,12 +369,47 @@ def reconstruct_mlmodel_at(
     return reconstruction
 
 
+def cleanup_model_metadata(model_uri: str, cfg: Optional[Neo4jConfig] = None) -> None:
+    """
+    Remove metadata graph nodes and relationships for a specific model.
+
+    Used for testing to ensure a clean slate for specific model tests.
+
+    Args:
+        model_uri: URI of the model to clean up
+        cfg: Neo4j configuration. If None, loads from environment.
+    """
+    env_cfg = cfg or Neo4jConfig.from_env()
+
+    # Delete all metadata relationships and nodes for this specific model
+    _run_cypher(
+        """
+        MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+        DELETE r, p
+        """,
+        {"model_uri": model_uri},
+        cfg=env_cfg,
+    )
+
+    # Delete the model node itself
+    _run_cypher(
+        """
+        MATCH (m:MLModel {uri: $model_uri})
+        DELETE m
+        """,
+        {"model_uri": model_uri},
+        cfg=env_cfg,
+    )
+
+    logger.debug(f"Cleaned up metadata for model {model_uri}")
+
+
 def cleanup_metadata_graph(cfg: Optional[Neo4jConfig] = None) -> None:
     """
-    Remove all metadata graph nodes and relationships.
+    Remove all temporal metadata graph nodes and relationships.
 
-    Used for testing - removes all MLModelMeta and MLModelProperty nodes
-    and their relationships. Does not affect the RDF graph.
+    Used for testing - removes all MLModel and MLModelPropertySnapshot nodes
+    and their HAS_PROPERTY_SNAPSHOT relationships. Does not affect the RDF graph.
 
     Args:
         cfg: Neo4j configuration. If None, loads from environment.
@@ -233,17 +419,17 @@ def cleanup_metadata_graph(cfg: Optional[Neo4jConfig] = None) -> None:
     # Delete all metadata relationships and nodes
     _run_cypher(
         """
-        MATCH (m:MLModelMeta)-[r:HAS_PROPERTY]->(p:MLModelProperty)
+        MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
         DELETE r, m, p
         """,
         cfg=env_cfg,
     )
 
     # Also delete any orphaned nodes (though the above should handle it)
-    _run_cypher("MATCH (m:MLModelMeta) DELETE m", cfg=env_cfg)
-    _run_cypher("MATCH (p:MLModelProperty) DELETE p", cfg=env_cfg)
+    _run_cypher("MATCH (m:MLModel) DELETE m", cfg=env_cfg)
+    _run_cypher("MATCH (p:MLModelPropertySnapshot) DELETE p", cfg=env_cfg)
 
-    logger.info("Cleaned up metadata graph")
+    logger.info("Cleaned up temporal metadata graph")
 
 
 def build_and_export_metadata_rdf(
@@ -251,10 +437,10 @@ def build_and_export_metadata_rdf(
     cfg: Optional[Neo4jConfig] = None,
 ) -> Dict[str, Any]:
     """
-    Export the metadata property graph as RDF triples.
+    Export the temporal metadata property graph as RDF triples.
 
     Queries the metadata graph and converts it to RDF triples using custom
-    namespaces for the metadata schema.
+    namespaces for the metadata schema, including validity intervals.
 
     Args:
         output_ttl_path: Optional path to save Turtle file
@@ -279,16 +465,17 @@ def build_and_export_metadata_rdf(
     graph.bind("rdf", RDF)
     graph.bind("xsd", XSD)
 
-    # Query metadata relationships
+    # Query metadata snapshots with validity intervals
     results = _run_cypher(
         """
-        MATCH (m:MLModelMeta)-[r:HAS_PROPERTY]->(p:MLModelProperty)
-        RETURN m.uri as model_uri, p.iri as property_iri,
-               r.value as value, r.value_uri as value_uri,
-               r.extracted_at as extracted_at,
-               r.extraction_method as extraction_method,
-               r.confidence as confidence,
-               r.notes as notes
+        MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+        RETURN m.uri as model_uri, p.predicate_iri as property_iri,
+               p.value as value, p.value_uri as value_uri,
+               r.valid_from as valid_from, r.valid_to as valid_to,
+               p.extraction_method as extraction_method,
+               p.confidence as confidence,
+               p.notes as notes,
+               p.snapshot_hash as snapshot_hash
         """,
         cfg=env_cfg,
     )
@@ -296,8 +483,8 @@ def build_and_export_metadata_rdf(
     triples_added = 0
 
     for record in results:
-        # Create blank node for the extraction event
-        extraction_event = BNode()
+        # Create blank node for the property snapshot
+        snapshot_event = BNode()
 
         # Add the extraction event as a triple
         model_uri = URIRef(record["model_uri"])
@@ -309,22 +496,27 @@ def build_and_export_metadata_rdf(
         elif record["value_uri"] is not None:
             graph.add((model_uri, property_iri, URIRef(record["value_uri"])))
 
-        # Add metadata about the extraction
-        graph.add((model_uri, MLENTORY_META.extractionEvent, extraction_event))
-        graph.add((extraction_event, MLENTORY_META.property, property_iri))
-        graph.add((extraction_event, MLENTORY_META.extractedAt,
-                  Literal(record["extracted_at"], datatype=XSD.dateTime)))
-        graph.add((extraction_event, MLENTORY_META.extractionMethod,
+        # Add metadata about the snapshot with validity intervals
+        graph.add((model_uri, MLENTORY_META.propertySnapshot, snapshot_event))
+        graph.add((snapshot_event, MLENTORY_META.property, property_iri))
+        graph.add((snapshot_event, MLENTORY_META.validFrom,
+                  Literal(record["valid_from"], datatype=XSD.dateTime)))
+        graph.add((snapshot_event, MLENTORY_META.extractionMethod,
                   Literal(record["extraction_method"])))
-        graph.add((extraction_event, MLENTORY_META.confidence,
+        graph.add((snapshot_event, MLENTORY_META.confidence,
                   Literal(record["confidence"], datatype=XSD.decimal)))
 
         if record["notes"]:
-            graph.add((extraction_event, MLENTORY_META.notes, Literal(record["notes"])))
+            graph.add((snapshot_event, MLENTORY_META.notes, Literal(record["notes"])))
+
+        # Add valid_to if not null
+        if record["valid_to"] is not None:
+            graph.add((snapshot_event, MLENTORY_META.validTo,
+                      Literal(record["valid_to"], datatype=XSD.dateTime)))
 
         triples_added += 1
 
-    logger.info(f"Exported {triples_added} metadata triples as RDF")
+    logger.info(f"Exported {triples_added} temporal metadata triples as RDF")
 
     # Save Turtle file if requested
     ttl_path = None
@@ -334,7 +526,7 @@ def build_and_export_metadata_rdf(
 
         graph.serialize(destination=str(ttl_file), format="turtle")
         ttl_path = str(ttl_file)
-        logger.info(f"Saved metadata RDF to Turtle file: {ttl_path}")
+        logger.info(f"Saved temporal metadata RDF to Turtle file: {ttl_path}")
 
     return {
         "triples_added": triples_added,
