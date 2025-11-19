@@ -102,6 +102,7 @@ services:
       - ./etl_extractors:/opt/dagster/app/etl_extractors
       - ./etl_transformers:/opt/dagster/app/etl_transformers
       - ./etl_loaders:/opt/dagster/app/etl_loaders
+      - ./tests:/opt/dagster/app/tests
       - ./schemas:/opt/dagster/app/schemas
       - ./data:/data
       - dagster_home:/opt/dagster/dagster_home
