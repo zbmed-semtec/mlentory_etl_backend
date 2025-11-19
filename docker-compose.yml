@@ -35,8 +35,8 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.2
     container_name: mlentory-elasticsearch
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      - "9201:9200"
+      - "9301:9300"
     environment:
       - node.name=elastic
       - "transport.host=localhost"
