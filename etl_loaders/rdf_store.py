@@ -273,6 +273,9 @@ def reset_database(drop_config: bool = True, cfg: Optional[Neo4jConfig] = None) 
     """
     logger.warning("Resetting Neo4j database: deleting all nodes and relationships...")
     _run_cypher("MATCH (n) DETACH DELETE n", cfg=cfg)
+    # Delete all indexes and constraints
+    _run_cypher("CALL apoc.schema.assert({},{},true) YIELD label, key RETURN *", cfg=cfg)
+    
     if drop_config:
         try:
             _run_cypher("CALL n10s.graphconfig.drop()", cfg=cfg)
