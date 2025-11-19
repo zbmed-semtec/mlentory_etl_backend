@@ -37,6 +37,8 @@ services:
     ports:
       - "9201:9200"
       - "9301:9300"
+    env_file:
+      - .env
     environment:
       - node.name=elastic
       - "transport.host=localhost"
@@ -49,7 +51,7 @@ services:
       # - "bootstrap.system_call_filter=false"   # Is not required for version 8.0 and above
       # - node.max_local_storage_nodes=2
       # Disk watermark settings to prevent allocation issues when disk is nearly full
-      - "cluster.routing.allocation.disk.watermark.low=85%"  # Start warning at 85% disk usage
+      - "cluster.routing.allocation.disk.watermark.low=95%"  # Start warning at 85% disk usage
       - "cluster.routing.allocation.disk.watermark.high=97%" # High watermark at 97% as requested
       - "cluster.routing.allocation.disk.watermark.flood_stage=98%" # Flood stage at 98%
       - "cluster.info.update.interval=1m" # Update cluster info every minute
