@@ -28,6 +28,7 @@ from etl_loaders.hf_rdf_loader import (
     build_and_persist_languages_rdf,
     build_and_persist_defined_terms_rdf,
 )
+from etl_loaders.hf_index_loader import index_hf_models
 from etl_loaders.metadata_graph import (
     ensure_metadata_graph_constraints,
     cleanup_metadata_graph,
@@ -78,6 +79,7 @@ def hf_rdf_store_ready() -> Dict[str, Any]:
         # Initialize/ensure n10s according to environment flag
         reset_flag = os.getenv("N10S_RESET_ON_CONFIG_CHANGE", "false").lower() == "true"
         desired_cfg = {"keepCustomDataTypes": True, "handleVocabUris": "SHORTEN"}
+        reset_database(drop_config=False)
         if reset_flag:
             logger.warning("N10S_RESET_ON_CONFIG_CHANGE=true → resetting database and re-initializing n10s")
             reset_database(drop_config=True)
@@ -198,6 +200,45 @@ def hf_load_models_to_neo4j(
 @asset(
     group_name="hf_loading",
     ins={
+        "normalized_models": AssetIn("hf_models_normalized"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "index"},
+)
+def hf_index_models_elasticsearch(
+    normalized_models: Tuple[str, str],
+) -> Dict[str, Any]:
+    """Index normalized HF models into Elasticsearch for search.
+
+    This asset reads the normalized HF FAIR4ML models JSON (`mlmodels.json`)
+    and indexes a subset of properties into an Elasticsearch index using
+    the `HFModelDocument` defined in `etl_loaders.hf_index_loader`.
+
+    The target index name and connection details are configured via env vars
+    (see `ElasticsearchConfig.from_env`).
+
+    Args:
+        normalized_models: Tuple of (mlmodels_json_path, normalized_folder)
+
+    Returns:
+        Dictionary of indexing statistics (models_indexed, errors, index, input_file).
+    """
+    mlmodels_json_path, normalized_folder = normalized_models
+
+    logger.info(
+        "Indexing normalized HF models into Elasticsearch from %s "
+        "(normalized_folder=%s)",
+        mlmodels_json_path,
+        normalized_folder,
+    )
+
+    stats = index_hf_models(json_path=mlmodels_json_path)
+    stats["normalized_folder"] = normalized_folder
+    return stats
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
         "models_loaded": AssetIn("hf_load_models_to_neo4j"),
         "store_ready": AssetIn("hf_rdf_store_ready"),
     },
@@ -250,8 +291,7 @@ def hf_export_metadata_rdf(
     # Export metadata as RDF
     logger.info("Exporting metadata property graph as RDF triples...")
     export_stats = build_and_export_metadata_rdf(
-        output_ttl_path=str(ttl_path),
-        cfg=config,
+        output_ttl_path=str(ttl_path)
     )
 
     logger.info(
