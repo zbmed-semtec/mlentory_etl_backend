@@ -228,7 +228,7 @@ def write_mlmodel_metadata(
         """
         MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
         WHERE r.valid_to IS NULL
-        RETURN p.snapshot_hash as snapshot_hash, id(p) as snapshot_id
+        RETURN p.snapshot_hash as snapshot_hash
         """,
         {"model_uri": model_uri},
         cfg=env_cfg,
@@ -236,87 +236,64 @@ def write_mlmodel_metadata(
 
     # Create set of existing snapshot hashes for fast lookup
     existing_hashes = {record["snapshot_hash"] for record in existing_results}
-    existing_snapshot_ids = {record["snapshot_hash"]: record["snapshot_id"] for record in existing_results}
 
     # Create set of current snapshot hashes
     current_hashes = {snapshot["snapshot_hash"] for snapshot in current_snapshots}
 
+    # Find snapshots that need to be created/updated (not already active)
+    new_snapshots = [
+        snapshot for snapshot in current_snapshots
+        if snapshot["snapshot_hash"] not in existing_hashes
+    ]
+
+    # Find snapshots that need to be closed (active but not in current set)
+    hashes_to_close = existing_hashes - current_hashes
+
     relationships_created = 0
 
-    # Process current snapshots
-    for snapshot in current_snapshots:
-        snapshot_hash = snapshot["snapshot_hash"]
+    # Batch create/update all new snapshots in one query
+    if new_snapshots:
+        _run_cypher(
+            """
+            UNWIND $snapshots AS s
+            MERGE (m:MLModel {uri: $model_uri})
+            MERGE (p:MLModelPropertySnapshot {snapshot_hash: s.snapshot_hash})
+              ON CREATE SET
+                p.predicate_iri     = s.predicate_iri,
+                p.value             = s.value,
+                p.value_uri         = s.value_uri,
+                p.extraction_method = s.extraction_method,
+                p.confidence        = s.confidence,
+                p.notes             = s.notes
+            MERGE (m)-[r:HAS_PROPERTY_SNAPSHOT]->(p)
+            ON CREATE SET
+              r.valid_from = datetime($extracted_at),
+              r.valid_to   = null
+            """,
+            {
+                "model_uri": model_uri,
+                "snapshots": new_snapshots,
+                "extracted_at": extracted_at.isoformat(),
+            },
+            cfg=env_cfg,
+        )
+        relationships_created = len(new_snapshots)
 
-        if snapshot_hash in existing_hashes:
-            # Snapshot already exists and is identical, keep it active
-            continue
-        else:
-            # Check if this exact snapshot existed before (but was closed)
-            # If so, we need to close the old one first
-            if snapshot_hash in existing_snapshot_ids:
-                # Close the existing relationship for this hash
-                _run_cypher(
-                    """
-                    MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
-                    WHERE id(p) = $snapshot_id
-                    SET r.valid_to = datetime($extracted_at)
-                    """,
-                    {
-                        "model_uri": model_uri,
-                        "snapshot_id": existing_snapshot_ids[snapshot_hash],
-                        "extracted_at": extracted_at.isoformat(),
-                    },
-                    cfg=env_cfg,
-                )
-
-            # Create new snapshot node and relationship
-            _run_cypher(
-                """
-                MERGE (m:MLModel {uri: $model_uri})
-                CREATE (m)-[:HAS_PROPERTY_SNAPSHOT {
-                    valid_from: datetime($extracted_at),
-                    valid_to: null
-                }]->(:MLModelPropertySnapshot {
-                    predicate_iri: $predicate_iri,
-                    value: $value,
-                    value_uri: $value_uri,
-                    extraction_method: $extraction_method,
-                    confidence: $confidence,
-                    notes: $notes,
-                    snapshot_hash: $snapshot_hash
-                })
-                """,
-                {
-                    "model_uri": model_uri,
-                    "predicate_iri": snapshot["predicate_iri"],
-                    "value": snapshot["value"],
-                    "value_uri": snapshot["value_uri"],
-                    "extraction_method": snapshot["extraction_method"],
-                    "confidence": snapshot["confidence"],
-                    "notes": snapshot["notes"],
-                    "snapshot_hash": snapshot_hash,
-                    "extracted_at": extracted_at.isoformat(),
-                },
-                cfg=env_cfg,
-            )
-            relationships_created += 1
-
-    # Close validity intervals for removed properties (snapshots that existed but are no longer present)
-    for existing_hash in existing_hashes:
-        if existing_hash not in current_hashes:
-            _run_cypher(
-                """
-                MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
-                WHERE p.snapshot_hash = $snapshot_hash AND r.valid_to IS NULL
-                SET r.valid_to = datetime($extracted_at)
-                """,
-                {
-                    "model_uri": model_uri,
-                    "snapshot_hash": existing_hash,
-                    "extracted_at": extracted_at.isoformat(),
-                },
-                cfg=env_cfg,
-            )
+    # Batch close removed snapshots in one query
+    if hashes_to_close:
+        _run_cypher(
+            """
+            MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+            WHERE r.valid_to IS NULL AND p.snapshot_hash IN $hashes_to_close
+            SET r.valid_to = datetime($extracted_at)
+            """,
+            {
+                "model_uri": model_uri,
+                "hashes_to_close": list(hashes_to_close),
+                "extracted_at": extracted_at.isoformat(),
+            },
+            cfg=env_cfg,
+        )
 
     logger.debug(f"Created {relationships_created} new metadata snapshots for model {model_uri}")
     return relationships_created
