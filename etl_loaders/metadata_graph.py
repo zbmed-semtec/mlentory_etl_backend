@@ -139,9 +139,17 @@ def _extract_property_snapshots(
             continue
         if predicate_iri == METADATA_ALIAS:  # Skip metadata alias
             continue
-
+        
+        # Get short name for the property
+        short_name = predicate_iri.rsplit("/", 1)[-1]
+        short_name = short_name.rsplit("#", 1)[-1]
+        
         # Get extraction metadata for this property
         prop_meta = extraction_meta.get(predicate_iri)
+        
+        if prop_meta is None:
+            prop_meta = extraction_meta.get(short_name)
+        
         if isinstance(prop_meta, dict):
             # Metadata provided as a plain dictionary
             extraction_method = prop_meta.get("extraction_method", "unknown")
@@ -177,12 +185,12 @@ def _extract_property_snapshots(
                 value_uri_param = None
 
             snapshot = {
-                "predicate_iri": predicate_iri,
-                "value": value_param,
-                "value_uri": value_uri_param,
-                "extraction_method": extraction_method,
-                "confidence": confidence,
-                "notes": notes,
+                    "predicate_iri": predicate_iri,
+                    "value": value_param,
+                    "value_uri": value_uri_param,
+                    "extraction_method": extraction_method,
+                    "confidence": confidence,
+                    "notes": notes,
             }
             snapshot["snapshot_hash"] = _generate_snapshot_hash(snapshot)
             snapshots.append(snapshot)
@@ -291,9 +299,9 @@ def write_mlmodel_metadata(
                 "model_uri": model_uri,
                 "hashes_to_close": list(hashes_to_close),
                 "extracted_at": extracted_at.isoformat(),
-            },
-            cfg=env_cfg,
-        )
+                },
+                cfg=env_cfg,
+            )
 
     logger.debug(f"Created {relationships_created} new metadata snapshots for model {model_uri}")
     return relationships_created
