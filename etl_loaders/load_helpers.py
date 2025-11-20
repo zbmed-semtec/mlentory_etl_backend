@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Dict
 from urllib.parse import urlparse
+import re
 
 
 class LoadHelpers:
@@ -30,8 +31,11 @@ class LoadHelpers:
 
         try:
             result = urlparse(value)
+            # Check that result does not contain spaces of line breaks with a regex
+            if re.search(r'\s|\n', value):
+                return False
             # Check if it has a scheme (http, https, etc.) and netloc (domain)
-            return bool(result.scheme and result.netloc)
+            return bool(result.scheme and result.netloc and result.path)
         except Exception:
             return False
 
