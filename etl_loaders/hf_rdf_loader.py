@@ -89,7 +89,15 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         # Reference publication
         "https://w3id.org/codemeta/referencePublication",
         # License
-        "https://w3id.org/codemeta/license",
+        "https://schema.org/license",
+        # Keywords
+        "https://schema.org/keywords",
+        # In Language
+        "https://schema.org/inLanguage",
+        # ML Task
+        "https://w3id.org/fair4ml/mlTask",
+        # Model Category
+        "https://w3id.org/fair4ml/modelCategory",
         # Base models
         "https://w3id.org/fair4ml/fineTunedFrom",
         # Datasets
