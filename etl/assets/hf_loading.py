@@ -189,7 +189,7 @@ def hf_load_models_to_neo4j(
     }
     
     # Save report to RDF folder as well
-    rdf_report_path = rdf_run_folder / "models_load_report.json"
+    rdf_report_path = rdf_run_folder / "mlmodels_load_report.json"
     with open(rdf_report_path, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     logger.info(f"Models load report also saved to: {rdf_report_path}")
