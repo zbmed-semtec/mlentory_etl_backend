@@ -8,3 +8,4 @@ https://huggingface.co/allenai/OLMoASR
 https://huggingface.co/dphn/Dolphin-Mistral-24B-Venice-Edition 
 https://huggingface.co/Tesslate/UIGEN-FX-4B-Preview
 https://huggingface.co/QuantStack/Wan2.2-S2V-14B-GGUF
+https://huggingface.co/onnx-community/whisper-small
