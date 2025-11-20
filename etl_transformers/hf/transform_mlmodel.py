@@ -223,7 +223,7 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "description": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
-            confidence=0.9,
+            confidence=1.0,
             source_field="card",
             notes="Extracted from model card with frontmatter removed"
         ),
