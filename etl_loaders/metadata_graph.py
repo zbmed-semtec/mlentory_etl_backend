@@ -417,104 +417,102 @@ def cleanup_metadata_graph(cfg: Optional[Neo4jConfig] = None) -> None:
     logger.info("Cleaned up temporal metadata graph")
 
 
-def build_and_export_metadata_rdf(
-    output_ttl_path: Optional[str] = None,
+def export_metadata_graph_json(
+    output_json_path: Optional[str] = None,
     cfg: Optional[Neo4jConfig] = None,
 ) -> Dict[str, Any]:
     """
-    Export the temporal metadata property graph as RDF triples.
+    Export the temporal metadata property graph as Neo4j JSON via APOC.
 
-    Queries the metadata graph and converts it to RDF triples using custom
-    namespaces for the metadata schema, including validity intervals.
+    Uses apoc.export.json.query to export the MLModel–HAS_PROPERTY_SNAPSHOT–
+    MLModelPropertySnapshot subgraph to a JSON file on the Neo4j server.
 
     Args:
-        output_ttl_path: Optional path to save Turtle file
+        output_json_path: Optional path to save JSON file
         cfg: Neo4j configuration. If None, loads from environment.
 
     Returns:
         Dict with export statistics:
-        - triples_added: Number of triples exported
-        - ttl_path: Path to saved Turtle file (if requested)
+        - nodes: Number of nodes exported
+        - relationships: Number of relationships exported
+        - json_path: Path to saved JSON file (if requested)
         - timestamp: Export timestamp
+        - apoc: APOC export details
     """
     env_cfg = cfg or Neo4jConfig.from_env()
 
-    # Define custom namespaces for metadata
-    MLENTORY = Namespace("https://w3id.org/mlentory/")
-    MLENTORY_META = Namespace("https://w3id.org/mlentory/mlentory_graph/meta/")
+    if not output_json_path:
+        raise ValueError("output_json_path must be provided for JSON export")
 
-    # Create RDF graph
-    graph = Graph()
-    graph.bind("mlentory", MLENTORY)
-    graph.bind("mlentory-meta", MLENTORY_META)
-    graph.bind("rdf", RDF)
-    graph.bind("xsd", XSD)
+    # Neo4j writes files relative to its `dbms.directories.export` (import) dir.
+    # Map the absolute path to a filename Neo4j can write to (e.g. just basename).
+    export_filename = Path(output_json_path).name  # e.g. "metadata.json"
 
-    # Query metadata snapshots with validity intervals
-    results = _run_cypher(
-        """
-        MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
-        RETURN m.uri as model_uri, p.predicate_iri as property_iri,
-               p.value as value, p.value_uri as value_uri,
-               r.valid_from as valid_from, r.valid_to as valid_to,
-               p.extraction_method as extraction_method,
-               p.confidence as confidence,
-               p.notes as notes,
-               p.snapshot_hash as snapshot_hash
-        """,
+    cypher = """
+    CALL apoc.export.json.query(
+      "
+      MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+      RETURN m, r, p
+      ",
+      null,
+      {useTypes: true, stream: true}
+    )
+    YIELD data, source, format, nodes, relationships, properties, time
+    WITH collect(data) AS rawChunks, source, format, nodes, relationships, properties, time
+    WITH apoc.text.join(rawChunks, '') AS rawJson,
+         source, format, nodes, relationships, properties, time
+    WITH split(rawJson, '\\n') AS lines,
+         source, format, nodes, relationships, properties, time
+    WITH [x IN lines WHERE x <> '' | apoc.convert.fromJsonMap(x)] AS jsonList,
+         source, format, nodes, relationships, properties, time
+    RETURN apoc.convert.toJson({export_info: {timestamp: datetime(), format: 'neo4j_apoc_export', query: 'MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot) RETURN m, r, p', total_objects: size(jsonList)}, data: jsonList}) AS jsonData,
+           source, format, nodes, relationships, properties, time
+    """
+
+    result = _run_cypher(
+        cypher,
+        {},
         cfg=env_cfg,
     )
 
-    triples_added = 0
+    if not result:
+        raise RuntimeError("APOC JSON export returned no result")
 
-    for record in results:
-        # Create blank node for the property snapshot
-        snapshot_event = BNode()
+    # APOC now returns a single properly formatted JSON string
+    json_object = json.loads(result[0]["jsonData"])["data"]
+    
+    logger.info(f"JSON object: {json_object}")
+    logger.info(f"len JSON object: {len(json_object)}")
+    logger.info(f"type JSON object: {type(json_object)}")
+    
+    json_string = json.dumps(json_object, indent=2, ensure_ascii=False)
 
-        # Add the extraction event as a triple
-        model_uri = URIRef(record["model_uri"])
-        property_iri = URIRef(record["property_iri"])
+    # Write the JSON string directly to the output path
+    output_path = Path(output_json_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(json_string)
 
-        # Add the main property triple
-        if record["value"] is not None:
-            graph.add((model_uri, property_iri, Literal(record["value"])))
-        elif record["value_uri"] is not None:
-            graph.add((model_uri, property_iri, URIRef(record["value_uri"])))
-
-        # Add metadata about the snapshot with validity intervals
-        graph.add((model_uri, MLENTORY_META.propertySnapshot, snapshot_event))
-        graph.add((snapshot_event, MLENTORY_META.property, property_iri))
-        graph.add((snapshot_event, MLENTORY_META.validFrom,
-                  Literal(record["valid_from"], datatype=XSD.dateTime)))
-        graph.add((snapshot_event, MLENTORY_META.extractionMethod,
-                  Literal(record["extraction_method"])))
-        graph.add((snapshot_event, MLENTORY_META.confidence,
-                  Literal(record["confidence"], datatype=XSD.decimal)))
-
-        if record["notes"]:
-            graph.add((snapshot_event, MLENTORY_META.notes, Literal(record["notes"])))
-
-        # Add valid_to if not null
-        if record["valid_to"] is not None:
-            graph.add((snapshot_event, MLENTORY_META.validTo,
-                      Literal(record["valid_to"], datatype=XSD.dateTime)))
-
-        triples_added += 1
-
-    logger.info(f"Exported {triples_added} temporal metadata triples as RDF")
-
-    # Save Turtle file if requested
-    ttl_path = None
-    if output_ttl_path:
-        ttl_file = Path(output_ttl_path)
-        ttl_file.parent.mkdir(parents=True, exist_ok=True)
-
-        graph.serialize(destination=str(ttl_file), format="turtle")
-        ttl_path = str(ttl_file)
-        logger.info(f"Saved temporal metadata RDF to Turtle file: {ttl_path}")
+    # Get stats from the first result row
+    stats = result[0]
+    
+    logger.info(
+        "Exported metadata graph: %s nodes, %s relationships → %s",
+        stats.get("nodes", 0),
+        stats.get("relationships", 0),
+        output_json_path,
+    )
 
     return {
-        "triples_added": triples_added,
-        "ttl_path": ttl_path,
+        "nodes": stats.get("nodes", 0),
+        "relationships": stats.get("relationships", 0),
+        "json_path": output_json_path,
         "timestamp": datetime.now().isoformat(),
+        "apoc": {
+            "source": stats.get("source"),
+            "nodes": stats.get("nodes"),
+            "relationships": stats.get("relationships"),
+            "properties": stats.get("properties"),
+            "time_ms": stats.get("time"),
+        },
     }
