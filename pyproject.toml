@@ -41,6 +41,8 @@ openml = "^0.15.1"
 selenium = "^4.38.0"
 pycountry = "^24.5.0"
 elasticsearch-dsl = "^8.0.0"
+fastapi = "^0.104.0"
+uvicorn = {extras = ["standard"], version = "^0.24.0"}
 
 [tool.pytest.ini_options]
 minversion = "7.0"
