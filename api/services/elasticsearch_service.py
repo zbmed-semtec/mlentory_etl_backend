@@ -20,18 +20,21 @@ Example:
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Tuple
+import re
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple, Any
 
 from elasticsearch_dsl import Q, Search
 
 from api.config import get_es_client, get_es_config
-from api.schemas.responses import ModelListItem
+from api.schemas.responses import ModelListItem, FacetValue, FacetConfig
+from api.services.faceted_search import FacetedSearchMixin
 from etl_loaders.hf_index_loader import HFModelDocument
 
 logger = logging.getLogger(__name__)
 
 
-class ElasticsearchService:
+class ElasticsearchService(FacetedSearchMixin):
     """Service for querying ML models in Elasticsearch."""
 
     def __init__(self):
@@ -127,6 +130,8 @@ class ElasticsearchService:
             keywords=hit.keywords or [],
             platform=hit.platform or "Unknown",
         )
+
+
 
 
 # Global service instance
