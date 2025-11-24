@@ -72,7 +72,7 @@ def hf_rdf_store_ready() -> Dict[str, Any]:
         # Build store config (may not expose uri/database attributes)
         _ = get_neo4j_store_config_from_env(
             batching=True,
-            batch_size=5000,
+            batch_size=200,
             multithreading=True,
             max_workers=4,
         )
@@ -171,6 +171,7 @@ def hf_load_models_to_neo4j(
         json_path=mlmodels_json_path,
         config=config,
         output_ttl_path=str(ttl_path),
+        batch_size=30,
     )
     
     logger.info(

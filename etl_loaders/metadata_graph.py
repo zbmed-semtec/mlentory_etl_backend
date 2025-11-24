@@ -198,6 +198,154 @@ def _extract_property_snapshots(
     return snapshots
 
 
+def write_mlmodel_metadata_batch(
+    models: List[Dict[str, Any]],
+    extracted_at: datetime,
+    cfg: Optional[Neo4jConfig] = None,
+) -> int:
+    """
+    Write metadata for a batch of MLModels to the temporal property graph.
+
+    Efficiently processes multiple models in fewer Cypher queries.
+    Only creates new property snapshots when properties actually change, using
+    validity intervals to track temporal changes efficiently.
+
+    Args:
+        models: List of normalized MLModel dictionaries
+        extracted_at: Timestamp when this extraction occurred
+        cfg: Neo4j configuration. If None, loads from environment.
+
+    Returns:
+        Number of new HAS_PROPERTY_SNAPSHOT relationships created
+    """
+    env_cfg = cfg or Neo4jConfig.from_env()
+    
+    if not models:
+        return 0
+
+    # 1. Prepare data for all models
+    model_data = []
+    all_model_uris = []
+    
+    for model in models:
+        # Get the model URI
+        try:
+            model_uri = LoadHelpers.mint_subject(model)
+        except Exception as e:
+            logger.warning(f"Could not mint subject for model in batch: {e}")
+            continue
+
+        all_model_uris.append(model_uri)
+        
+        # Get extraction metadata
+        extraction_meta = model.get(METADATA_ALIAS, {})
+        
+        # Extract current property snapshots
+        current_snapshots = _extract_property_snapshots(model, extraction_meta)
+        
+        model_data.append({
+            "uri": model_uri,
+            "snapshots": current_snapshots,
+            "current_hashes": {s["snapshot_hash"] for s in current_snapshots}
+        })
+
+    if not all_model_uris:
+        return 0
+
+    # 2. Batch query existing active snapshots
+    existing_snapshots_query = """
+        MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+        WHERE m.uri IN $model_uris AND r.valid_to IS NULL
+        RETURN m.uri as model_uri, collect(p.snapshot_hash) as snapshot_hashes
+    """
+    
+    existing_results = _run_cypher(
+        existing_snapshots_query,
+        {"model_uris": all_model_uris},
+        cfg=env_cfg
+    )
+    
+    existing_hashes_map = {
+        record["model_uri"]: set(record["snapshot_hashes"]) 
+        for record in existing_results
+    }
+    
+    # 3. Calculate diffs
+    new_snapshots_flat = []
+    hashes_to_close_flat = []
+    
+    for data in model_data:
+        uri = data["uri"]
+        current_snapshots = data["snapshots"]
+        current_hashes = data["current_hashes"]
+        existing_hashes = existing_hashes_map.get(uri, set())
+        
+        # Identify new snapshots
+        for snapshot in current_snapshots:
+            if snapshot["snapshot_hash"] not in existing_hashes:
+                s_copy = snapshot.copy()
+                s_copy["model_uri"] = uri
+                new_snapshots_flat.append(s_copy)
+                
+        # Identify snapshots to close
+        to_close = existing_hashes - current_hashes
+        if to_close:
+             hashes_to_close_flat.append({
+                 "model_uri": uri,
+                 "hashes": list(to_close)
+             })
+
+    relationships_created = 0
+    
+    # 4. Batch Write New Snapshots
+    if new_snapshots_flat:
+        create_query = """
+            UNWIND $snapshots AS s
+            MERGE (m:MLModel {uri: s.model_uri})
+            MERGE (p:MLModelPropertySnapshot {snapshot_hash: s.snapshot_hash})
+              ON CREATE SET
+                p.predicate_iri     = s.predicate_iri,
+                p.value             = s.value,
+                p.value_uri         = s.value_uri,
+                p.extraction_method = s.extraction_method,
+                p.confidence        = s.confidence,
+                p.notes             = s.notes
+            MERGE (m)-[r:HAS_PROPERTY_SNAPSHOT]->(p)
+            ON CREATE SET
+              r.valid_from = datetime($extracted_at),
+              r.valid_to   = null
+        """
+        _run_cypher(
+            create_query,
+            {
+                "snapshots": new_snapshots_flat,
+                "extracted_at": extracted_at.isoformat()
+            },
+            cfg=env_cfg
+        )
+        relationships_created = len(new_snapshots_flat)
+
+    # 5. Batch Close Removed Snapshots
+    if hashes_to_close_flat:
+        close_query = """
+            UNWIND $closes AS c
+            MATCH (m:MLModel {uri: c.model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+            WHERE r.valid_to IS NULL AND p.snapshot_hash IN c.hashes
+            SET r.valid_to = datetime($extracted_at)
+        """
+        _run_cypher(
+            close_query,
+            {
+                "closes": hashes_to_close_flat,
+                "extracted_at": extracted_at.isoformat()
+            },
+            cfg=env_cfg
+        )
+        
+    logger.debug(f"Processed batch of {len(models)} models, created {relationships_created} new snapshots")
+    return relationships_created
+
+
 def write_mlmodel_metadata(
     model: Dict[str, Any],
     extracted_at: datetime,
@@ -220,91 +368,7 @@ def write_mlmodel_metadata(
     Raises:
         ValueError: If model is missing required identifier/name fields
     """
-    env_cfg = cfg or Neo4jConfig.from_env()
-
-    # Get the model URI using the same logic as RDF loader
-    model_uri = LoadHelpers.mint_subject(model)
-
-    # Get extraction metadata if available
-    extraction_meta = model.get(METADATA_ALIAS, {})
-
-    # Extract current property snapshots
-    current_snapshots = _extract_property_snapshots(model, extraction_meta)
-
-    # Query existing active snapshots (valid_to is null) and their hashes
-    existing_results = _run_cypher(
-        """
-        MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
-        WHERE r.valid_to IS NULL
-        RETURN p.snapshot_hash as snapshot_hash
-        """,
-        {"model_uri": model_uri},
-        cfg=env_cfg,
-    )
-
-    # Create set of existing snapshot hashes for fast lookup
-    existing_hashes = {record["snapshot_hash"] for record in existing_results}
-
-    # Create set of current snapshot hashes
-    current_hashes = {snapshot["snapshot_hash"] for snapshot in current_snapshots}
-
-    # Find snapshots that need to be created/updated (not already active)
-    new_snapshots = [
-        snapshot for snapshot in current_snapshots
-        if snapshot["snapshot_hash"] not in existing_hashes
-    ]
-
-    # Find snapshots that need to be closed (active but not in current set)
-    hashes_to_close = existing_hashes - current_hashes
-
-    relationships_created = 0
-
-    # Batch create/update all new snapshots in one query
-    if new_snapshots:
-        _run_cypher(
-            """
-            UNWIND $snapshots AS s
-            MERGE (m:MLModel {uri: $model_uri})
-            MERGE (p:MLModelPropertySnapshot {snapshot_hash: s.snapshot_hash})
-              ON CREATE SET
-                p.predicate_iri     = s.predicate_iri,
-                p.value             = s.value,
-                p.value_uri         = s.value_uri,
-                p.extraction_method = s.extraction_method,
-                p.confidence        = s.confidence,
-                p.notes             = s.notes
-            MERGE (m)-[r:HAS_PROPERTY_SNAPSHOT]->(p)
-            ON CREATE SET
-              r.valid_from = datetime($extracted_at),
-              r.valid_to   = null
-            """,
-            {
-                "model_uri": model_uri,
-                "snapshots": new_snapshots,
-                "extracted_at": extracted_at.isoformat(),
-            },
-            cfg=env_cfg,
-        )
-        relationships_created = len(new_snapshots)
-
-    # Batch close removed snapshots in one query
-    if hashes_to_close:
-        _run_cypher(
-            """
-            MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
-            WHERE r.valid_to IS NULL AND p.snapshot_hash IN $hashes_to_close
-            SET r.valid_to = datetime($extracted_at)
-            """,
-            {
-                "model_uri": model_uri,
-                "hashes_to_close": list(hashes_to_close),
-                "extracted_at": extracted_at.isoformat(),
-                },
-                cfg=env_cfg,
-            )
-
-    logger.debug(f"Created {relationships_created} new metadata snapshots for model {model_uri}")
-    return relationships_created
+    return write_mlmodel_metadata_batch([model], extracted_at, cfg)
 
 
 def reconstruct_mlmodel_at(
