@@ -211,6 +211,159 @@ GET /api/v1/models/https%3A%2F%2Fw3id.org%2Fmlentory%2Fmodel%2Fabc123?include_en
 }
 ```
 
+### Faceted Search Endpoints
+
+#### `GET /api/v1/models/search`
+Advanced faceted search with dynamic facets and filters.
+
+**Query Parameters:**
+- `query` (string) - Text search query across model fields
+- `filters` (JSON string) - Property filters (e.g., `{"license": ["MIT"], "mlTask": ["text-generation"]}`)
+- `page` (int, default: 1) - Page number (1-based)
+- `page_size` (int, default: 50, max: 1000) - Results per page
+- `facets` (JSON array) - Facet fields to aggregate (e.g., `["mlTask", "license", "keywords"]`)
+- `facet_size` (int, default: 20, max: 100) - Maximum values per facet
+- `facet_query` (JSON object) - Search within specific facets (e.g., `{"keywords": "medical"}`)
+
+**Example Requests:**
+```bash
+# Simple search
+GET /api/v1/models/search?query=image+classification
+
+# Search with filters
+GET /api/v1/models/search?query=bert&filters={"license":["MIT"],"mlTask":["text-classification"]}
+
+# Custom facets
+GET /api/v1/models/search?facets=["license","sharedBy"]&facet_size=50
+
+# Search within facets
+GET /api/v1/models/search?facet_query={"keywords":"medical"}
+```
+
+**Response:**
+```json
+{
+  "models": [
+    {
+      "db_identifier": "https://w3id.org/mlentory/model/abc123",
+      "name": "bert-base-uncased",
+      "description": "BERT base model",
+      "sharedBy": "google",
+      "license": "apache-2.0",
+      "mlTask": ["fill-mask"],
+      "keywords": ["bert", "transformer"],
+      "platform": "Hugging Face"
+    }
+  ],
+  "total": 150,
+  "page": 1,
+  "page_size": 50,
+  "filters": {
+    "license": ["MIT"],
+    "mlTask": ["text-classification"]
+  },
+  "facets": {
+    "mlTask": [
+      {"value": "text-classification", "count": 75},
+      {"value": "text-generation", "count": 45}
+    ],
+    "license": [
+      {"value": "MIT", "count": 120},
+      {"value": "Apache-2.0", "count": 30}
+    ]
+  },
+  "facet_config": {
+    "mlTask": {
+      "field": "ml_tasks",
+      "label": "ML Tasks",
+      "type": "keyword",
+      "icon": "mdi-brain",
+      "is_high_cardinality": false,
+      "supports_search": true
+    }
+  }
+}
+```
+
+#### `GET /api/v1/models/facets/config`
+Get configuration metadata for all available facets.
+
+**Response:**
+```json
+{
+  "facet_config": {
+    "mlTask": {
+      "field": "ml_tasks",
+      "label": "ML Tasks",
+      "type": "keyword",
+      "icon": "mdi-brain",
+      "is_high_cardinality": false,
+      "default_size": 20,
+      "supports_search": true,
+      "pinned": true
+    },
+    "license": {
+      "field": "license",
+      "label": "Licenses",
+      "type": "keyword",
+      "icon": "mdi-license",
+      "is_high_cardinality": false,
+      "default_size": 10,
+      "supports_search": true,
+      "pinned": true
+    },
+    "keywords": {
+      "field": "keywords",
+      "label": "Keywords",
+      "type": "keyword",
+      "icon": "mdi-tag",
+      "is_high_cardinality": true,
+      "default_size": 20,
+      "supports_search": true,
+      "pinned": true
+    }
+  }
+}
+```
+
+#### `GET /api/v1/models/facets/values`
+Fetch values for a specific facet with search and pagination.
+
+**Query Parameters:**
+- `field` (string, required) - Facet field name (e.g., `keywords`, `mlTask`, `license`)
+- `search_query` (string) - Optional search term to filter facet values
+- `after_key` (string) - Pagination cursor for getting more values
+- `limit` (int, default: 50, max: 200) - Maximum values to return
+- `filters` (JSON string) - Current filters for context
+
+**Example Requests:**
+```bash
+# Get keyword values
+GET /api/v1/models/facets/values?field=keywords
+
+# Search within keywords
+GET /api/v1/models/facets/values?field=keywords&search_query=medical
+
+# Paginate through values
+GET /api/v1/models/facets/values?field=keywords&after_key=previous_value&limit=50
+
+# With context filters
+GET /api/v1/models/facets/values?field=keywords&filters={"license":["MIT"]}
+```
+
+**Response:**
+```json
+{
+  "values": [
+    {"value": "medical-imaging", "count": 15},
+    {"value": "medical-diagnosis", "count": 12},
+    {"value": "medical-research", "count": 8}
+  ],
+  "after_key": "medical-research",
+  "has_more": true
+}
+```
+
 ## Configuration
 
 The API uses environment variables for configuration, reusing the same variables as the ETL pipeline:
@@ -253,29 +406,14 @@ The API is included in the main `docker-compose.yml`:
 
 ```bash
 # Start all services (Neo4j, Elasticsearch, API)
-docker-compose up --profile=api -d
+docker-compose up -d api
 
 # View logs
-docker-compose logs -f
+docker-compose logs -f api
 
 # Stop services
 docker-compose down
 ```
-
-### Common errors:
-
-```bash
-------
- > [api internal] load build context:
-------
-failed to solve: error from sender: open /mnt/mlentory_volume/mlentory_etl_backend/config/neo4j/import: permission denied
-```
-
-You need to change the permissions of the directory `config/neo4j/import` to be writable by the user running the container.
-```bash
-sudo chmod -R 777 config/neo4j/import
-```
-
 
 The API will be available at:
 - **API**: http://localhost:8000
@@ -296,6 +434,15 @@ curl "http://localhost:8000/api/v1/models?search=transformer&page=1&page_size=10
 # Get model details with related entities
 curl "http://localhost:8000/api/v1/models/MODEL_URI?include_entities=license&include_entities=datasets"
 
+# Faceted search
+curl "http://localhost:8000/api/v1/models/search?query=image+classification&filters=%7B%22license%22%3A%5B%22MIT%22%5D%7D"
+
+# Get facet configuration
+curl http://localhost:8000/api/v1/models/facets/config
+
+# Get facet values with search
+curl "http://localhost:8000/api/v1/models/facets/values?field=keywords&search_query=medical&limit=20"
+
 # Health check
 curl http://localhost:8000/health
 ```
@@ -304,6 +451,7 @@ curl http://localhost:8000/health
 
 ```python
 import requests
+import json
 
 # List models
 response = requests.get("http://localhost:8000/api/v1/models", params={
@@ -323,6 +471,33 @@ response = requests.get(
 model = response.json()
 print(f"Model: {model['name']}")
 print(f"License: {model['related_entities']['license']['name']}")
+
+# Faceted search
+response = requests.get("http://localhost:8000/api/v1/models/search", params={
+    "query": "image classification",
+    "filters": json.dumps({"license": ["MIT"], "mlTask": ["image-classification"]}),
+    "facets": json.dumps(["mlTask", "license", "keywords"]),
+    "page": 1,
+    "page_size": 50
+})
+data = response.json()
+print(f"Found {data['total']} models")
+print(f"ML Task facets: {data['facets']['mlTask']}")
+
+# Get facet configuration
+response = requests.get("http://localhost:8000/api/v1/models/facets/config")
+config = response.json()
+print(f"Available facets: {list(config['facet_config'].keys())}")
+
+# Search within facet values
+response = requests.get("http://localhost:8000/api/v1/models/facets/values", params={
+    "field": "keywords",
+    "search_query": "medical",
+    "limit": 20,
+    "filters": json.dumps({"license": ["MIT"]})
+})
+values = response.json()
+print(f"Medical keywords: {[v['value'] for v in values['values']]}")
 ```
 
 ### Using JavaScript/TypeScript
@@ -407,8 +582,9 @@ pytest --cov=api tests/
 
 Potential additions to the API:
 
-- [ ] **Filtering**: Advanced filtering by license, task, platform, etc.
-- [ ] **Aggregations**: Statistics and faceted search (e.g., count by license)
+- [x] **Faceted Search**: Dynamic facets and filters (✅ Implemented)
+- [x] **Filtering**: Advanced filtering by license, task, platform, etc. (✅ Implemented)
+- [x] **Aggregations**: Statistics and faceted search (✅ Implemented)
 - [ ] **Batch operations**: Get multiple models in one request
 - [ ] **GraphQL**: Alternative query interface for complex graph traversals
 - [ ] **Authentication**: API key or OAuth2 authentication
