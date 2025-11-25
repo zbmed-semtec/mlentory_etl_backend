@@ -1,0 +1,52 @@
+# MLentory ETL Run Configuration
+# This file configures extraction parameters for each platform.
+# Sensitive credentials (Neo4j, Elasticsearch) should remain in .env files.
+
+# General Configuration
+general:
+  # Default thread count for parallel operations (can be overridden per platform)
+  default_threads: 4
+  # Base data directory for extraction outputs
+  data_root: "/data"
+
+# Platform-Specific Configurations
+platforms:
+  # HuggingFace Configuration
+  huggingface:
+    # Number of latest models to extract
+    num_models: 20
+    # Whether to prioritize recently updated models
+    update_recent: true
+    # Number of parallel threads for extraction
+    threads: 4
+    # Path to file containing specific model IDs to extract (one per line)
+    models_file_path: "/data/refs/hf_model_ids.txt"
+    # Number of iterations to follow base model references
+    base_model_iterations: 1
+    # Number of threads for enrichment operations (datasets, articles, etc.)
+    enrichment_threads: 4
+    # Offset for pagination (if applicable)
+    offset: 0
+
+  # OpenML Configuration
+  openml:
+    # Number of run instances to extract
+    num_instances: 50
+    # Offset for pagination
+    offset: 0
+    # Number of parallel threads for extraction
+    threads: 4
+    # Number of threads for enrichment operations
+    enrichment_threads: 4
+    # Enable web scraping for additional metadata
+    enable_scraping: false
+
+  # AI4Life Configuration
+  ai4life:
+    # Number of models to extract
+    num_models: 50
+    # Base URL for AI4Life API
+    base_url: "https://hypha.aicell.io"
+    # Parent ID for collection filtering
+    parent_id: "bioimage-io/bioimage.io"
+
