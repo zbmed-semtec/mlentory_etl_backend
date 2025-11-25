@@ -109,6 +109,7 @@ services:
       - ./etl_transformers:/opt/dagster/app/etl_transformers
       - ./etl_loaders:/opt/dagster/app/etl_loaders
       - ./tests:/opt/dagster/app/tests
+      - ./config/etl:/opt/dagster/app/config/etl	
       - ./schemas:/opt/dagster/app/schemas
       - ./data:/data
       - dagster_home:/opt/dagster/dagster_home
