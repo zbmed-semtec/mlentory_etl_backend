@@ -10,9 +10,7 @@ Pipeline:
 
 from __future__ import annotations
 
-import os
 import uuid
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple, List, Dict, Any
@@ -22,16 +20,10 @@ import logging
 from dagster import asset, AssetIn
 
 from etl_extractors.ai4life.ai4life_extractor import AI4LifeExtractor
+from etl.config import get_ai4life_config
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class AI4LifeConfig:
-    num_models: int = int(os.getenv("AI4LIFE_NUM_MODELS", "50"))
-    base_url: str = os.getenv("AI4LIFE_BASE_URL", "https://hypha.aicell.io")
-    parent_id: str = os.getenv("AI4LIFE_PARENT_ID", "bioimage-io/bioimage.io")
 
 
 @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"})
@@ -50,10 +42,10 @@ def ai4life_raw_records(run_folder: str) -> Tuple[List[Dict[str, Any]], str, AI4
     Fetch raw records from AI4Life API.
     Returns (records_list, run_folder, extractor_with_timestamp).
     """
-    cfg = AI4LifeConfig()
-    extractor = AI4LifeExtractor(base_url=cfg.base_url, parent_id=cfg.parent_id)
+    config = get_ai4life_config()
+    extractor = AI4LifeExtractor(base_url=config.base_url, parent_id=config.parent_id)
 
-    records = extractor.fetch_records(cfg.num_models)
+    records = extractor.fetch_records(config.num_models)
 
     # Extract list from response (support both list and dict with 'data' key)
     data = records if isinstance(records, list) else records.get("data", [])

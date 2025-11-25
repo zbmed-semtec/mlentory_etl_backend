@@ -80,6 +80,9 @@ def hf_rdf_store_ready() -> Dict[str, Any]:
         reset_flag = os.getenv("N10S_RESET_ON_CONFIG_CHANGE", "false").lower() == "true"
         desired_cfg = {"keepCustomDataTypes": True, "handleVocabUris": "SHORTEN"}
 
+        # reset_database(drop_config=False)
+        
+        
         if reset_flag:
             logger.warning("N10S_RESET_ON_CONFIG_CHANGE=true → resetting database and re-initializing n10s")
             reset_database(drop_config=True)
@@ -171,7 +174,7 @@ def hf_load_models_to_neo4j(
         json_path=mlmodels_json_path,
         config=config,
         output_ttl_path=str(ttl_path),
-        batch_size=30,
+        batch_size=50,
     )
     
     logger.info(

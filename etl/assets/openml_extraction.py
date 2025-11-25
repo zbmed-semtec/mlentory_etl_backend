@@ -11,9 +11,7 @@ All outputs are saved to /data/raw/openml/<timestamp_uuid>/ for traceability.
 
 from __future__ import annotations
 
-import os
 import uuid
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Set, Tuple
@@ -22,28 +20,10 @@ import logging
 from dagster import asset, AssetIn
 
 from etl_extractors.openml import OpenMLExtractor, OpenMLEnrichment
+from etl.config import get_openml_config
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class OpenMLRunsExtractionConfig:
-    """Configuration for OpenML runs extraction from environment variables."""
-
-    num_instances: int = int(os.getenv("OPENML_NUM_INSTANCES", "50"))
-    offset: int = int(os.getenv("OPENML_OFFSET", "0"))
-    threads: int = int(os.getenv("OPENML_THREADS", "4"))
-
-
-@dataclass
-class OpenMLEnrichmentConfig:
-    """Configuration for OpenML entity enrichment from environment variables."""
-
-    threads: int = int(os.getenv("OPENML_ENRICHMENT_THREADS", "4"))
-    enable_scraping: bool = (
-        os.getenv("OPENML_ENABLE_SCRAPING", "false").lower() == "true"
-    )
 
 
 # ========== Run Folder Creation ==========
@@ -89,10 +69,9 @@ def openml_raw_runs(run_folder: str) -> Tuple[str, str]:
     Returns:
         Tuple of (runs_json_path, run_folder) to pass to downstream assets
     """
-    config = OpenMLRunsExtractionConfig()
-    enrichment_config = OpenMLEnrichmentConfig()
+    config = get_openml_config()
     
-    extractor = OpenMLExtractor(enable_scraping=enrichment_config.enable_scraping)
+    extractor = OpenMLExtractor(enable_scraping=config.enable_scraping)
     
     try:
         output_root = Path(run_folder).parent.parent  # Go up to /data
@@ -160,7 +139,7 @@ def openml_enriched_datasets(datasets_data: Tuple[Set[int], str]) -> str:
         Path to the saved datasets JSON file
     """
     dataset_ids, run_folder = datasets_data
-    config = OpenMLEnrichmentConfig()
+    config = get_openml_config()
     
     extractor = OpenMLExtractor(enable_scraping=config.enable_scraping)
     
@@ -173,7 +152,7 @@ def openml_enriched_datasets(datasets_data: Tuple[Set[int], str]) -> str:
         output_root = Path(run_folder).parent.parent  # Go up to /data
         _, json_path = extractor.extract_specific_datasets(
             dataset_ids=list(dataset_ids),
-            threads=config.threads,
+            threads=config.enrichment_threads,
             output_root=output_root,
         )
         
