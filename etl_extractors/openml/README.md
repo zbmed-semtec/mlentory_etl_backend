@@ -52,16 +52,17 @@ All outputs are saved to `/data/raw/openml/<timestamp>_<uuid>/`:
 
 ## Configuration
 
-Environment variables (set in `.env`):
+Configuration is now managed via `config/etl/run_config.yaml`:
 
-### Runs Extraction
-- `OPENML_NUM_INSTANCES` (default: `50`) - Number of runs to fetch
-- `OPENML_OFFSET` (default: `0`) - Pagination offset
-- `OPENML_THREADS` (default: `4`) - Threads for parallel processing
-
-### Entity Enrichment
-- `OPENML_ENRICHMENT_THREADS` (default: `4`) - Threads for entity extraction
-- `OPENML_ENABLE_SCRAPING` (default: `false`) - Enable web scraping for dataset stats
+```yaml
+platforms:
+  openml:
+    num_instances: 50         # Number of runs to fetch
+    offset: 0                 # Pagination offset
+    threads: 4                # Threads for parallel processing
+    enrichment_threads: 4     # Threads for entity extraction
+    enable_scraping: false    # Enable web scraping for dataset stats
+```
 
 ## Web Scraping
 
@@ -73,8 +74,11 @@ By default, web scraping is **disabled** for faster extraction. When enabled, th
 - Auto-disables on connection failures
 
 **Enable scraping:**
-```bash
-OPENML_ENABLE_SCRAPING=true
+Update `config/etl/run_config.yaml`:
+```yaml
+platforms:
+  openml:
+    enable_scraping: true
 ```
 
 **Note:** Scraping is slow and may be unreliable. Use only when stats are critical.
@@ -157,19 +161,22 @@ This enables tracking of data provenance and extraction method.
 
 ## Testing
 
-Test with a small number of instances first:
+Test with a small number of instances first by updating `config/etl/run_config.yaml`:
 
+```yaml
+platforms:
+  openml:
+    num_instances: 5
+    enable_scraping: false
+```
+
+Then materialize:
 ```bash
-export OPENML_NUM_INSTANCES=5
-export OPENML_ENABLE_SCRAPING=false
 dagster asset materialize -m etl.repository -a openml_raw_runs
 ```
 
-For scraping tests (slow):
-
+For scraping tests (slow), set `enable_scraping: true` and:
 ```bash
-export OPENML_NUM_INSTANCES=2
-export OPENML_ENABLE_SCRAPING=true
 dagster asset materialize -m etl.repository -a openml_enriched_datasets
 ```
 
