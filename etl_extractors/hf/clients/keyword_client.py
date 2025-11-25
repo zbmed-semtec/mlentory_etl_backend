@@ -6,8 +6,10 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import pandas as pd
+import requests
 import logging
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import wikipediaapi
 from wikidata.client import Client as WikidataClient
 
@@ -83,9 +85,42 @@ class HFKeywordClient:
         except Exception as e:  # noqa: BLE001
             logger.error("Error loading curated keywords CSV: %s", e)
 
+    def _process_single_keyword(self, keyword: str) -> Dict[str, Any]:
+        """
+        Process a single keyword: check cache or fetch from Wikipedia.
+        Used for parallel processing.
+        """
+        # 1. Check CSV cache first
+        if keyword in self.curated_definitions:
+            return self.curated_definitions[keyword]
+        
+        # 2. Fallback to Wikipedia + Wikidata
+        keyword_data = self._fetch_from_wikipedia(keyword)
+        if keyword_data:
+            return keyword_data
+        else:
+            # No data found, create stub entity
+            return {
+                'keyword': keyword,
+                'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                'definition': None,
+                'source': 'not_found',
+                'url': None,
+                'aliases': [],
+                'wikidata_qid': None,
+                'enriched': False,
+                'entity_type': 'Keyword',
+                'platform': 'HF',
+                'extraction_metadata': {
+                    'extraction_method': 'Wikipedia API',
+                    'confidence': 1.0,
+                }
+            }
+
     def get_keywords_metadata(self, keywords: List[str]) -> pd.DataFrame:
         """
         Retrieve metadata for keywords using CSV cache + Wikipedia/Wikidata fallback.
+        Uses parallel processing for API requests.
         
         Args:
             keywords: List of keyword strings
@@ -95,36 +130,72 @@ class HFKeywordClient:
         """
         all_keyword_data: List[Dict[str, Any]] = []
         
-        for keyword in keywords:
-            # 1. Check CSV cache first
-            if keyword in self.curated_definitions:
-                all_keyword_data.append(self.curated_definitions[keyword])
-                continue
+        # Use ThreadPoolExecutor for parallel processing
+        # Max workers set to 10 to be polite to Wikipedia API while still getting speedup
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_keyword = {
+                executor.submit(self._process_single_keyword, keyword): keyword 
+                for keyword in keywords
+            }
             
-            # 2. Fallback to Wikipedia + Wikidata
-            keyword_data = self._fetch_from_wikipedia(keyword)
-            if keyword_data:
-                all_keyword_data.append(keyword_data)
-            else:
-                # No data found, create stub entity
-                all_keyword_data.append({
-                    'keyword': keyword,
-                    'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
-                    'definition': None,
-                    'source': 'not_found',
-                    'url': None,
-                    'aliases': [],
-                    'wikidata_qid': None,
-                    'enriched': False,
-                    'entity_type': 'Keyword',
-                    'platform': 'HF',
-                    'extraction_metadata': {
-                        'extraction_method': 'Wikipedia API',
-                        'confidence': 1.0,
-                    }
-                })
+            for future in as_completed(future_to_keyword):
+                keyword = future_to_keyword[future]
+                try:
+                    result = future.result()
+                    all_keyword_data.append(result)
+                except Exception as e:
+                    logger.error("Error processing keyword %s: %s", keyword, e)
+                    # Add basic stub on error to keep pipeline moving
+                    all_keyword_data.append({
+                        'keyword': keyword,
+                        'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                        'definition': None,
+                        'source': 'error',
+                        'url': None,
+                        'aliases': [],
+                        'wikidata_qid': None,
+                        'enriched': False,
+                        'entity_type': 'Keyword',
+                        'platform': 'HF',
+                        'extraction_metadata': {
+                            'extraction_method': 'Error',
+                            'confidence': 0.0,
+                            'error': str(e)
+                        }
+                    })
         
         return pd.DataFrame(all_keyword_data)
+
+    def _search_wikipedia(self, keyword: str) -> Optional[str]:
+        """
+        Search Wikipedia for keyword with technology/AI context.
+        Returns the title of the most relevant page.
+        """
+        url = "https://en.wikipedia.org/w/api.php"
+        # Prioritize technology and AI context
+        search_query = f"{keyword} technology artificial intelligence"
+        
+        params = {
+            "action": "query",
+            "list": "search",
+            "srsearch": search_query,
+            "format": "json",
+            "srlimit": 1
+        }
+        
+        try:
+            headers = {"User-Agent": self.user_agent}
+            response = requests.get(url, params=params, headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                search_results = data.get("query", {}).get("search", [])
+                if search_results:
+                    return search_results[0]["title"]
+        except Exception as e:
+            logger.debug("Wikipedia search failed for %s: %s", keyword, e)
+            
+        return None
 
     def _fetch_from_wikipedia(self, keyword: str) -> Optional[Dict[str, Any]]:
         """Fetch keyword definition from Wikipedia and enrich with Wikidata."""
@@ -132,8 +203,17 @@ class HFKeywordClient:
             return None
         
         try:
-            # Search Wikipedia
-            page = self.wiki.page(keyword)
+            # 1. Try to find a more relevant page title using context search
+            page_title = self._search_wikipedia(keyword) or keyword
+            
+            # 2. Fetch the page
+            page = self.wiki.page(page_title)
+            
+            if not page.exists():
+                # Fallback to original keyword if the search result (if any) failed/didn't exist
+                if page_title != keyword:
+                    logger.debug("Context search failed for '%s', falling back to exact match", page_title)
+                    page = self.wiki.page(keyword)
             
             if not page.exists():
                 logger.debug("Wikipedia page not found for keyword: %s", keyword)
