@@ -364,6 +364,72 @@ GET /api/v1/models/facets/values?field=keywords&filters={"license":["MIT"]}
 }
 ```
 
+### Graph Exploration Endpoint
+
+#### `GET /api/v1/graph/{entity_id}`
+Explore the knowledge graph starting from any entity with configurable depth traversal.
+
+**Path Parameters:**
+- `entity_id` (string) - Alphanumeric ID fragment of the starting entity (e.g., `bert-base-uncased`)
+
+**Query Parameters:**
+- `depth` (int, default: 1, max: 3) - Number of hops to traverse
+- `direction` (string, default: "both") - Traversal direction ("outgoing", "incoming", "both")
+- `entity_type` (string, default: "MLModel") - Entity label/type (e.g., `MLModel`, `License`, `DefinedTerm`)
+- `relationships` (list[string], optional) - Specific relationship types to follow (e.g., "HAS_LICENSE", "CITED_IN")
+
+**Example Requests:**
+```bash
+# Get immediate neighbors (depth 1) for an MLModel
+GET /api/v1/graph/abc123?entity_type=MLModel
+
+# Get neighbors up to depth 2, outgoing only
+GET /api/v1/graph/abc123?entity_type=MLModel&depth=2&direction=outgoing
+
+# Filter by specific relationships
+GET /api/v1/graph/abc123?entity_type=MLModel&relationships=HAS_LICENSE&relationships=CITED_IN
+```
+
+**Response:**
+```json
+{
+  "nodes": [
+    {
+      "id": "https://w3id.org/mlentory/model/abc123",
+      "labels": ["MLModel"],
+      "properties": {
+        "name": "bert-base-uncased",
+        "uri": "https://w3id.org/mlentory/model/abc123"
+      }
+    },
+    {
+      "id": "https://spdx.org/licenses/Apache-2.0",
+      "labels": ["License"],
+      "properties": {
+        "name": "Apache License 2.0",
+        "uri": "https://spdx.org/licenses/Apache-2.0"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "rel_123",
+      "source": "https://w3id.org/mlentory/model/abc123",
+      "target": "https://spdx.org/licenses/Apache-2.0",
+      "type": "HAS_LICENSE",
+      "properties": {}
+    }
+  ],
+  "metadata": {
+    "start_uri": "https://w3id.org/mlentory/model/abc123",
+    "depth": 1,
+    "direction": "both",
+    "node_count": 2,
+    "edge_count": 1
+  }
+}
+```
+
 ## Configuration
 
 The API uses environment variables for configuration, reusing the same variables as the ETL pipeline:
@@ -442,6 +508,9 @@ curl http://localhost:8000/api/v1/models/facets/config
 
 # Get facet values with search
 curl "http://localhost:8000/api/v1/models/facets/values?field=keywords&search_query=medical&limit=20"
+
+# Platform statistics
+curl http://localhost:8000/api/v1/stats/platform
 
 # Health check
 curl http://localhost:8000/health
