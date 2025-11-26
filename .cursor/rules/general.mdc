@@ -9,6 +9,8 @@ project:
     A modular data pipeline that extracts ML model metadata from the web,
     normalizes it into the FAIR4ML schema, stores it in Neo4j, and indexes it
     in Elasticsearch for fast discovery.
+
+    When coding we want to avoid recursion, we want to use reusable functions.
   
   commit_message:
     - Use the git emoji conventions for the commit message.
@@ -63,9 +65,9 @@ workflow:
     - Local dev stack runs via `docker-compose up`.
 
   data_flow:
-    - Extractors → write raw data to `/data/raw/<source>/`.
-    - Transformers → normalize into FAIR4ML schema in `/data/normalized/<source>/`.
-    - Loaders → upsert FAIR4ML objects into Neo4j and Elasticsearch, creates an RDF file in `/data/rdf/<source>/`.
+    - Extractors → write raw data to `/data/1_raw/<source>/`.
+    - Transformers → normalize into FAIR4ML schema in `/data/2_normalized/<source>/`.
+    - Loaders → upsert FAIR4ML objects into Neo4j and Elasticsearch, creates an RDF file in `/data/3_rdf/<source>/`.
 
   dagster:
     - Project entrypoint: `etl/repository.py`
