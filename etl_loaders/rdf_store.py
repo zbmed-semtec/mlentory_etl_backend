@@ -466,6 +466,12 @@ def export_graph_neosemantics_batched(
                 )
 
             rdf_content = response.text
+            
+            # If there is already content, remove the lines with @prefix declarations
+            if total_chars>0:
+                rdf_content = "\n".join([line for line in rdf_content.split("\n") if not line.startswith("@prefix")])
+                rdf_content = rdf_content.strip() + "\n"
+            
             batch_chars = len(rdf_content)
             total_chars += batch_chars
 

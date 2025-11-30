@@ -371,3 +371,50 @@ def test_build_and_persist_models_rdf_invalid_json(tmp_path):
     with pytest.raises(json.JSONDecodeError):
         build_and_persist_models_rdf(str(json_file), config)
 
+@pytest.mark.integration
+@patch('etl_loaders.hf_rdf_loader.write_mlmodel_metadata_batch')
+@patch('etl_loaders.hf_rdf_loader.open_graph')
+@patch('etl_loaders.hf_rdf_loader.build_model_triples')
+def test_build_and_persist_models_rdf_calls_batch_metadata(mock_build_triples, mock_open_graph, mock_write_batch, tmp_path):
+    """Test that write_mlmodel_metadata_batch is called when write_metadata is True."""
+    from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+    from rdflib_neo4j import Neo4jStoreConfig
+
+    # Create a dummy JSON file with multiple models
+    models = [
+        {"https://schema.org/name": "model1"},
+        {"https://schema.org/name": "model2"},
+        {"https://schema.org/name": "model3"}
+    ]
+    json_file = tmp_path / "models.json"
+    json_file.write_text(json.dumps(models))
+    
+    config = Mock(spec=Neo4jStoreConfig)
+    mock_graph = Mock()
+    mock_open_graph.return_value = mock_graph
+    mock_build_triples.return_value = 5
+    mock_write_batch.return_value = 3
+    
+    # Set batch size smaller than total models to force multiple batches
+    result = build_and_persist_models_rdf(
+        json_path=str(json_file),
+        config=config,
+        write_metadata=True,
+        batch_size=2
+    )
+    
+    assert result["models_processed"] == 3
+    assert result["triples_added"] == 15 # 5 * 3
+    assert result["metadata_relationships"] == 6 # 3 * 2 batches? No, mock_write_batch return value is summed.
+    # If mock_write_batch returns 3, and it's called twice (once for 2 models, once for 1 model)
+    # It should be 6.
+    
+    assert mock_write_batch.call_count == 2
+    
+    # Verify first batch
+    args, _ = mock_write_batch.call_args_list[0]
+    assert len(args[0]) == 2
+    
+    # Verify second batch
+    args, _ = mock_write_batch.call_args_list[1]
+    assert len(args[0]) == 1

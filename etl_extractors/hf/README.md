@@ -97,18 +97,25 @@ The HF extraction is exposed as Dagster assets:
 ### `hf_raw_models`
 Extracts raw HF model metadata.
 
-**Configuration (env vars):**
-- `HF_NUM_MODELS` (default: 50)
-- `HF_UPDATE_RECENT` (default: true)
-- `HF_THREADS` (default: 4)
+**Configuration (config/etl/run_config.yaml):**
+```yaml
+platforms:
+  huggingface:
+    num_models: 2000          # Number of latest models to extract
+    update_recent: true       # Prioritize recently updated models
+    threads: 4                # Parallel threads for extraction
+    models_file_path: "/data/refs/hf_model_ids.txt"  # Optional: specific models to extract
+    base_model_iterations: 1  # Depth to follow base model references
+    enrichment_threads: 4     # Threads for enrichment operations
+    offset: 0                 # Pagination offset
+```
 
 **Output:** Path to models JSON
 
 ### `hf_enriched_entities`
 Depends on `hf_raw_models`. Identifies and extracts related entities.
 
-**Configuration (env vars):**
-- `HF_ENRICHMENT_THREADS` (default: 4)
+**Configuration:** Uses `enrichment_threads` from the YAML config above.
 
 **Output:** Dict mapping entity type to JSON path
 

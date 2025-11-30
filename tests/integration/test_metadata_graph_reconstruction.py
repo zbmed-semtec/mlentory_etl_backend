@@ -16,6 +16,7 @@ from typing import Dict, Any
 from etl_loaders.metadata_graph import (
     ensure_metadata_graph_constraints,
     write_mlmodel_metadata,
+    write_mlmodel_metadata_batch,
     reconstruct_mlmodel_at,
     cleanup_metadata_graph,
     cleanup_model_metadata,
@@ -448,3 +449,47 @@ class TestTemporalMetadataGraph:
         # Should create exactly 1 new snapshot (only name changed)
         assert count3 == 1
 
+    def test_batch_metadata_write(self, neo4j_config, sample_model_v1, sample_model_v2):
+        """Test writing metadata for multiple models in a batch."""
+
+        # Prepare batch
+        model1 = sample_model_v1
+        # Make model2 different from model1
+        model2 = copy.deepcopy(sample_model_v2)
+        model2["https://schema.org/identifier"] = ["https://huggingface.co/test/model-batch-2"]
+        model2["https://schema.org/url"] = "https://huggingface.co/test/model-batch-2"
+        
+        uri1 = LoadHelpers.mint_subject(model1)
+        uri2 = LoadHelpers.mint_subject(model2)
+        
+        cleanup_model_metadata(uri1, neo4j_config)
+        cleanup_model_metadata(uri2, neo4j_config)
+
+        ts1 = datetime(2024, 1, 1, 10, 0, 0)
+        
+        # Write batch
+        count = write_mlmodel_metadata_batch([model1, model2], ts1, neo4j_config)
+        
+        # Should create relationships for both models
+        assert count > 0
+        
+        # Verify both exist
+        r1 = reconstruct_mlmodel_at(uri1, ts1, neo4j_config)
+        r2 = reconstruct_mlmodel_at(uri2, ts1, neo4j_config)
+        
+        assert r1["https://schema.org/name"] == ["Test Model V1"]
+        assert r2["https://schema.org/name"] == ["Test Model V2 - Updated"]
+        
+        # Verify updating in batch works
+        model1_v2 = copy.deepcopy(model1)
+        model1_v2["https://schema.org/name"] = "Test Model V1 Updated"
+        
+        ts2 = datetime(2024, 1, 2, 10, 0, 0)
+        
+        # Pass both again, but only one changed
+        count_update = write_mlmodel_metadata_batch([model1_v2, model2], ts2, neo4j_config)
+        
+        assert count_update > 0
+        
+        r1_updated = reconstruct_mlmodel_at(uri1, ts2, neo4j_config)
+        assert r1_updated["https://schema.org/name"] == ["Test Model V1 Updated"]

@@ -139,9 +139,17 @@ def _extract_property_snapshots(
             continue
         if predicate_iri == METADATA_ALIAS:  # Skip metadata alias
             continue
-
+        
+        # Get short name for the property
+        short_name = predicate_iri.rsplit("/", 1)[-1]
+        short_name = short_name.rsplit("#", 1)[-1]
+        
         # Get extraction metadata for this property
         prop_meta = extraction_meta.get(predicate_iri)
+        
+        if prop_meta is None:
+            prop_meta = extraction_meta.get(short_name)
+        
         if isinstance(prop_meta, dict):
             # Metadata provided as a plain dictionary
             extraction_method = prop_meta.get("extraction_method", "unknown")
@@ -177,17 +185,165 @@ def _extract_property_snapshots(
                 value_uri_param = None
 
             snapshot = {
-                "predicate_iri": predicate_iri,
-                "value": value_param,
-                "value_uri": value_uri_param,
-                "extraction_method": extraction_method,
-                "confidence": confidence,
-                "notes": notes,
+                    "predicate_iri": predicate_iri,
+                    "value": value_param,
+                    "value_uri": value_uri_param,
+                    "extraction_method": extraction_method,
+                    "confidence": confidence,
+                    "notes": notes,
             }
             snapshot["snapshot_hash"] = _generate_snapshot_hash(snapshot)
             snapshots.append(snapshot)
 
     return snapshots
+
+
+def write_mlmodel_metadata_batch(
+    models: List[Dict[str, Any]],
+    extracted_at: datetime,
+    cfg: Optional[Neo4jConfig] = None,
+) -> int:
+    """
+    Write metadata for a batch of MLModels to the temporal property graph.
+
+    Efficiently processes multiple models in fewer Cypher queries.
+    Only creates new property snapshots when properties actually change, using
+    validity intervals to track temporal changes efficiently.
+
+    Args:
+        models: List of normalized MLModel dictionaries
+        extracted_at: Timestamp when this extraction occurred
+        cfg: Neo4j configuration. If None, loads from environment.
+
+    Returns:
+        Number of new HAS_PROPERTY_SNAPSHOT relationships created
+    """
+    env_cfg = cfg or Neo4jConfig.from_env()
+    
+    if not models:
+        return 0
+
+    # 1. Prepare data for all models
+    model_data = []
+    all_model_uris = []
+    
+    for model in models:
+        # Get the model URI
+        try:
+            model_uri = LoadHelpers.mint_subject(model)
+        except Exception as e:
+            logger.warning(f"Could not mint subject for model in batch: {e}")
+            continue
+
+        all_model_uris.append(model_uri)
+        
+        # Get extraction metadata
+        extraction_meta = model.get(METADATA_ALIAS, {})
+        
+        # Extract current property snapshots
+        current_snapshots = _extract_property_snapshots(model, extraction_meta)
+        
+        model_data.append({
+            "uri": model_uri,
+            "snapshots": current_snapshots,
+            "current_hashes": {s["snapshot_hash"] for s in current_snapshots}
+        })
+
+    if not all_model_uris:
+        return 0
+
+    # 2. Batch query existing active snapshots
+    existing_snapshots_query = """
+        MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+        WHERE m.uri IN $model_uris AND r.valid_to IS NULL
+        RETURN m.uri as model_uri, collect(p.snapshot_hash) as snapshot_hashes
+    """
+    
+    existing_results = _run_cypher(
+        existing_snapshots_query,
+        {"model_uris": all_model_uris},
+        cfg=env_cfg
+    )
+    
+    existing_hashes_map = {
+        record["model_uri"]: set(record["snapshot_hashes"]) 
+        for record in existing_results
+    }
+    
+    # 3. Calculate diffs
+    new_snapshots_flat = []
+    hashes_to_close_flat = []
+    
+    for data in model_data:
+        uri = data["uri"]
+        current_snapshots = data["snapshots"]
+        current_hashes = data["current_hashes"]
+        existing_hashes = existing_hashes_map.get(uri, set())
+        
+        # Identify new snapshots
+        for snapshot in current_snapshots:
+            if snapshot["snapshot_hash"] not in existing_hashes:
+                s_copy = snapshot.copy()
+                s_copy["model_uri"] = uri
+                new_snapshots_flat.append(s_copy)
+                
+        # Identify snapshots to close
+        to_close = existing_hashes - current_hashes
+        if to_close:
+             hashes_to_close_flat.append({
+                 "model_uri": uri,
+                 "hashes": list(to_close)
+             })
+
+    relationships_created = 0
+    
+    # 4. Batch Write New Snapshots
+    if new_snapshots_flat:
+        create_query = """
+            UNWIND $snapshots AS s
+            MERGE (m:MLModel {uri: s.model_uri})
+            MERGE (p:MLModelPropertySnapshot {snapshot_hash: s.snapshot_hash})
+              ON CREATE SET
+                p.predicate_iri     = s.predicate_iri,
+                p.value             = s.value,
+                p.value_uri         = s.value_uri,
+                p.extraction_method = s.extraction_method,
+                p.confidence        = s.confidence,
+                p.notes             = s.notes
+            MERGE (m)-[r:HAS_PROPERTY_SNAPSHOT]->(p)
+            ON CREATE SET
+              r.valid_from = datetime($extracted_at),
+              r.valid_to   = null
+        """
+        _run_cypher(
+            create_query,
+            {
+                "snapshots": new_snapshots_flat,
+                "extracted_at": extracted_at.isoformat()
+            },
+            cfg=env_cfg
+        )
+        relationships_created = len(new_snapshots_flat)
+
+    # 5. Batch Close Removed Snapshots
+    if hashes_to_close_flat:
+        close_query = """
+            UNWIND $closes AS c
+            MATCH (m:MLModel {uri: c.model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+            WHERE r.valid_to IS NULL AND p.snapshot_hash IN c.hashes
+            SET r.valid_to = datetime($extracted_at)
+        """
+        _run_cypher(
+            close_query,
+            {
+                "closes": hashes_to_close_flat,
+                "extracted_at": extracted_at.isoformat()
+            },
+            cfg=env_cfg
+        )
+        
+    logger.debug(f"Processed batch of {len(models)} models, created {relationships_created} new snapshots")
+    return relationships_created
 
 
 def write_mlmodel_metadata(
@@ -212,91 +368,7 @@ def write_mlmodel_metadata(
     Raises:
         ValueError: If model is missing required identifier/name fields
     """
-    env_cfg = cfg or Neo4jConfig.from_env()
-
-    # Get the model URI using the same logic as RDF loader
-    model_uri = LoadHelpers.mint_subject(model)
-
-    # Get extraction metadata if available
-    extraction_meta = model.get(METADATA_ALIAS, {})
-
-    # Extract current property snapshots
-    current_snapshots = _extract_property_snapshots(model, extraction_meta)
-
-    # Query existing active snapshots (valid_to is null) and their hashes
-    existing_results = _run_cypher(
-        """
-        MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
-        WHERE r.valid_to IS NULL
-        RETURN p.snapshot_hash as snapshot_hash
-        """,
-        {"model_uri": model_uri},
-        cfg=env_cfg,
-    )
-
-    # Create set of existing snapshot hashes for fast lookup
-    existing_hashes = {record["snapshot_hash"] for record in existing_results}
-
-    # Create set of current snapshot hashes
-    current_hashes = {snapshot["snapshot_hash"] for snapshot in current_snapshots}
-
-    # Find snapshots that need to be created/updated (not already active)
-    new_snapshots = [
-        snapshot for snapshot in current_snapshots
-        if snapshot["snapshot_hash"] not in existing_hashes
-    ]
-
-    # Find snapshots that need to be closed (active but not in current set)
-    hashes_to_close = existing_hashes - current_hashes
-
-    relationships_created = 0
-
-    # Batch create/update all new snapshots in one query
-    if new_snapshots:
-        _run_cypher(
-            """
-            UNWIND $snapshots AS s
-            MERGE (m:MLModel {uri: $model_uri})
-            MERGE (p:MLModelPropertySnapshot {snapshot_hash: s.snapshot_hash})
-              ON CREATE SET
-                p.predicate_iri     = s.predicate_iri,
-                p.value             = s.value,
-                p.value_uri         = s.value_uri,
-                p.extraction_method = s.extraction_method,
-                p.confidence        = s.confidence,
-                p.notes             = s.notes
-            MERGE (m)-[r:HAS_PROPERTY_SNAPSHOT]->(p)
-            ON CREATE SET
-              r.valid_from = datetime($extracted_at),
-              r.valid_to   = null
-            """,
-            {
-                "model_uri": model_uri,
-                "snapshots": new_snapshots,
-                "extracted_at": extracted_at.isoformat(),
-            },
-            cfg=env_cfg,
-        )
-        relationships_created = len(new_snapshots)
-
-    # Batch close removed snapshots in one query
-    if hashes_to_close:
-        _run_cypher(
-            """
-            MATCH (m:MLModel {uri: $model_uri})-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
-            WHERE r.valid_to IS NULL AND p.snapshot_hash IN $hashes_to_close
-            SET r.valid_to = datetime($extracted_at)
-            """,
-            {
-                "model_uri": model_uri,
-                "hashes_to_close": list(hashes_to_close),
-                "extracted_at": extracted_at.isoformat(),
-            },
-            cfg=env_cfg,
-        )
-
-    logger.debug(f"Created {relationships_created} new metadata snapshots for model {model_uri}")
-    return relationships_created
+    return write_mlmodel_metadata_batch([model], extracted_at, cfg)
 
 
 def reconstruct_mlmodel_at(
@@ -409,104 +481,102 @@ def cleanup_metadata_graph(cfg: Optional[Neo4jConfig] = None) -> None:
     logger.info("Cleaned up temporal metadata graph")
 
 
-def build_and_export_metadata_rdf(
-    output_ttl_path: Optional[str] = None,
+def export_metadata_graph_json(
+    output_json_path: Optional[str] = None,
     cfg: Optional[Neo4jConfig] = None,
 ) -> Dict[str, Any]:
     """
-    Export the temporal metadata property graph as RDF triples.
+    Export the temporal metadata property graph as Neo4j JSON via APOC.
 
-    Queries the metadata graph and converts it to RDF triples using custom
-    namespaces for the metadata schema, including validity intervals.
+    Uses apoc.export.json.query to export the MLModel–HAS_PROPERTY_SNAPSHOT–
+    MLModelPropertySnapshot subgraph to a JSON file on the Neo4j server.
 
     Args:
-        output_ttl_path: Optional path to save Turtle file
+        output_json_path: Optional path to save JSON file
         cfg: Neo4j configuration. If None, loads from environment.
 
     Returns:
         Dict with export statistics:
-        - triples_added: Number of triples exported
-        - ttl_path: Path to saved Turtle file (if requested)
+        - nodes: Number of nodes exported
+        - relationships: Number of relationships exported
+        - json_path: Path to saved JSON file (if requested)
         - timestamp: Export timestamp
+        - apoc: APOC export details
     """
     env_cfg = cfg or Neo4jConfig.from_env()
 
-    # Define custom namespaces for metadata
-    MLENTORY = Namespace("https://w3id.org/mlentory/")
-    MLENTORY_META = Namespace("https://w3id.org/mlentory/mlentory_graph/meta/")
+    if not output_json_path:
+        raise ValueError("output_json_path must be provided for JSON export")
 
-    # Create RDF graph
-    graph = Graph()
-    graph.bind("mlentory", MLENTORY)
-    graph.bind("mlentory-meta", MLENTORY_META)
-    graph.bind("rdf", RDF)
-    graph.bind("xsd", XSD)
+    # Neo4j writes files relative to its `dbms.directories.export` (import) dir.
+    # Map the absolute path to a filename Neo4j can write to (e.g. just basename).
+    export_filename = Path(output_json_path).name  # e.g. "metadata.json"
 
-    # Query metadata snapshots with validity intervals
-    results = _run_cypher(
-        """
-        MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
-        RETURN m.uri as model_uri, p.predicate_iri as property_iri,
-               p.value as value, p.value_uri as value_uri,
-               r.valid_from as valid_from, r.valid_to as valid_to,
-               p.extraction_method as extraction_method,
-               p.confidence as confidence,
-               p.notes as notes,
-               p.snapshot_hash as snapshot_hash
-        """,
+    cypher = """
+    CALL apoc.export.json.query(
+      "
+      MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot)
+      RETURN m, r, p
+      ",
+      null,
+      {useTypes: true, stream: true}
+    )
+    YIELD data, source, format, nodes, relationships, properties, time
+    WITH collect(data) AS rawChunks, source, format, nodes, relationships, properties, time
+    WITH apoc.text.join(rawChunks, '') AS rawJson,
+         source, format, nodes, relationships, properties, time
+    WITH split(rawJson, '\\n') AS lines,
+         source, format, nodes, relationships, properties, time
+    WITH [x IN lines WHERE x <> '' | apoc.convert.fromJsonMap(x)] AS jsonList,
+         source, format, nodes, relationships, properties, time
+    RETURN apoc.convert.toJson({export_info: {timestamp: datetime(), format: 'neo4j_apoc_export', query: 'MATCH (m:MLModel)-[r:HAS_PROPERTY_SNAPSHOT]->(p:MLModelPropertySnapshot) RETURN m, r, p', total_objects: size(jsonList)}, data: jsonList}) AS jsonData,
+           source, format, nodes, relationships, properties, time
+    """
+
+    result = _run_cypher(
+        cypher,
+        {},
         cfg=env_cfg,
     )
 
-    triples_added = 0
+    if not result:
+        raise RuntimeError("APOC JSON export returned no result")
 
-    for record in results:
-        # Create blank node for the property snapshot
-        snapshot_event = BNode()
+    # APOC now returns a single properly formatted JSON string
+    json_object = json.loads(result[0]["jsonData"])["data"]
+    
+    logger.info(f"JSON object: {json_object}")
+    logger.info(f"len JSON object: {len(json_object)}")
+    logger.info(f"type JSON object: {type(json_object)}")
+    
+    json_string = json.dumps(json_object, indent=2, ensure_ascii=False)
 
-        # Add the extraction event as a triple
-        model_uri = URIRef(record["model_uri"])
-        property_iri = URIRef(record["property_iri"])
+    # Write the JSON string directly to the output path
+    output_path = Path(output_json_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(json_string)
 
-        # Add the main property triple
-        if record["value"] is not None:
-            graph.add((model_uri, property_iri, Literal(record["value"])))
-        elif record["value_uri"] is not None:
-            graph.add((model_uri, property_iri, URIRef(record["value_uri"])))
-
-        # Add metadata about the snapshot with validity intervals
-        graph.add((model_uri, MLENTORY_META.propertySnapshot, snapshot_event))
-        graph.add((snapshot_event, MLENTORY_META.property, property_iri))
-        graph.add((snapshot_event, MLENTORY_META.validFrom,
-                  Literal(record["valid_from"], datatype=XSD.dateTime)))
-        graph.add((snapshot_event, MLENTORY_META.extractionMethod,
-                  Literal(record["extraction_method"])))
-        graph.add((snapshot_event, MLENTORY_META.confidence,
-                  Literal(record["confidence"], datatype=XSD.decimal)))
-
-        if record["notes"]:
-            graph.add((snapshot_event, MLENTORY_META.notes, Literal(record["notes"])))
-
-        # Add valid_to if not null
-        if record["valid_to"] is not None:
-            graph.add((snapshot_event, MLENTORY_META.validTo,
-                      Literal(record["valid_to"], datatype=XSD.dateTime)))
-
-        triples_added += 1
-
-    logger.info(f"Exported {triples_added} temporal metadata triples as RDF")
-
-    # Save Turtle file if requested
-    ttl_path = None
-    if output_ttl_path:
-        ttl_file = Path(output_ttl_path)
-        ttl_file.parent.mkdir(parents=True, exist_ok=True)
-
-        graph.serialize(destination=str(ttl_file), format="turtle")
-        ttl_path = str(ttl_file)
-        logger.info(f"Saved temporal metadata RDF to Turtle file: {ttl_path}")
+    # Get stats from the first result row
+    stats = result[0]
+    
+    logger.info(
+        "Exported metadata graph: %s nodes, %s relationships → %s",
+        stats.get("nodes", 0),
+        stats.get("relationships", 0),
+        output_json_path,
+    )
 
     return {
-        "triples_added": triples_added,
-        "ttl_path": ttl_path,
+        "nodes": stats.get("nodes", 0),
+        "relationships": stats.get("relationships", 0),
+        "json_path": output_json_path,
         "timestamp": datetime.now().isoformat(),
+        "apoc": {
+            "source": stats.get("source"),
+            "nodes": stats.get("nodes"),
+            "relationships": stats.get("relationships"),
+            "properties": stats.get("properties"),
+            "time_ms": stats.get("time"),
+        },
     }

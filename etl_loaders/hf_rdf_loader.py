@@ -22,7 +22,7 @@ from rdflib.namespace import RDF, XSD
 from rdflib_neo4j import Neo4jStoreConfig
 
 from etl_loaders.rdf_store import namespaces, open_graph, export_graph_neosemantics_batched
-from etl_loaders.metadata_graph import ensure_metadata_graph_constraints, write_mlmodel_metadata
+from etl_loaders.metadata_graph import ensure_metadata_graph_constraints, write_mlmodel_metadata_batch
 from etl_loaders.load_helpers import LoadHelpers
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,15 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         # Reference publication
         "https://w3id.org/codemeta/referencePublication",
         # License
-        "https://w3id.org/codemeta/license",
+        "https://schema.org/license",
+        # Keywords
+        "https://schema.org/keywords",
+        # In Language
+        "https://schema.org/inLanguage",
+        # ML Task
+        "https://w3id.org/fair4ml/mlTask",
+        # Model Category
+        "https://w3id.org/fair4ml/modelCategory",
         # Base models
         "https://w3id.org/fair4ml/fineTunedFrom",
         # Datasets
@@ -110,6 +118,7 @@ def build_and_persist_models_rdf(
     config: Neo4jStoreConfig,
     output_ttl_path: Optional[str] = None,
     write_metadata: bool = True,
+    batch_size: int = 20,
 ) -> Dict[str, Any]:
     """
     Build RDF triples from normalized HF models and persist to Neo4j.
@@ -119,6 +128,7 @@ def build_and_persist_models_rdf(
         config: Neo4jStoreConfig for connecting to Neo4j
         output_ttl_path: Optional path to save Turtle file
         write_metadata: Whether to write metadata to parallel property graph (default: True)
+        batch_size: Number of models to process before logging progress (default: 100)
 
     Returns:
         Dict with loading statistics:
@@ -163,26 +173,29 @@ def build_and_persist_models_rdf(
     run_timestamp = datetime.now()
     
     try:
-        for idx, model in enumerate(models):
+        models_batches = [models[i:i + batch_size] for i in range(0, len(models), batch_size)]
+        
+        for batch_idx, batch in enumerate(models_batches):
             try:
-                subject_uri = LoadHelpers.mint_subject(model)
-                subject_uris.append(subject_uri)
-                triples_added = build_model_triples(graph, model)
-                total_triples += triples_added
+                for model in batch:
+                    subject_uri = LoadHelpers.mint_subject(model)
+                    subject_uris.append(subject_uri)
+                    triples_added = build_model_triples(graph, model)
+                    total_triples += triples_added
 
                 # Write metadata to parallel property graph if enabled
                 if write_metadata:
-                    metadata_relationships = write_mlmodel_metadata(model, run_timestamp)
+                    metadata_relationships = write_mlmodel_metadata_batch(batch, run_timestamp)
                     total_metadata_relationships += metadata_relationships
 
-                if (idx + 1) % 100 == 0:
-                    logger.info(f"Processed {idx + 1}/{len(models)} models, "
+                if (batch_idx + 1) % 100 == 0:
+                    logger.info(f"Processed {batch_idx + 1}/{len(models_batches)} batches, "
                               f"added {total_triples} triples")
             except Exception as e:
                 errors += 1
-                model_id = model.get("https://schema.org/identifier", f"unknown_{idx}")
-                logger.error(f"Error building triples for model {model_id}: {e}", 
-                           exc_info=True)
+                model_ids = [model.get("https://schema.org/identifier") for model in batch]
+                logger.error(f"Error building triples for models {model_ids}: {e}", 
+                             exc_info=True)
                 logger.error(f"Stack trace: {traceback.format_exc()}")
         
         logger.info(f"Finished building triples: {total_triples} triples for "

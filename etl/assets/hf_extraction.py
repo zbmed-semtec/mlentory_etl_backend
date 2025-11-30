@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Set, Tuple, List, Optional, Dict
@@ -14,6 +12,7 @@ import pandas as pd
 from dagster import asset, AssetIn
 
 from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper
+from etl.config import get_hf_config
 
 
 logger = logging.getLogger(__name__)
@@ -47,20 +46,6 @@ def _read_model_ids_from_file(file_path: str) -> List[str]:
     
     logger.info(f"Read {len(model_ids)} model IDs from {file_path}")
     return model_ids
-
-
-@dataclass
-class HFModelsExtractionConfig:
-    num_models: int = int(os.getenv("HF_NUM_MODELS", "50"))
-    update_recent: bool = os.getenv("HF_UPDATE_RECENT", "true").lower() == "true"
-    threads: int = int(os.getenv("HF_THREADS", "4"))
-    models_file_path: str = os.getenv("HF_MODELS_FILE_PATH", "/data/refs/hf_model_ids.txt")
-    base_model_iterations: int = int(os.getenv("HF_BASE_MODEL_ITERATIONS", "1"))
-
-
-@dataclass
-class HFEnrichmentConfig:
-    threads: int = int(os.getenv("HF_ENRICHMENT_THREADS", "4"))
 
 
 @asset(group_name="hf", tags={"pipeline": "hf_etl"})
@@ -100,7 +85,7 @@ def hf_raw_models_latest(run_folder: str) -> Tuple[Optional[pd.DataFrame], str]:
     Returns:
         Tuple of (models_dataframe, run_folder) to pass to merge asset
     """
-    config = HFModelsExtractionConfig()
+    config = get_hf_config()
     extractor = HFExtractor()
     
     output_root = Path(run_folder).parent.parent  # Go up to /data
@@ -133,7 +118,7 @@ def hf_raw_models_from_file(run_folder: str) -> Tuple[Optional[pd.DataFrame], st
     Returns:
         Tuple of (models_dataframe, run_folder) to pass to merge asset
     """
-    config = HFModelsExtractionConfig()
+    config = get_hf_config()
     extractor = HFExtractor()
     
     # Read model IDs from file
@@ -242,7 +227,7 @@ def hf_add_ancestor_models(models_data: Tuple[str, str]) -> Tuple[str, str]:
         Path to the saved base models JSON file (``hf_models_with_ancestors.json``)
     """
     models_json_path, run_folder = models_data
-    config = HFModelsExtractionConfig()
+    config = get_hf_config()
     extractor = HFExtractor()
     enrichment = HFEnrichment(extractor=extractor)
     
@@ -306,7 +291,7 @@ def hf_enriched_datasets(datasets_data: Tuple[Dict[str, List[str]], str]) -> str
     for model_id, datasets in model_datasets_dict.items():
         dataset_names.update(datasets)
     
-    config = HFEnrichmentConfig()
+    config = get_hf_config()
     extractor = HFExtractor()
     
     if not dataset_names:
@@ -317,7 +302,7 @@ def hf_enriched_datasets(datasets_data: Tuple[Dict[str, List[str]], str]) -> str
     output_root = Path(run_folder).parent.parent  # Go up to /data
     _, json_path = extractor.extract_specific_datasets(
         dataset_names=list(dataset_names),
-        threads=config.threads,
+        threads=config.enrichment_threads,
         output_root=output_root,
     )
     
