@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query
@@ -35,10 +35,9 @@ from api.schemas.responses import (
     ModelDetail,
     ModelListItem,
     PaginatedResponse,
-    RelatedEntities,
 )
 from api.services.elasticsearch_service import elasticsearch_service
-from api.services.neo4j_service import neo4j_service
+from api.services.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
 
@@ -96,62 +95,8 @@ async def list_models(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/models/{model_id}", response_model=ModelDetail)
-async def get_model_detail(
-    model_id: str,
-    include_entities: List[str] = Query(
-        [],
-        description="List of related entities to include from Neo4j",
-        examples=["license", "datasets", "articles", "keywords", "tasks", "languages"],
-    ),
-) -> ModelDetail:
-    """
-    Get detailed information about a specific ML model.
-
-    Returns basic model info from Elasticsearch plus optional related entities from Neo4j.
-    The model_id should be the full URI/identifier of the model.
-    """
-    try:
-        # First get basic model info from Elasticsearch
-        model = elasticsearch_service.get_model_by_id(model_id)
-        if not model:
-            raise HTTPException(status_code=404, detail="Model not found")
-
-        # If no entities requested, return just the basic model info
-        if not include_entities:
-            return ModelDetail(
-                identifier=[model.db_identifier],  # MLModel expects list of identifiers
-                name=model.name,
-                description=model.description,
-                sharedBy=model.sharedBy,  # Use camelCase field name
-                license=model.license,
-                mlTask=model.mlTask,  # Use camelCase field name
-                keywords=model.keywords,
-                platform=model.platform,
-                related_entities=RelatedEntities(),  # Empty related entities
-            )
-
-        # Get related entities from Neo4j
-        related_entities = neo4j_service.get_related_entities(model_id, include_entities)
-
-        return ModelDetail(
-            identifier=[model.db_identifier],  # MLModel expects list of identifiers
-            name=model.name,
-            description=model.description,
-            sharedBy=model.sharedBy,  # Use camelCase field name
-            license=model.license,
-            mlTask=model.mlTask,  # Use camelCase field name
-            keywords=model.keywords,
-            platform=model.platform,
-            related_entities=related_entities,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting model detail for {model_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
+# NOTE: Static routes MUST be defined BEFORE dynamic {model_id} route
+# Otherwise FastAPI will match "search", "facets", etc. as model IDs
 
 @router.get("/models/search", response_model=FacetedSearchResponse)
 async def search_models_with_facets(
@@ -411,3 +356,88 @@ async def get_facet_values(
     except Exception as e:
         logger.error(f"Error retrieving facet values: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error retrieving facet values: {str(e)}")
+
+
+# Dynamic route MUST be last - it catches all /models/{anything}
+@router.get("/models/{model_id}", response_model=ModelDetail)
+async def get_model_detail(
+    model_id: str,
+    resolve_properties: List[str] = Query(
+        [],
+        description="List of properties/relationships to resolve as full entities (e.g., 'HAS_LICENSE', 'author')",
+        examples=["HAS_LICENSE", "author", "dataset"],
+    ),
+) -> ModelDetail:
+    """
+    Get detailed information about a specific ML model.
+
+    Returns basic model info from Elasticsearch plus optional related entities from Neo4j.
+    The model_id can be the full URI or the alphanumeric ID.
+    
+    To include related entities, specify the relationship types in `resolve_properties`.
+    """
+    try:
+        # First get basic model info from Elasticsearch
+        model = elasticsearch_service.get_model_by_id(model_id)
+        if not model:
+            raise HTTPException(status_code=404, detail="Model not found")
+        
+        model_response = ModelDetail(
+            identifier=[model.db_identifier],
+            name=model.name,
+            description=model.description,
+            sharedBy=model.sharedBy,
+            license=model.license,
+            mlTask=model.mlTask,
+            keywords=model.keywords,
+            platform=model.platform,
+            related_entities={}
+        )
+        
+
+        # If no entities requested, return just the basic model info
+        if not resolve_properties:
+            return model_response
+
+        # Get related entities from Neo4j using GraphService
+        # We traverse outgoing relationships matching the requested types
+        graph_data = graph_service.get_entity_graph(
+            entity_id=model_id,
+            depth=1,
+            relationships=resolve_properties,
+            direction="outgoing",
+            entity_label="MLModel",
+        )
+
+        related_entities: Dict[str, List[Dict[str, Any]]] = {}
+        
+        # Map nodes by ID for easy lookup
+        nodes_map = {n.id: n for n in graph_data.nodes}
+        start_uri = graph_data.metadata.get("start_uri")
+
+        # Group neighbor nodes by relationship type
+        for edge in graph_data.edges:
+            # Only care about edges starting from our model
+            if edge.source == start_uri:
+                rel_type = edge.type
+                target_node = nodes_map.get(edge.target)
+                
+                if target_node:
+                    if rel_type not in related_entities:
+                        related_entities[rel_type] = []
+                    
+                    # Create entity dict from node properties + uri
+                    entity_dict = target_node.properties.copy()
+                    entity_dict["uri"] = target_node.id
+                    
+                    related_entities[rel_type].append(entity_dict)
+
+        model_response.related_entities = related_entities
+        
+        return model_response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting model detail for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
