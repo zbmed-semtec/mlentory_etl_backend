@@ -12,12 +12,49 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from api.schemas.entities import EntityBatchRequest, EntityBatchResponse
 from api.schemas.graph import GraphResponse
 from api.services.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post("/graph/entities_by_ids_batch", response_model=EntityBatchResponse)
+async def get_entities_batch(request: EntityBatchRequest) -> EntityBatchResponse:
+    """
+    📦 Batch fetch entity properties by ID.
+
+    Retrieves properties for a list of entity URIs. Useful for bulk data fetching
+    in frontend components.
+
+    **Request Body:**
+    - `entity_ids`: List of entity URIs (can include angle brackets `<>`)
+    - `properties`: Optional list of property names to fetch. If omitted, returns all properties.
+
+    **Response:**
+    - `entities`: Map of URI -> {property: [values]}
+    - `count`: Number of entities found
+    """
+    try:
+        logger.info(f"Batch fetching {len(request.entity_ids)} entities")
+        
+        entities_data = graph_service.get_entities_properties_batch(
+            entity_ids=request.entity_ids,
+            properties=request.properties
+        )
+        
+        return EntityBatchResponse(
+            count=len(entities_data),
+            entities=entities_data,
+            # Dummy cache stats until caching is implemented
+            cache_stats={"hits": 0, "misses": len(entities_data), "hit_rate": 0.0}
+        )
+
+    except Exception as e:
+        logger.error(f"Error in batch entity fetch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/graph/{entity_id}", response_model=GraphResponse)

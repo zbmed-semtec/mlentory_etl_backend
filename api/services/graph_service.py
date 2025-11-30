@@ -256,6 +256,116 @@ class GraphService:
             logger.error(f"Error traversing graph for {entity_uri}: {e}", exc_info=True)
             return GraphResponse(nodes=[], edges=[], metadata={"error": str(e)})
 
+    def get_entities_properties_batch(
+        self,
+        entity_ids: List[str],
+        properties: Optional[List[str]] = None
+    ) -> Dict[str, Dict[str, List[str]]]:
+        """
+        Fetch properties for multiple entities in a single batch query.
+
+        Args:
+            entity_ids: List of entity URIs or IDs. Angle brackets will be stripped.
+            properties: Optional list of specific properties to fetch.
+                        If None/empty, fetches all properties.
+
+        Returns:
+            Dictionary mapping Entity URI -> { Property Name -> List[Values] }
+        """
+        if not entity_ids:
+            return {}
+
+        # Clean IDs (strip <>)
+        clean_ids = [
+            eid.strip("<>") if eid.strip().startswith("<") and eid.strip().endswith(">") else eid.strip()
+            for eid in entity_ids
+        ]
+
+        # Determine what to return
+        if properties:
+            # Return specific properties
+            # We construct a map projection in Cypher
+            # properties are typically single values or lists in Neo4j.
+            # We need to ensure everything is a list of strings for the response format.
+            
+            # Sanitize property names to simple alphanumeric to avoid injection
+            safe_props = [p for p in properties if p.isalnum() or p.replace("_","").replace(".","").isalnum()]
+            
+            if not safe_props:
+                # Fallback to returning all properties if sanitization removed everything
+                return_clause = "properties(n)"
+            else:
+                # Construct map projection: {prop1: n.prop1, prop2: n.prop2}
+                # Note: If a property doesn't exist on a node, it returns null
+                projection_items = [f"{p}: n.{p}" for p in safe_props]
+                return_clause = f"{{{', '.join(projection_items)}}}"
+        else:
+            # Return all properties
+            return_clause = "properties(n)"
+
+        props_query = f"""
+        UNWIND $uris as uri
+        MATCH (n {{uri: uri}})-[r]->(m)
+        RETURN n.uri as uri, {return_clause} as props
+        """
+        
+        rels_query = f"""
+        UNWIND $uris AS uri
+        MATCH (n {{uri: uri}})-[r]->(m)
+        RETURN
+          n.uri AS uri,
+          type(r) AS rel_type,
+          collect(DISTINCT m.uri) AS targets
+        """
+        
+        response_data = {}
+
+        try:
+            results = _run_cypher(props_query, {"uris": clean_ids}, self.config)
+            for record in results:
+                uri = record.get("uri")
+                props_raw = record.get("props", {})
+                relationships_raw = record.get("relationships", {})
+                logger.info("\n--------------------------------\n")
+                logger.info(f"Record: {record}")
+                logger.info("\n--------------------------------\n")
+                targets_uri = record.get("targets_uri", {})
+                
+                if not uri:
+                    continue
+                    
+                # Normalize values to List[str]
+                normalized_props = {}
+                for key, val in props_raw.items():
+                    if val is None:
+                        continue
+                    if isinstance(val, list):
+                        normalized_props[key] = [str(v) for v in val if v is not None]
+                    else:
+                        normalized_props[key] = [str(val)]
+                
+                for relationship in relationships_raw:
+                    if relationship not in normalized_props:
+                        normalized_props[relationship] = []
+                    normalized_props[relationship].append(targets_uri)
+                
+                response_data[uri] = normalized_props
+            
+            results = _run_cypher(rels_query, {"uris": clean_ids}, self.config)
+            for record in results:
+                uri = record.get("uri")
+                rel_type = record.get("rel_type")
+                targets = record.get("targets") or []
+                if not uri:
+                    continue
+                response_data[uri][rel_type] = targets
+            
+            return response_data
+
+        except Exception as e:
+            logger.error(f"Error fetching batch properties: {e}", exc_info=True)
+            return {}
+
     def _build_entity_uri(self, entity_id: str) -> str:
         """
         Reconstruct the full entity URI from the compact identifier.
