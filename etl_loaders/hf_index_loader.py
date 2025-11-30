@@ -14,7 +14,11 @@ from typing import Any, Dict, List, Optional
 
 from elasticsearch_dsl import Document, Keyword, Text, connections
 
-from etl_loaders.elasticsearch_store import ElasticsearchConfig, create_elasticsearch_client
+from etl_loaders.elasticsearch_store import (
+    ElasticsearchConfig,
+    create_elasticsearch_client,
+    clean_index,
+)
 from etl_loaders.load_helpers import LoadHelpers
 
 logger = logging.getLogger(__name__)
@@ -149,6 +153,18 @@ def index_hf_models(
         "index": config.hf_models_index,
         "input_file": str(json_file),
     }
+
+
+def clean_hf_models_index(
+    es_config: Optional[ElasticsearchConfig] = None,
+) -> Dict[str, Any]:
+    """Clean the Hugging Face models Elasticsearch index.
+
+    This removes all documents from the HF models index configured via
+    ``ELASTIC_HF_MODELS_INDEX`` while keeping the index and its mappings.
+    """
+    config = es_config or ElasticsearchConfig.from_env()
+    return clean_index(config.hf_models_index, cfg=config)
 
 
 
