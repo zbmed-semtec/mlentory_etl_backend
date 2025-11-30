@@ -23,7 +23,7 @@ Architecture Overview:
          |          v
          |     Elasticsearch (indexed model data)
          |
-         +---> Neo4j Service (services/neo4j_service.py)
+         +---> Graph Service (services/graph_service.py)
                     |
                     v
                Neo4j (graph relationships)

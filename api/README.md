@@ -18,7 +18,8 @@ api/
 │   └── responses.py          # Pydantic response models (extends FAIR4ML schemas)
 └── services/
     ├── elasticsearch_service.py  # Elasticsearch query logic
-    └── neo4j_service.py          # Neo4j relationship queries
+    └── graph_service.py          # Graph exploration & relationship queries
+    └── faceted_search.py          # Faceted search service
 ```
 
 ### Design Principles
@@ -59,24 +60,18 @@ Handles all Elasticsearch queries for model search and retrieval.
 - `search_models(search_query, page, page_size)` - Paginated search
 - `get_model_by_id(model_id)` - Single model retrieval
 
-#### Neo4j Service (`services/neo4j_service.py`)
+#### Graph Service (`services/graph_service.py`)
 
-Handles all Neo4j queries for fetching related entities.
+Handles all Neo4j graph traversals and relationship queries.
 
 **Responsibilities:**
-- Fetch related entities by type (license, datasets, articles, etc.)
-- Transform graph data to entity response models
+- Fetch subgraphs starting from any entity with configurable depth
+- Retrieve properties for batches of entities
+- Support efficient graph exploration
 
-**Supported entity types:**
-- `license` - Model license information
-- `datasets` - Related training/test datasets
-- `articles` - Scholarly articles about the model
-- `keywords` - Keywords/tags
-- `tasks` - ML tasks the model performs
-- `languages` - Supported natural languages
-
-**Key method:**
-- `get_related_entities(model_uri, entities)` - Fetch specified related entities
+**Key methods:**
+- `get_entity_graph(entity_id, depth, relationships...)` - Explore graph neighborhood
+- `get_entities_properties_batch(entity_ids, properties)` - Batch property retrieval
 
 ### Schemas (`schemas/responses.py`)
 
@@ -167,12 +162,12 @@ Get detailed model information with optional related entities.
 - `model_id` (string) - Model URI/identifier
 
 **Query Parameters:**
-- `include_entities` (list[string], optional) - Related entities to include
-  - Valid values: `license`, `datasets`, `articles`, `keywords`, `tasks`, `languages`
+- `resolve_properties` (list[string], optional) - Related entities to include by relationship type
+  - Examples: `HAS_LICENSE`, `dataset`, `author`
 
 **Example Request:**
 ```bash
-GET /api/v1/models/https%3A%2F%2Fw3id.org%2Fmlentory%2Fmodel%2Fabc123?include_entities=license&include_entities=datasets
+GET /api/v1/models/https%3A%2F%2Fw3id.org%2Fmlentory%2Fmodel%2Fabc123?resolve_properties=HAS_LICENSE&resolve_properties=dataset
 ```
 
 **Response:**
@@ -190,23 +185,20 @@ GET /api/v1/models/https%3A%2F%2Fw3id.org%2Fmlentory%2Fmodel%2Fabc123?include_en
   "author": "Google Research",
   "dateCreated": "2018-11-03T00:00:00Z",
   "related_entities": {
-    "license": {
-      "uri": "https://spdx.org/licenses/Apache-2.0",
-      "name": "Apache License 2.0",
-      "url": "https://www.apache.org/licenses/LICENSE-2.0"
-    },
-    "datasets": [
+    "HAS_LICENSE": [
+      {
+        "uri": "https://spdx.org/licenses/Apache-2.0",
+        "name": "Apache License 2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0"
+      }
+    ],
+    "dataset": [
       {
         "uri": "https://w3id.org/mlentory/dataset/xyz789",
         "name": "Wikipedia + BookCorpus",
-        "description": "Training data for BERT",
-        "url": null
+        "description": "Training data for BERT"
       }
-    ],
-    "articles": [],
-    "keywords": [],
-    "tasks": [],
-    "languages": []
+    ]
   }
 }
 ```
@@ -426,6 +418,42 @@ GET /api/v1/graph/abc123?entity_type=MLModel&relationships=HAS_LICENSE&relations
     "direction": "both",
     "node_count": 2,
     "edge_count": 1
+  }
+}
+```
+
+#### `POST /api/v1/graph/entities_by_ids_batch`
+Batch fetch properties for multiple entities by their URIs.
+
+**Request Body:**
+```json
+{
+  "entity_ids": [
+    "https://w3id.org/mlentory/model/abc123",
+    "<https://w3id.org/mlentory/dataset/xyz789>"
+  ],
+  "properties": ["name", "description"]  // Optional
+}
+```
+
+**Response:**
+```json
+{
+  "count": 2,
+  "entities": {
+    "https://w3id.org/mlentory/model/abc123": {
+      "name": ["bert-base-uncased"],
+      "description": ["BERT base model"]
+    },
+    "https://w3id.org/mlentory/dataset/xyz789": {
+      "name": ["Wikipedia + BookCorpus"],
+      "description": ["Training data"]
+    }
+  },
+  "cache_stats": {
+    "hits": 0,
+    "misses": 2,
+    "hit_rate": 0.0
   }
 }
 ```
