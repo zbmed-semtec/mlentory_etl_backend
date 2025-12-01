@@ -1,4 +1,4 @@
-# RDF Exporter: Semantic Web Integration
+# RDF Exporter
 
 This comprehensive guide explains how MLentory exports FAIR4ML data as RDF (Resource Description Framework), enabling integration with the semantic web and other FAIR data systems. Understanding RDF export is crucial for researchers who need to integrate MLentory data with other research tools, for systems that consume semantic web data, and for anyone interested in FAIR data principles.
 
@@ -15,6 +15,7 @@ The traditional web is built for humans. HTML pages are designed to be read by p
 **Semantic Web Integration** means that MLentory data can be understood by any system that speaks RDF. This includes research platforms like Zenodo, academic databases, knowledge graphs like Wikidata, and specialized ML research tools. Instead of building custom integrations for each system, RDF provides a universal format.
 
 **FAIR Compliance** is built into RDF. The FAIR principles (Findable, Accessible, Interoperable, Reusable) are naturally supported by RDF's design:
+
 - **Findable**: RDF uses unique identifiers (URIs) for everything
 - **Accessible**: RDF can be retrieved using standard web protocols
 - **Interoperable**: RDF works with any system that understands semantic web standards
@@ -22,7 +23,7 @@ The traditional web is built for humans. HTML pages are designed to be read by p
 
 **Queryability** is a key advantage. RDF data can be queried using SPARQL, a powerful query language similar to SQL but designed for graph data. This enables complex queries like "Find all models that use datasets also used by model X" or "Show me the lineage of all models based on BERT."
 
-![RDF Triples Concept](images/rdf-triples.png)
+RDF uses a simple triple structure: subject-predicate-object. Each triple represents one fact about the data, enabling flexible and extensible data representation.
 *Figure 1: RDF represents information as triples (subject-predicate-object), creating a graph structure that enables powerful queries and linking across systems.*
 
 ### Understanding RDF Triples
@@ -84,6 +85,7 @@ This creates a small graph showing that BERT has a name, performs a task, and wa
 ```
 
 **Key Syntax:**
+
 - `a` = `rdf:type` (shorthand)
 - `;` = Continue with same subject
 - `.` = End of subject's triples
@@ -99,6 +101,7 @@ This creates a small graph showing that BERT has a name, performs a task, and wa
 - `/data/normalized/<source>/<timestamp>_<uuid>/mlmodels.json`
 
 **What happens:**
+
 - Load FAIR4ML JSON files
 - Parse model structure
 - Extract all properties
@@ -106,6 +109,7 @@ This creates a small graph showing that BERT has a name, performs a task, and wa
 ### Step 2: Convert to RDF Triples
 
 **What happens:**
+
 - Create subject IRI for each model
 - Map FAIR4ML properties to RDF predicates
 - Create triples for each property
@@ -132,6 +136,7 @@ This creates a small graph showing that BERT has a name, performs a task, and wa
 ### Step 3: Generate Turtle File
 
 **What happens:**
+
 - Write RDF triples in Turtle format
 - Include namespace prefixes
 - Format for readability
@@ -147,6 +152,7 @@ This creates a small graph showing that BERT has a name, performs a task, and wa
 ### Namespaces
 
 **Standard Namespaces:**
+
 - `schema:` → `https://schema.org/`
 - `fair4ml:` → `https://w3id.org/fair4ml#`
 - `rdf:` → `http://www.w3.org/1999/02/22-rdf-syntax-ns#`
@@ -157,20 +163,24 @@ This creates a small graph showing that BERT has a name, performs a task, and wa
 ### Property Mapping
 
 **Core Identification:**
+
 - `identifier` → `schema:identifier`
 - `name` → `schema:name`
 - `url` → `schema:url`
 
 **Authorship:**
+
 - `author` → `schema:author`
 - `sharedBy` → `fair4ml:sharedBy`
 
 **Temporal:**
+
 - `dateCreated` → `schema:dateCreated` (xsd:dateTime)
 - `dateModified` → `schema:dateModified` (xsd:dateTime)
 - `datePublished` → `schema:datePublished` (xsd:dateTime)
 
 **ML-Specific:**
+
 - `mlTask` → `fair4ml:mlTask`
 - `modelCategory` → `fair4ml:modelCategory`
 - `fineTunedFrom` → `fair4ml:fineTunedFrom`
@@ -178,6 +188,7 @@ This creates a small graph showing that BERT has a name, performs a task, and wa
 - `evaluatedOn` → `fair4ml:evaluatedOn`
 
 **Description:**
+
 - `description` → `schema:description`
 - `keywords` → `schema:keywords`
 - `license` → `schema:license`
@@ -382,11 +393,13 @@ graph.serialize(destination="/data/rdf/hf/models.ttl", format="turtle")
 ### File Format
 
 **Turtle (.ttl):**
+
 - Human-readable
 - Standard RDF format
 - Widely supported
 
 **Alternative Formats:**
+
 - JSON-LD (`.jsonld`)
 - RDF/XML (`.rdf`)
 - N-Triples (`.nt`)
@@ -414,16 +427,19 @@ WHERE {
 ### Integration with Other Systems
 
 **FAIR Data Systems:**
+
 - Link to other FAIR datasets
 - Integrate with semantic web tools
 - Enable cross-platform discovery
 
 **Research Platforms:**
+
 - Zenodo
 - DataCite
 - ORCID
 
 **Knowledge Graphs:**
+
 - Wikidata
 - DBpedia
 - Custom knowledge graphs
@@ -435,11 +451,13 @@ WHERE {
 ### Large Files
 
 **Streaming:**
+
 - Process models in batches
 - Write incrementally
 - Avoid loading entire graph in memory
 
 **Compression:**
+
 - Use `.ttl.gz` for large files
 - Reduces storage and transfer time
 
@@ -459,6 +477,7 @@ WHERE {
 **Problem:** RDF file is invalid
 
 **Solutions:**
+
 - Validate with RDF validator
 - Check namespace prefixes
 - Verify IRI format
@@ -469,6 +488,7 @@ WHERE {
 **Problem:** RDF file is too large
 
 **Solutions:**
+
 - Split into multiple files
 - Use compression
 - Filter unnecessary properties
@@ -479,6 +499,7 @@ WHERE {
 **Problem:** Some properties not exported
 
 **Solutions:**
+
 - Check property mapping
 - Verify data exists in source
 - Review transformation logic

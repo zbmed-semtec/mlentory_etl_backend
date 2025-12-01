@@ -1,4 +1,4 @@
-# Extractors Overview: Gathering Data from ML Model Repositories
+#Overview
 
 Extractors are the first stage of the MLentory ETL pipeline, responsible for gathering raw, unprocessed data from external ML model repositories. Understanding how extractors work is crucial for anyone who wants to add new data sources, debug extraction issues, or understand where the data in MLentory comes from.
 
@@ -6,25 +6,23 @@ Extractors are the first stage of the MLentory ETL pipeline, responsible for gat
 
 ## What Are Extractors and Why Do We Need Them?
 
-Imagine you're building a comprehensive search system for machine learning models. You want to include models from HuggingFace Hub, OpenML, AI4Life, and potentially other platforms. Each of these platforms has its own API, its own data format, and its own way of organizing information. Some provide rich metadata through well-documented APIs, while others require web scraping or have limited programmatic access.
+We are building a comprehensive search system for machine learning models. We want to include models from HuggingFace Hub, OpenML, AI4Life, and potentially other platforms. Each of these platforms has its own API, its own data format, and its own way of organizing information. Some provide rich metadata through well-documented APIs, while others require web scraping or have limited programmatic access.
 
 **Extractors** are specialized modules that handle these differences. Each extractor is designed for a specific platform and knows how to:
+
 - Connect to that platform's API or data source
 - Handle authentication and rate limiting
 - Fetch model metadata and related information
 - Deal with platform-specific quirks and limitations
 - Store the raw data in a consistent format for later processing
 
-Think of extractors as translators—they speak the language of each platform (HuggingFace's API, OpenML's Python package, etc.) and convert everything into a common format that the rest of the pipeline can understand.
-
-![Extractor Architecture](images/extractor-architecture.png)
-*Figure 1: Extractors act as translators, converting platform-specific data formats into a common structure that the transformation stage can process.*
+Think of extractors as translators, they speak the language of each platform (HuggingFace's API, OpenML's Python package, etc.) and convert everything into a common format that the rest of the pipeline can process.
 
 ### The Challenge of Multiple Sources
 
 Each platform presents unique challenges. HuggingFace has millions of models and provides rich metadata, but you need to handle pagination and rate limits carefully. OpenML focuses on ML experiments and has a different data model (runs, flows, datasets, tasks). AI4Life specializes in biomedical models and uses yet another structure.
 
-Extractors abstract away these differences, providing a consistent interface regardless of the source. This means the transformation stage doesn't need to know whether data came from HuggingFace or OpenML—it just receives raw JSON files in a predictable structure.
+Extractors abstract away these differences, providing a consistent interface regardless of the source. This means the transformation stage doesn't need to know whether data came from HuggingFace or OpenML, it just receives raw JSON files in a predictable structure.
 
 ---
 
@@ -124,8 +122,11 @@ AI4Life focuses on biomedical AI models and datasets, providing specialized know
 
 All extractors in MLentory follow a modular architecture pattern. This design choice makes extractors easier to understand, test, and extend. Instead of one monolithic extractor class that does everything, we break functionality into focused modules.
 
-![Modular Extractor Architecture](images/modular-extractor-architecture.png)
-*Figure 2: Extractors use a modular architecture with separate layers for API clients, entity identification, enrichment, and orchestration.*
+The modular architecture includes:
+- **Client Layer:** Low-level API interactions (authentication, rate limiting, requests)
+- **Entity Identifiers:** Pattern matching to find entity references in model metadata
+- **Enrichment Layer:** Batch fetching of full metadata for discovered entities
+- **High-Level Extractor:** Orchestrates all components and manages workflow
 
 ### The Client Layer: Low-Level API Interactions
 
@@ -314,8 +315,8 @@ Extracted data is saved as JSON arrays, where each element represents one entity
 ```json
 [
   {
-    "modelId": "bert-base-uncased",
-    "author": "google",
+    "modelId": "google-bert/bert-base-uncased",
+    "author": "google-bert",
     "pipeline_tag": "fill-mask",
     "tags": ["pytorch", "transformers"],
     "downloads": 5000000,

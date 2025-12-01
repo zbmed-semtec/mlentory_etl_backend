@@ -6,7 +6,7 @@ This directory contains the MkDocs documentation for MLentory ETL.
 
 The documentation is organized into the following sections:
 
-- **Getting Started**: Installation, quickstart, configuration, and first run
+- **Getting Started**: Installation, quickstart, and configuration
 - **Architecture**: System design, data flow, components, and deployment
 - **Concepts**: ETL overview, FAIR4ML schema, Dagster basics, graph databases
 - **Extractors**: Overview and guides for each extractor (HuggingFace, OpenML, AI4Life)

@@ -1,4 +1,4 @@
-# Loaders Overview: Storing Data for Different Use Cases
+#Overview
 
 Loaders are the final stage of the MLentory ETL pipeline, responsible for storing normalized FAIR4ML data in target systems optimized for different query patterns. Understanding loaders helps you appreciate why we use multiple storage systems, how data is organized for different use cases, and how the system supports both relationship queries and full-text search.
 
@@ -16,8 +16,7 @@ After extraction and transformation, we have clean, standardized FAIR4ML data. B
 
 **RDF Export** creates semantic web files for interoperability. Want to integrate with other FAIR data systems or enable SPARQL queries? RDF files provide that capability.
 
-![Multiple Storage Systems](images/multiple-storage-systems.png)
-*Figure 1: Different storage systems optimize for different query patterns, enabling both relationship exploration and full-text search.*
+Different storage systems optimize for different query patterns, enabling both relationship exploration and full-text search. Neo4j handles relationship queries, Elasticsearch handles full-text search, and RDF files enable semantic web integration.
 
 ### Why Not Just One System?
 

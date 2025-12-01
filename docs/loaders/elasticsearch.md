@@ -1,4 +1,4 @@
-# Elasticsearch Loader: Enabling Fast Full-Text Search
+# Elasticsearch Loader
 
 The Elasticsearch loader indexes normalized FAIR4ML models as searchable documents, enabling fast full-text search, filtering, and faceted search across all ML models. Understanding how the Elasticsearch loader works helps you appreciate how MLentory enables discovery through search.
 
@@ -10,12 +10,10 @@ When users search for ML models, they don't always know exact model names or ide
 
 **Elasticsearch** is a search engine built on Apache Lucene, designed specifically for full-text search. Unlike databases optimized for exact matches or relationship queries, Elasticsearch analyzes text, builds indexes, and provides relevance ranking that makes discovery intuitive.
 
-![Elasticsearch Indexing Process](images/elasticsearch-indexing-process.png)
-*Figure 1: The Elasticsearch loader converts FAIR4ML JSON into searchable documents, enabling fast full-text search and filtering.*
-
 ### Why Elasticsearch?
 
 **Elasticsearch excels at:**
+
 - **Full-text search:** Fast keyword search across descriptions, names, and other text fields
 - **Filtering:** Filter by ML tasks, licenses, authors, and other structured fields
 - **Faceted search:** Count results by category (e.g., "how many models for each task?")
@@ -23,6 +21,7 @@ When users search for ML models, they don't always know exact model names or ide
 - **Aggregations:** Analyze data distributions (e.g., "most common ML tasks")
 
 **Perfect for ML model discovery:**
+
 - Search by description ("models for sentiment analysis")
 - Filter by ML tasks ("text-classification")
 - Find models by keywords ("bert", "transformer", "nlp")
@@ -63,6 +62,7 @@ The indexing process transforms FAIR4ML JSON into Elasticsearch documents throug
 ```
 
 **Field mapping:** Different FAIR4ML properties map to different Elasticsearch field types:
+
 - `name`, `description` → Text fields (full-text search)
 - `db_identifier`, `license`, `platform` → Keyword fields (exact match)
 - `ml_tasks`, `keywords` → Keyword arrays (multi-value, exact match)
@@ -82,6 +82,7 @@ The indexing process transforms FAIR4ML JSON into Elasticsearch documents throug
 ### Step 4: Verifying Indexing
 
 **What happens:** After indexing, the loader verifies that indexing succeeded:
+
 - Checks document count (ensures all documents were indexed)
 - Verifies search works (tests a sample query)
 - Reports statistics (models indexed, errors encountered)
@@ -97,6 +98,7 @@ Elasticsearch uses **mappings** to define how documents are indexed and searched
 ### Field Types: Text vs Keyword
 
 **Text Fields** are analyzed for full-text search:
+
 - **Analysis:** Text is tokenized (split into words), lowercased, and stemmed
 - **Examples:** `name`, `description`
 - **Use case:** Keyword search, phrase matching, relevance ranking
@@ -104,6 +106,7 @@ Elasticsearch uses **mappings** to define how documents are indexed and searched
 When you search for "sentiment analysis," Elasticsearch matches documents containing "sentiment" or "analysis" anywhere in the text fields, ranked by relevance.
 
 **Keyword Fields** are stored exactly as-is for exact matches:
+
 - **No analysis:** Values are stored exactly as provided
 - **Examples:** `db_identifier`, `license`, `platform`
 - **Use case:** Filtering, aggregations, exact matches
@@ -111,6 +114,7 @@ When you search for "sentiment analysis," Elasticsearch matches documents contai
 When you filter by `license: "apache-2.0"`, Elasticsearch matches documents with exactly that license value.
 
 **Multi-value Fields** store arrays:
+
 - **Arrays:** Multiple values per field
 - **Examples:** `ml_tasks`, `keywords`
 - **Use case:** Multiple tags, categories, filtering by any value
@@ -135,6 +139,7 @@ class HFModelDocument(Document):
 ```
 
 **Field Mappings:**
+
 - `name`: Text (searchable) + Keyword (exact match via `name.raw`)
 - `description`: Text (full-text search)
 - `ml_tasks`: Keyword array (filtering)
@@ -165,18 +170,21 @@ class Index:
 **Replicas** are copies of shards for redundancy and performance. Replicas enable read scaling (multiple nodes can serve search requests) and provide redundancy (if one node fails, replicas continue serving).
 
 **Configuration:**
+
 - `number_of_shards`: Number of primary shards (default: 1 for small datasets)
 - `number_of_replicas`: Number of replica shards (default: 0 for development, 1+ for production)
 
 ### Environment Variables
 
 **Connection settings:**
+
 - `ES_HOST`: Elasticsearch host (default: `localhost`)
 - `ES_PORT`: Elasticsearch port (default: `9200`)
 - `ES_USERNAME`: Username (optional, for secured Elasticsearch)
 - `ES_PASSWORD`: Password (optional, for secured Elasticsearch)
 
 **Index settings:**
+
 - `HF_MODELS_INDEX`: Index name (default: `hf_models`)
 
 These environment variables allow you to configure Elasticsearch connection and index names without changing code.
@@ -190,6 +198,7 @@ The Elasticsearch loader can be used in several ways:
 ### Via Dagster UI
 
 **Steps:**
+
 1. Open Dagster UI (http://localhost:3000)
 2. Navigate to Assets tab
 3. Find `hf_index_models_elasticsearch` asset (or similar for other sources)
@@ -404,16 +413,19 @@ doc.save(using=es_client, refresh=True)   # Immediate (slower)
 ### Index Settings
 
 **Optimize for search speed:**
+
 - More shards (parallel processing)
 - More replicas (read scaling)
 - Larger heap size (more memory for caching)
 
 **Optimize for indexing speed:**
+
 - Fewer shards (less overhead)
 - No replicas (faster writes)
 - Larger batch size (fewer API calls)
 
 **Optimize for storage:**
+
 - Compression enabled
 - Smaller field sizes
 - Remove unused fields
@@ -431,6 +443,7 @@ When indexing data into Elasticsearch, you might encounter issues:
 **Problem:** Cannot connect to Elasticsearch
 
 **Solutions:**
+
 - Check Elasticsearch is running (`docker ps` or `systemctl status elasticsearch`)
 - Verify host and port (should be `localhost:9200` for local)
 - Check credentials (if Elasticsearch is secured)
@@ -441,12 +454,14 @@ When indexing data into Elasticsearch, you might encounter issues:
 **Problem:** Some documents fail to index
 
 **Solutions:**
+
 - Check document structure (ensure it matches the mapping)
 - Verify field mappings (ensure fields are correctly typed)
 - Review error logs (Elasticsearch provides detailed error messages)
 - Handle missing fields gracefully (use default values or skip documents)
 
 **Common errors:**
+
 - **Mapping errors:** Field type doesn't match (e.g., trying to index text as keyword)
 - **Validation errors:** Document doesn't match mapping constraints
 - **Size errors:** Document too large (Elasticsearch has size limits)
@@ -456,12 +471,14 @@ When indexing data into Elasticsearch, you might encounter issues:
 **Problem:** Indexing is slow
 
 **Solutions:**
+
 - Use bulk indexing (index multiple documents at once)
 - Increase batch size (process more documents per batch)
 - Disable refresh during indexing (refresh after all documents are indexed)
 - Optimize index settings (shards, replicas, heap size)
 
 **Performance tips:**
+
 - Index in batches of 100-1000 documents
 - Use delayed refresh for large datasets
 - Monitor Elasticsearch metrics (CPU, memory, disk I/O)

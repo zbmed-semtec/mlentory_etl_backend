@@ -1,10 +1,10 @@
-# Schema Structure: Implementing FAIR4ML with Pydantic
+# FAIR4ML with Pydantic
 
 This document explains how we implement the FAIR4ML schema in MLentory using Pydantic, a powerful Python library for data validation. Understanding this implementation helps you work with the codebase, debug transformation issues, and extend the schema as needed.
 
 ---
 
-## Why Pydantic? The Foundation of Type Safety
+## 🤔 Why Pydantic? The Foundation of Type Safety
 
 When building data pipelines, one of the biggest challenges is ensuring data quality. You might receive data from external APIs, transform it through multiple stages, and load it into databases—and at any point, the data could be malformed, missing required fields, or have incorrect types. Catching these issues early saves hours of debugging later.
 
@@ -12,7 +12,7 @@ When building data pipelines, one of the biggest challenges is ensuring data qua
 
 Think of Pydantic as a contract system: you define a contract (the model) that specifies what data is acceptable, and Pydantic enforces that contract. If data doesn't match, you get clear error messages explaining what's wrong. If data does match, you get a validated object that you can trust.
 
-### The Benefits in Practice
+### ✨ The Benefits in Practice
 
 **Type Safety** means that if you define a field as `str`, Pydantic will reject anything that isn't a string. This catches errors at runtime, before they cause problems downstream. For example, if a transformation accidentally produces a number where a string is expected, Pydantic will catch it immediately.
 
@@ -43,16 +43,13 @@ Notice how Pydantic catches errors automatically. You don't need to write `if no
 
 ---
 
-## Our Pydantic Models: The Building Blocks
+## 🧩 Our Pydantic Models: The Building Blocks
 
 In MLentory, we use Pydantic models to represent FAIR4ML entities. These models serve multiple purposes: they validate data, provide type safety, enable JSON serialization, and serve as documentation.
 
-### The MLModel Model: Our Primary Entity
+### 🤖 The MLModel Model: Our Primary Entity
 
 The **MLModel** model (located in `schemas/fair4ml/mlmodel.py`) is the most important model in our system. It represents a FAIR4ML MLModel entity and implements the FAIR4ML v0.1.0 specification.
-
-![Pydantic Model Structure](images/pydantic-model-structure.png)
-*Figure 1: Pydantic models provide structure, validation, and type safety for FAIR4ML data throughout the pipeline.*
 
 What makes this model special is how it balances multiple requirements:
 
@@ -71,9 +68,9 @@ from schemas.fair4ml import MLModel
 
 # Create a model with required fields
 model = MLModel(
-    identifier=["https://huggingface.co/bert-base-uncased"],
-    name="bert-base-uncased",
-    url="https://huggingface.co/bert-base-uncased",
+    identifier=["https://huggingface.co/google-bert/bert-base-uncased"],
+    name="google-bert/bert-base-uncased",
+    url="https://huggingface.co/google-bert/bert-base-uncased",
     mlTask=["fill-mask"]
 )
 
@@ -88,7 +85,7 @@ except ValidationError as e:
     print(e)  # Clear error message
 ```
 
-### ExtractionMetadata: Tracking Provenance
+### 📊 ExtractionMetadata: Tracking Provenance
 
 The **ExtractionMetadata** model is a MLentory-specific extension that tracks how each field was extracted. This might seem like overhead, but it's incredibly valuable for:
 
@@ -126,7 +123,7 @@ model.extraction_metadata = {
 
 This metadata travels with the data through the pipeline, providing a complete audit trail.
 
-### Related Entity Models: The Ecosystem
+### 🔗 Related Entity Models: The Ecosystem
 
 MLentory also includes models for related entities that connect to ML models:
 
@@ -140,11 +137,11 @@ These models work together to create a rich, interconnected representation of th
 
 ---
 
-## Understanding Field Types: The Language of Data
+## 📝 Understanding Field Types: The Language of Data
 
 Fields in Pydantic models use Python type annotations to specify what kind of data they accept. Understanding these types is crucial for working with the models effectively.
 
-### Required vs Optional: Making Fields Flexible
+### ⚖️ Required vs Optional: Making Fields Flexible
 
 The distinction between required and optional fields is fundamental to data modeling. Required fields must always be present—they're the essential information that defines an entity. Optional fields can be missing—they provide additional context but aren't strictly necessary.
 
@@ -166,7 +163,7 @@ When you create a model:
 
 This design balances strictness (ensuring essential data is present) with flexibility (allowing partial data when full information isn't available).
 
-### Common Field Types: Building Complex Structures
+### 🏗️ Common Field Types: Building Complex Structures
 
 Pydantic supports all Python types, but some are particularly common in our models:
 
@@ -206,11 +203,11 @@ Each type serves a specific purpose, and choosing the right type makes the model
 
 ---
 
-## Validation Rules: Ensuring Data Quality
+## ✅ Validation Rules: Ensuring Data Quality
 
 Validation is where Pydantic really shines. Instead of writing manual checks, you define rules using type annotations and Field constraints, and Pydantic enforces them automatically.
 
-### Automatic Type Validation
+### 🔍 Automatic Type Validation
 
 The most basic validation is type checking. If you define a field as `str`, Pydantic will reject anything that isn't a string:
 
@@ -223,7 +220,7 @@ model = MLModel(
 
 Pydantic will raise a `ValidationError` with a clear message explaining what went wrong. This catches errors early, before they propagate through the pipeline and cause mysterious failures later.
 
-### Field Constraints: Beyond Types
+### 🔒 Field Constraints: Beyond Types
 
 Sometimes type checking isn't enough. You might need to ensure a string isn't empty, a number is in a valid range, or a list has at least one item. Pydantic's `Field` function lets you specify these constraints:
 
@@ -251,7 +248,7 @@ identifier: List[str] = Field(..., min_items=1)
 
 `min_items=1` ensures at least one identifier is provided, which is required by FAIR4ML.
 
-### Custom Validators: Complex Logic
+### 🛠️ Custom Validators: Complex Logic
 
 Sometimes you need validation logic that's more complex than simple constraints. Pydantic's `field_validator` decorator lets you write custom validation functions:
 
@@ -272,11 +269,11 @@ Custom validators run after type checking and constraint validation, allowing yo
 
 ---
 
-## Field Aliases: Bridging Python and JSON-LD
+## 🔗 Field Aliases: Bridging Python and JSON-LD
 
 One of the most powerful features of our Pydantic models is field aliases. These allow fields to be accessed by multiple names, which is crucial for JSON-LD compatibility.
 
-### Why Aliases Matter
+### 🤔 Why Aliases Matter
 
 In Python, we want field names to be Pythonic: `identifier`, `name`, `mlTask`. But in JSON-LD, we need property names to be full IRIs: `https://schema.org/identifier`, `https://schema.org/name`, `https://w3id.org/fair4ml/mlTask`.
 
@@ -293,7 +290,7 @@ Now the field can be accessed using either name:
 - Python code uses `model.identifier`
 - JSON-LD uses `"https://schema.org/identifier"`
 
-### Populate by Name: The Best of Both Worlds
+### 🌐 Populate by Name: The Best of Both Worlds
 
 The `populate_by_name=True` configuration option makes this even more powerful. It allows models to be created using either the Python field name or the alias:
 
@@ -312,21 +309,19 @@ model = MLModel(
 ```
 
 This flexibility means:
+
 - **Python developers** can use familiar, Pythonic names
 - **JSON-LD systems** can use standard property IRIs
 - **Data conversion** is seamless in both directions
 - **Compatibility** is maintained with semantic web standards
 
-![Field Aliases Diagram](images/field-aliases.png)
-*Figure 2: Field aliases enable seamless conversion between Python-friendly names and JSON-LD property IRIs, maintaining compatibility with both programming and semantic web standards.*
-
 ---
 
-## JSON Serialization: Moving Data Through the Pipeline
+## 📤 JSON Serialization: Moving Data Through the Pipeline
 
 Our pipeline moves data through JSON files at multiple stages. Pydantic makes this seamless by providing easy conversion to and from JSON.
 
-### Converting to JSON
+### ➡️ Converting to JSON
 
 When you need to save a model to a JSON file or send it over an API, Pydantic provides simple methods:
 
@@ -348,7 +343,7 @@ json_ld = model.model_dump(by_alias=True)
 
 The `by_alias=True` parameter tells Pydantic to use aliases instead of Python field names, producing JSON-LD compatible output.
 
-### Converting from JSON
+### ⬅️ Converting from JSON
 
 Reading JSON back into models is equally simple:
 
@@ -373,11 +368,11 @@ This bidirectional compatibility means you can read data from semantic web syste
 
 ---
 
-## Schema Evolution: Growing Without Breaking
+## 🔄 Schema Evolution: Growing Without Breaking
 
 As FAIR4ML evolves and our needs change, we need to update our models. Schema evolution is the process of changing models while maintaining compatibility with existing data.
 
-### Adding New Fields: Backward Compatible Changes
+### ➕ Adding New Fields: Backward Compatible Changes
 
 The safest way to evolve a schema is to add optional fields with defaults. This is backward compatible because:
 
@@ -394,7 +389,7 @@ hasCO2eEmissions: Optional[str] = None  # Optional, backward compatible
 
 Existing JSON files without this field will still validate (the field will just be `None`). New JSON files can include this field. This allows gradual migration without breaking existing code or data.
 
-### Removing Fields: Breaking Changes
+### ➖ Removing Fields: Breaking Changes
 
 Removing fields is more dangerous and requires careful planning:
 
@@ -413,11 +408,11 @@ This process gives users time to adapt and prevents sudden breakage.
 
 ---
 
-## Error Handling: Graceful Failures
+## ⚠️ Error Handling: Graceful Failures
 
 When validation fails, Pydantic raises `ValidationError` exceptions. Understanding how to handle these errors is crucial for building robust pipelines.
 
-### Understanding Validation Errors
+### 🔍 Understanding Validation Errors
 
 Pydantic's `ValidationError` provides detailed information about what went wrong:
 
@@ -446,7 +441,7 @@ Each error in the list describes one validation problem:
 
 This detailed information makes debugging much easier.
 
-### Error Handling in Our Pipeline
+### 🔧 Error Handling in Our Pipeline
 
 In MLentory's transformation stage, we handle validation errors gracefully:
 
@@ -471,11 +466,11 @@ This is crucial in production systems where data quality varies and you need to 
 
 ---
 
-## Configuration: Tuning Model Behavior
+## ⚙️ Configuration: Tuning Model Behavior
 
 Pydantic models can be configured to behave differently based on your needs. Our models use specific configurations to support JSON-LD compatibility and provide good defaults.
 
-### Model Configuration
+### 🔧 Model Configuration
 
 Our MLModel uses this configuration:
 
@@ -496,7 +491,7 @@ model_config = ConfigDict(
 
 **`json_schema_extra`** provides example values that are used when generating JSON Schema documentation. This helps users understand what valid data looks like.
 
-### Available Configuration Options
+### 📋 Available Configuration Options
 
 Pydantic offers many configuration options:
 
@@ -510,11 +505,11 @@ We keep our configuration minimal to maintain simplicity and performance, but th
 
 ---
 
-## Best Practices: Writing Maintainable Models
+## ✅ Best Practices: Writing Maintainable Models
 
 Based on our experience building and maintaining these models, here are some best practices:
 
-### Use Type Hints Consistently
+### 📝 Use Type Hints Consistently
 
 Type hints aren't just for Pydantic—they're documentation that helps everyone understand the code:
 
@@ -527,7 +522,7 @@ description: Optional[str] = None
 name = None  # What type is this? Who knows!
 ```
 
-### Provide Sensible Defaults
+### 🎯 Provide Sensible Defaults
 
 Optional fields should have defaults that make sense:
 
@@ -539,7 +534,7 @@ keywords: List[str] = Field(default_factory=list)
 keywords: List[str]  # Forces users to always provide a list, even if empty
 ```
 
-### Document Fields with Descriptions
+### 📚 Document Fields with Descriptions
 
 Field descriptions help users understand what each field means:
 
@@ -551,7 +546,7 @@ name: str = Field(description="Human-readable name of the model")
 name: str  # What is this? What format? What's required?
 ```
 
-### Validate Early and Often
+### ⚡ Validate Early and Often
 
 Don't defer validation—validate as soon as you have data:
 
@@ -567,7 +562,7 @@ These practices make models more maintainable, easier to understand, and less er
 
 ---
 
-## Key Takeaways
+## 🎓 Key Takeaways
 
 Pydantic provides a powerful foundation for implementing FAIR4ML in MLentory:
 
@@ -582,7 +577,7 @@ Understanding these concepts helps you work effectively with the codebase, debug
 
 ---
 
-## Next Steps
+## 🚀 Next Steps
 
 Now that you understand how we implement FAIR4ML with Pydantic:
 
@@ -593,7 +588,7 @@ Now that you understand how we implement FAIR4ML with Pydantic:
 
 ---
 
-## Resources
+## 📖 Resources
 
 - **Pydantic Documentation:** [https://docs.pydantic.dev/](https://docs.pydantic.dev/) - Comprehensive guide to Pydantic
 - **Python Type Hints:** [https://docs.python.org/3/library/typing.html](https://docs.python.org/3/library/typing.html) - Official type hints documentation

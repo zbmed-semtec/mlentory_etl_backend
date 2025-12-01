@@ -2,7 +2,7 @@
 
 Learn how to configure the MLentory ETL pipeline for your environment. All configuration is managed through environment variables.
 
-## Configuration File
+## 📄 Configuration File
 
 The pipeline uses a `.env` file for configuration. Start by copying the example file:
 
@@ -14,11 +14,11 @@ Then edit `.env` with your preferred settings.
 
 ## Environment Variables
 
-### Required Variables
+### ✅ Required Variables
 
 These variables must be set for the pipeline to function:
 
-#### Neo4j Configuration
+#### 🗄️ Neo4j Configuration
 
 ```bash
 NEO4J_URI=bolt://mlentory-neo4j:7687
@@ -28,13 +28,13 @@ NEO4J_DATABASE=neo4j
 ```
 
 - **NEO4J_URI**: Connection URI for Neo4j
-  - Docker: `bolt://mlentory-neo4j:7687` (uses service name)
-  - Local: `bolt://localhost:7687`
+    - Docker: `bolt://mlentory-neo4j:7687` (uses service name)
+    - Local: `bolt://localhost:7687`
 - **NEO4J_USER**: Username for Neo4j authentication
 - **NEO4J_PASSWORD**: Password for Neo4j (use a strong password in production!)
 - **NEO4J_DATABASE**: Database name (default: `neo4j`)
 
-#### Elasticsearch Configuration
+#### 🔍 Elasticsearch Configuration
 
 ```bash
 ELASTIC_HOST=mlentory-elasticsearch
@@ -46,15 +46,15 @@ ELASTIC_HF_MODELS_INDEX=hf_models
 ```
 
 - **ELASTIC_HOST**: Elasticsearch hostname
-  - Docker: `mlentory-elasticsearch` (service name)
-  - Local: `localhost`
+    - Docker: `mlentory-elasticsearch` (service name)
+    - Local: `localhost`
 - **ELASTIC_PORT**: Elasticsearch port (default: `9201` in Docker, `9200` locally)
 - **ELASTIC_SCHEME**: Connection scheme (`http` or `https`)
 - **ELASTIC_USER**: Username (optional, for secured Elasticsearch)
 - **ELASTIC_PASSWORD**: Password (optional, for secured Elasticsearch)
 - **ELASTIC_HF_MODELS_INDEX**: Index name for HuggingFace models (default: `hf_models`)
 
-#### Dagster Configuration
+#### ⚙️ Dagster Configuration
 
 ```bash
 DAGSTER_HOME=/opt/dagster/dagster_home
@@ -65,37 +65,42 @@ DAGSTER_POSTGRES_HOST=dagster-postgres
 ```
 
 - **DAGSTER_HOME**: Path to Dagster workspace directory
-- **DAGSTER_POSTGRES_***: PostgreSQL connection details for Dagster metadata storage
+- **DAGSTER_POSTGRES_USER**: PostgreSQL username for Dagster metadata storage
+- **DAGSTER_POSTGRES_PASSWORD**: PostgreSQL password for Dagster metadata storage
+- **DAGSTER_POSTGRES_DB**: PostgreSQL database name for Dagster
+- **DAGSTER_POSTGRES_HOST**: PostgreSQL hostname
+    - Docker: `dagster-postgres` (service name)
+    - Local: `localhost`
 
-### Optional Variables
+### 🔧 Optional Variables
 
 These have sensible defaults but can be customized:
 
-#### Data Storage
+#### 💾 Data Storage
 
 ```bash
 DATA_DIR=/data
 ```
 
 - **DATA_DIR**: Base directory for storing extracted, normalized, and RDF data
-  - Default: `/data` (in Docker containers)
-  - Creates subdirectories: `raw/`, `normalized/`, `rdf/`
+    - Default: `/data` (in Docker containers)
+    - Creates subdirectories: `raw/`, `normalized/`, `rdf/`
 
-#### API Keys and Authentication
+#### 🔑 API Keys and Authentication
 
 ```bash
 # HuggingFace API Token (optional but recommended)
 HF_TOKEN=your_huggingface_token_here
-# Alternative: HUGGINGFACE_HUB_TOKEN=your_huggingface_token_here
 ```
 
-- **HF_TOKEN** or **HUGGINGFACE_HUB_TOKEN**: HuggingFace API token (optional)
+**HF_TOKEN**: HuggingFace API token (optional)
+
   - **Why use it?**: Higher rate limits, access to private models, better reliability
-  - **How to get**: Create a token at https://huggingface.co/settings/tokens
+  - **How to get**: Create a token at [https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
   - **Note**: The `huggingface_hub` library automatically reads this from environment variables
   - **Without token**: Works for public models but with lower rate limits
 
-#### Extraction Configuration
+#### 📥 Extraction Configuration
 
 ```bash
 # HuggingFace extraction
@@ -131,10 +136,10 @@ AI4LIFE_PARENT_ID=bioimage-io/bioimage.io
 - **OPENML_ENRICHMENT_THREADS**: Threads for OpenML enrichment (default: `4`)
 - **OPENML_ENABLE_SCRAPING**: Enable web scraping for additional stats (default: `false`, ⚠️ slow)
 - **AI4LIFE_NUM_MODELS**: Number of models to extract from AI4Life (default: `50`)
-- **AI4LIFE_BASE_URL**: Base URL for AI4Life API (default: `https://hypha.aicell.io`)
+- **AI4LIFE_BASE_URL**: Base URL for AI4Life API (default: [https://hypha.aicell.io](https://hypha.aicell.io))
 - **AI4LIFE_PARENT_ID**: Parent ID for AI4Life extraction (default: `bioimage-io/bioimage.io`)
 
-#### Port Configuration
+#### 🔌 Port Configuration
 
 ```bash
 DAGSTER_PORT=3000
@@ -148,7 +153,7 @@ NEO4J_BOLT_PORT=7687
 
 ## Configuration Examples
 
-### Development Setup
+### 🛠️ Development Setup
 
 For local development with Docker:
 
@@ -172,7 +177,7 @@ DATA_DIR=/data
 DAGSTER_HOME=/opt/dagster/dagster_home
 ```
 
-### Production Setup
+### 🚀 Production Setup
 
 For production, use secure passwords and consider enabling authentication:
 
@@ -200,7 +205,7 @@ HF_TOKEN=<your_huggingface_token>
 
 ## Security Best Practices
 
-### Never Commit Secrets
+### 🔒 Never Commit Secrets
 
 - ✅ Add `.env` to `.gitignore`
 - ✅ Use `.env.example` as a template (without real passwords or API tokens)
@@ -208,14 +213,14 @@ HF_TOKEN=<your_huggingface_token>
 - ✅ Rotate passwords and API tokens regularly
 - ✅ Never commit API tokens or passwords to version control
 
-### API Token Security
+### 🔑 API Token Security
 
 - **HuggingFace Token**: Store securely, use read-only tokens when possible
 - **Token Scope**: Only grant necessary permissions (read access is sufficient for extraction)
 - **Token Rotation**: Rotate tokens periodically for security
 - **Environment Variables**: Prefer environment variables over hardcoding in code
 
-### Production Security
+### 🛡️ Production Security
 
 - Use strong, randomly generated passwords
 - Enable Elasticsearch security features
@@ -226,7 +231,7 @@ HF_TOKEN=<your_huggingface_token>
   - AWS Secrets Manager
   - HashiCorp Vault
 
-### Password Generation
+### 🔐 Password Generation
 
 Generate strong passwords:
 
@@ -242,7 +247,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 After setting up your `.env` file, verify the configuration:
 
-### Check Environment Variables
+### ✅ Check Environment Variables
 
 ```bash
 # In Docker container
@@ -250,7 +255,7 @@ docker compose exec dagster-webserver env | grep NEO4J
 docker compose exec dagster-webserver env | grep ELASTIC
 ```
 
-### Test Connections
+### 🔗 Test Connections
 
 **Test Neo4j:**
 ```bash
@@ -280,26 +285,25 @@ print(f'Elasticsearch: {config.scheme}://{config.host}:{config.port}')
 
 ## Troubleshooting Configuration
 
-### Variables Not Loading
+### ⚠️ Variables Not Loading
 
 - Ensure `.env` file is in the project root
 - Check for typos in variable names
 - Restart services after changing `.env`: `docker compose restart`
 
-### Connection Failures
+### ❌ Connection Failures
 
 - Verify service names match (for Docker networking)
 - Check ports are not conflicting
 - Ensure services are running: `docker compose ps`
 
-### Permission Issues
+### 🔐 Permission Issues
 
 - Check file permissions: `chmod 600 .env` (restrictive permissions)
 - Verify Docker volumes have correct permissions
 
-## Next Steps
+## 🚦 Next Steps
 
 Once configured:
 
-- **[Run your first pipeline](first-run.md)** - Execute your first extraction
 - **[Explore operations](../operations/running-pipelines.md)** - Learn about running and monitoring pipelines

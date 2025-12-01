@@ -28,7 +28,7 @@ The pipeline extracts ML model metadata from multiple external platforms:
 - **OpenML** - Platform for ML experiments, datasets, and model flows
 - **AI4Life** - Biomedical AI models and datasets
 
-Each source has its own data format, API structure, and metadata schema.
+Each source has its own data format.
 
 ### Extraction
 
@@ -96,13 +96,13 @@ Each source has its own data format, API structure, and metadata schema.
 
 **Input:** Raw JSON files from `/data/raw/<source>/`
 
-**Output:** Normalized FAIR4ML JSON files in `/data/normalized/<source>/<timestamp>_<uuid>/`
+**Output:** Normalized JSON files in `/data/normalized/<source>/<timestamp>_<uuid>/`
 
 - Models in FAIR4ML format
 
-- Datasets in FAIR4ML format
+- Datasets in Croissant ML format
 
-- Papers, authors, organizations
+- Papers, authors, organizations in Schema.org format
 
 - Relationship mappings
 
@@ -122,33 +122,33 @@ Each source has its own data format, API structure, and metadata schema.
 
 1. **Neo4j Loading** (Graph Database)
 
-   - Creates nodes for models, datasets, papers, authors, organizations
+    - Creates nodes for models, datasets, papers, authors, organizations
 
-   - Creates relationships (USES_DATASET, CITES_PAPER, BASED_ON, etc.)
+    - Creates relationships (USES_DATASET, CITES_PAPER, BASED_ON, etc.)
 
-   - Enables relationship queries and graph traversals
+    - Enables relationship queries and graph traversals
 
-   - Supports recommendation algorithms based on graph structure
+    - Supports recommendation algorithms based on graph structure
 
 2. **PostgreSQL Loading** (Dagster Metadata)
 
-   - Stores pipeline execution history
+    - Stores pipeline execution history
 
-   - Tracks asset materialization
+    - Tracks asset materialization
 
-   - Maintains data lineage and provenance
+    - Maintains data lineage and provenance
 
-   - Powers Dagster UI for monitoring and debugging
+    - Powers Dagster UI for monitoring and debugging
 
 3. **Elasticsearch Indexing** (Search Engine)
 
-   - Indexes all metadata for full-text search
+    - Indexes all metadata for full-text search
 
-   - Creates searchable documents with fields (name, description, tasks, etc.)
+    - Creates searchable documents with fields (name, description, tasks, etc.)
 
-   - Enables fast filtering, aggregation, and faceted search
+    - Enables fast filtering, aggregation, and faceted search
 
-   - Powers the MLentory search interface
+    - Powers the MLentory search interface
 
 **Input:** Normalized FAIR4ML JSON files from `/data/normalized/<source>/`
 
@@ -178,41 +178,33 @@ Each source has its own data format, API structure, and metadata schema.
 
 1. **User Search Request**
 
-   - User enters search query in Nuxt frontend
+    - User enters search query in Nuxt frontend
 
-   - Frontend sends request to MLentory Backend API
+    - Frontend sends request to MLentory Backend API
 
 2. **Backend API Processing**
 
-   - API queries Elasticsearch for full-text search
+    - API queries Elasticsearch for full-text search
 
-   - API queries Neo4j for relationship-based queries
+    - API queries Neo4j for relationship-based queries
 
-   - Combines results and applies ranking
+    - Combines results and applies ranking
 
 3. **Response to Frontend**
 
-   - API returns search results with metadata
+    - API returns search results with metadata
 
-   - Frontend displays models, datasets, papers
+    - Frontend displays models, datasets, papers
 
-   - Shows relationships (e.g., "This model uses these datasets")
+    - Shows relationships (e.g., "This model uses these datasets")
 
-4. **Relationship Visualization**
+4. **Recommendation Service**
 
-   - Frontend queries Neo4j for graph relationships
+    - Backend uses Neo4j graph structure to find similar models
 
-   - Displays knowledge graph visualizations
+    - Uses Elasticsearch for content-based recommendations
 
-   - Shows connections between models, datasets, papers
-
-5. **Recommendation Service**
-
-   - Backend uses Neo4j graph structure to find similar models
-
-   - Uses Elasticsearch for content-based recommendations
-
-   - Frontend displays recommended models
+    - Frontend displays recommended models
 
 **Data Flow:**
 ```
@@ -228,9 +220,9 @@ Nuxt Frontend (displays results, visualizations)
 ```
 
 **What's Served:**
+
 - Search results (models, datasets, papers)
 - Model details and metadata
-- Relationship graphs
 - Recommendations
 - FAIR Digital Object representations
 
@@ -310,6 +302,7 @@ Running the same extraction twice produces the same result. Assets can be safely
 
 ### 3. Observability
 Dagster provides full visibility into:
+
 - What's running and what's completed
 - Success and failure rates
 - Data lineage (where data came from)

@@ -37,6 +37,7 @@ FAIR4ML MLModels JSON
 ### Why Modular?
 
 **Benefits:**
+
 - **Parallel Processing:** Extract properties simultaneously
 - **Error Isolation:** One failure doesn't stop others
 - **Easy to Extend:** Add new property groups easily
@@ -50,12 +51,14 @@ Each property group is processed independently:
 #### 1. Basic Properties ✅
 
 **What's extracted:**
+
 - Core identification (identifier, name, url)
 - Authorship (author, sharedBy)
 - Temporal information (dateCreated, dateModified, datePublished)
 - Description (from model card)
 
 **Mapping:**
+
 ```python
 # HuggingFace → FAIR4ML
 raw["modelId"] → fair4ml["identifier"]
@@ -69,6 +72,7 @@ raw["card"] → fair4ml["description"]
 #### 2. Keywords & Language ⏳
 
 **What's extracted:**
+
 - Keywords/tags
 - Natural languages (inLanguage)
 
@@ -84,6 +88,7 @@ raw["tags"] (language codes) → fair4ml["inLanguage"]
 #### 3. Task & Category ⏳
 
 **What's extracted:**
+
 - ML tasks (mlTask)
 - Model category/architecture (modelCategory)
 
@@ -99,6 +104,7 @@ raw["library_name"] + raw["tags"] → fair4ml["modelCategory"]
 #### 4. License ⏳
 
 **What's extracted:**
+
 - License identifier
 - Legal terms
 
@@ -114,6 +120,7 @@ raw["card"] (frontmatter) → fair4ml["license"]
 #### 5. Lineage ⏳
 
 **What's extracted:**
+
 - Base models (fineTunedFrom)
 - Model dependencies
 
@@ -128,6 +135,7 @@ raw["tags"] (base_model:*) → fair4ml["fineTunedFrom"]
 #### 6. Code & Usage ⏳
 
 **What's extracted:**
+
 - Code snippets
 - Usage instructions
 
@@ -143,6 +151,7 @@ raw["card"] (usage sections) → fair4ml["usageInstructions"]
 #### 7. Datasets ⏳
 
 **What's extracted:**
+
 - Training datasets (trainedOn)
 - Evaluation datasets (evaluatedOn)
 - Performance metrics
@@ -159,6 +168,7 @@ raw["card"] (evaluation mentions) → fair4ml["evaluatedOn"]
 #### 8. Ethics & Risks ⏳
 
 **What's extracted:**
+
 - Limitations
 - Biases
 - Ethical considerations
@@ -182,6 +192,7 @@ raw["card"] (ethical section) → fair4ml["ethicalSocial"]
 - `/data/raw/hf/<timestamp>_<uuid>/hf_models_with_ancestors.json`
 
 **What happens:**
+
 - Load JSON file
 - Parse HuggingFace model structure
 - Handle missing or malformed data
@@ -189,6 +200,7 @@ raw["card"] (ethical section) → fair4ml["ethicalSocial"]
 ### Step 2: Extract Properties (Parallel)
 
 **What happens:**
+
 - Each property group extracts its fields independently
 - Creates partial schema files
 - Runs in parallel (Dagster handles this)
@@ -202,6 +214,7 @@ raw["card"] (ethical section) → fair4ml["ethicalSocial"]
 ### Step 3: Merge Partial Schemas
 
 **What happens:**
+
 - Load all partial schema files
 - Merge by model index (`_index` field)
 - Combine extraction metadata
@@ -220,12 +233,14 @@ merged = {
 ### Step 4: Validate
 
 **What happens:**
+
 - Validate merged data against FAIR4ML Pydantic schema
 - Check required fields exist
 - Verify data types are correct
 - Ensure values are valid
 
 **Error handling:**
+
 - Invalid models logged to error file
 - Valid models continue processing
 - Partial success allowed
@@ -233,6 +248,7 @@ merged = {
 ### Step 5: Save Normalized Data
 
 **Output:**
+
 - `/data/normalized/hf/<timestamp>_<uuid>/mlmodels.json`
 - `/data/normalized/hf/<timestamp>_<uuid>/transformation_errors.json` (if any)
 
@@ -301,12 +317,14 @@ Each field includes provenance tracking:
 ```
 
 **Fields:**
+
 - `extraction_method`: How the field was derived
 - `confidence`: Reliability score (0.0-1.0)
 - `source_field`: Original HuggingFace field name
 - `notes`: Additional context
 
 **Benefits:**
+
 - Track data provenance
 - Debug transformation issues
 - Assess data quality
@@ -318,25 +336,30 @@ Each field includes provenance tracking:
 ### Transformation Assets
 
 **`hf_normalized_run_folder`**
+
 - Creates unique run folder for normalized outputs
 - Returns: Path to normalized run folder
 
 **`hf_extract_basic_properties`** ✅
+
 - Extracts basic properties from raw models
 - Depends on: `hf_add_ancestor_models`
 - Returns: Path to partial_basic_properties.json
 
 **`hf_extract_keywords_language`** ⏳
+
 - Extracts keywords and languages
 - Depends on: `hf_add_ancestor_models`
 - Returns: Path to partial_keywords_language.json
 
 **`hf_extract_task_category`** ⏳
+
 - Extracts ML tasks and model categories
 - Depends on: `hf_add_ancestor_models`
 - Returns: Path to partial_task_category.json
 
 **`hf_models_normalized`**
+
 - Merges all partial schemas
 - Validates with Pydantic
 - Depends on: All property extraction assets
@@ -472,6 +495,7 @@ normalized = normalize_hf_model(raw_model)
 ### Parallel Execution
 
 **With parallel property extraction:**
+
 - **Time:** ~O(n) where n = number of models
 - **Speedup:** Up to 8x (number of property groups)
 - **Memory:** O(n × p) where p = property groups
@@ -479,6 +503,7 @@ normalized = normalize_hf_model(raw_model)
 ### Sequential Execution
 
 **Without parallelization:**
+
 - **Time:** O(n × p)
 - **Memory:** O(n × p)
 
@@ -493,6 +518,7 @@ normalized = normalize_hf_model(raw_model)
 **Problem:** Some models fail validation
 
 **Solutions:**
+
 - Check error file for details
 - Review raw data for missing fields
 - Verify data types are correct
@@ -503,6 +529,7 @@ normalized = normalize_hf_model(raw_model)
 **Problem:** Some properties not extracted
 
 **Solutions:**
+
 - Check if property extraction asset exists
 - Verify raw data contains source fields
 - Review extraction logic
@@ -513,6 +540,7 @@ normalized = normalize_hf_model(raw_model)
 **Problem:** Transformation is slow
 
 **Solutions:**
+
 - Ensure parallel execution (Dagster)
 - Reduce number of models
 - Check system resources (CPU, memory)
@@ -533,7 +561,6 @@ normalized = normalize_hf_model(raw_model)
 
 ## Next Steps
 
-- See [Transformation Architecture](architecture.md) - Detailed architecture guide
 - Check [Adding a Transformer](adding-transformer.md) - How to add new transformers
 - Explore [Loaders](../loaders/overview.md) - How normalized data is loaded
 - Review [FAIR4ML Schema](../concepts/fair4ml-schema.md) - Schema reference

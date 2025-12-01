@@ -1,5 +1,4 @@
-# Neo4j Loader: Building the Knowledge Graph
-
+# Neo4j Loader
 The Neo4j loader is responsible for converting normalized FAIR4ML models into RDF triples and storing them in Neo4j as a knowledge graph. This process enables relationship queries, model lineage tracking, and graph-based recommendations. Understanding how the Neo4j loader works helps you appreciate how MLentory builds and maintains its knowledge graph.
 
 ---
@@ -10,18 +9,17 @@ Graph databases excel at relationship queries, path finding, and pattern matchin
 
 **The Neo4j loader's job** is to take FAIR4ML data (which is already standardized and validated) and convert it into a graph structure that Neo4j can store and query efficiently. This involves converting JSON to RDF triples, creating graph nodes and relationships, and ensuring data consistency.
 
-![Neo4j Loading Process](images/neo4j-loading-process.png)
-*Figure 1: The Neo4j loader converts FAIR4ML JSON to RDF triples, then loads them into Neo4j as a knowledge graph.*
-
 ### Why Neo4j?
 
 **Graph databases excel at:**
+
 - **Relationship queries:** Finding connected entities is fast because relationships are stored directly, not computed through JOINs
 - **Path finding:** Discovering connections between entities (like model lineage) is a natural graph operation
 - **Pattern matching:** Finding subgraphs that match patterns (like "models using datasets also used by other models") is efficient
 - **Traversals:** Following relationships from one node to explore the graph is intuitive and fast
 
 **Perfect for ML metadata:**
+
 - Models use datasets (for training and evaluation)
 - Models cite papers (research publications)
 - Models are based on other models (fine-tuning, transfer learning)
@@ -65,6 +63,7 @@ The loading process transforms FAIR4ML JSON into a Neo4j knowledge graph through
 ```
 
 **Why RDF?** RDF is a standard format that enables semantic web integration. By converting to RDF, we can:
+
 - Use standard vocabularies (FAIR4ML, schema.org)
 - Enable SPARQL queries (in addition to Cypher)
 - Export to RDF/Turtle format for interoperability
@@ -101,6 +100,7 @@ CREATE (m)-[:USES_DATASET]->(d)
 ```
 
 **Relationship types:** Different FAIR4ML properties map to different relationship types:
+
 - `trainedOn` → `TRAINED_ON`
 - `evaluatedOn` → `EVALUATED_ON`
 - `citesPaper` → `CITES_PAPER`
@@ -114,6 +114,7 @@ CREATE (m)-[:USES_DATASET]->(d)
 **What happens:** The loader can optionally export RDF data to Turtle format (a human-readable RDF syntax). This creates files like `/data/rdf/<source>/models.ttl` that can be used for semantic web integration.
 
 **Why export?** RDF/Turtle files enable:
+
 - Integration with other semantic web systems
 - FAIR data compliance
 - Sharing knowledge graphs with other researchers
@@ -130,6 +131,7 @@ Understanding how FAIR4ML properties map to RDF helps you understand the graph s
 ### FAIR4ML to RDF Mapping
 
 **Core Properties** use schema.org vocabulary:
+
 - `identifier` → `schema:identifier` (the model's unique identifier)
 - `name` → `schema:name` (human-readable name)
 - `url` → `schema:url` (primary access URL)
@@ -138,6 +140,7 @@ Understanding how FAIR4ML properties map to RDF helps you understand the graph s
 - `license` → `schema:license` (license information)
 
 **ML-Specific Properties** use FAIR4ML vocabulary:
+
 - `mlTask` → `fair4ml:mlTask` (ML tasks the model addresses)
 - `modelCategory` → `fair4ml:modelCategory` (model architecture type)
 - `fineTunedFrom` → `fair4ml:fineTunedFrom` (base model for fine-tuning)
@@ -145,6 +148,7 @@ Understanding how FAIR4ML properties map to RDF helps you understand the graph s
 - `evaluatedOn` → `fair4ml:evaluatedOn` (evaluation datasets)
 
 **Temporal Properties** use schema.org with proper data types:
+
 - `dateCreated` → `schema:dateCreated` (xsd:dateTime)
 - `dateModified` → `schema:dateModified` (xsd:dateTime)
 - `datePublished` → `schema:datePublished` (xsd:dateTime)
@@ -163,6 +167,7 @@ subject_iri = "https://huggingface.co/bert-base-uncased"
 ```
 
 **Benefits:**
+
 - **Unique identifiers:** Each model has a globally unique identifier
 - **Resolvable URLs:** Identifiers are URLs that can be resolved (in some cases)
 - **Semantic web compatible:** IRIs work in semantic web contexts
@@ -212,6 +217,7 @@ Dataset nodes enable queries like "find all models using this dataset" or "find 
 Paper nodes enable queries like "find all papers cited by transformer models" or "find models based on this paper."
 
 **Other Node Types:**
+
 - `Author` - Model/paper authors
 - `Organization` - Publishing institutions/companies
 - `Task` - ML tasks
@@ -261,12 +267,14 @@ Neo4j's **n10s plugin** provides RDF integration, enabling seamless conversion b
 ### What is n10s?
 
 **n10s** (Neosemantics) is a Neo4j plugin that provides:
+
 - **RDF import/export:** Convert between RDF and Neo4j's native format
 - **SPARQL queries:** Query Neo4j using SPARQL (in addition to Cypher)
 - **Semantic web compatibility:** Maintain RDF semantics in Neo4j
 - **Vocabulary management:** Handle RDF vocabularies (like FAIR4ML, schema.org)
 
 **How it works:** n10s stores RDF triples in Neo4j while maintaining RDF semantics. This means you can:
+
 - Load RDF data into Neo4j
 - Query using Cypher (for graph operations)
 - Query using SPARQL (for semantic web operations)
@@ -275,6 +283,7 @@ Neo4j's **n10s plugin** provides RDF integration, enabling seamless conversion b
 ### Connection Configuration
 
 **Environment Variables:**
+
 - `NEO4J_URI`: Neo4j connection URI (default: `bolt://localhost:7687`)
 - `NEO4J_USER`: Username (default: `neo4j`)
 - `NEO4J_PASSWORD`: Password (required)
@@ -301,6 +310,7 @@ The Neo4j loader can be used in several ways:
 ### Via Dagster UI
 
 **Steps:**
+
 1. Open Dagster UI (http://localhost:3000)
 2. Navigate to Assets tab
 3. Find `hf_load_models_to_neo4j` asset (or similar for other sources)
@@ -426,6 +436,7 @@ The loader can optionally export RDF data to Turtle format:
 ```
 
 **Benefits:**
+
 - **Semantic web compatible:** Can be used with other RDF tools
 - **FAIR data compliance:** Supports FAIR data principles
 - **Integration:** Can be imported into other systems
@@ -460,6 +471,7 @@ for i in range(0, len(models), batch_size):
 **Multi-threaded loading:** Process multiple models simultaneously using multiple threads. This utilizes all available CPU cores.
 
 **Considerations:** 
+
 - Use connection pooling to avoid creating too many connections
 - Balance load across threads (don't overload Neo4j)
 - Handle errors gracefully (one thread failure shouldn't stop others)
@@ -487,6 +499,7 @@ When loading data into Neo4j, you might encounter issues:
 **Problem:** Cannot connect to Neo4j
 
 **Solutions:**
+
 - Check Neo4j is running (`docker ps` or `systemctl status neo4j`)
 - Verify connection URI (should be `bolt://localhost:7687` for local)
 - Check credentials (username and password)
@@ -497,6 +510,7 @@ When loading data into Neo4j, you might encounter issues:
 **Problem:** Out of memory during loading
 
 **Solutions:**
+
 - Reduce batch size (process fewer models at a time)
 - Process in smaller chunks (split large datasets)
 - Increase Neo4j heap size (in `neo4j.conf`: `dbms.memory.heap.max_size=2G`)
@@ -507,6 +521,7 @@ When loading data into Neo4j, you might encounter issues:
 **Problem:** Loading is slow
 
 **Solutions:**
+
 - Enable batch processing (process multiple models together)
 - Create indexes (faster lookups)
 - Use parallel processing (utilize all CPU cores)

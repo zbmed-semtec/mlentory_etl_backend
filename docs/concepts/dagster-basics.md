@@ -12,8 +12,7 @@ Building a data pipeline involves many moving parts: extracting data from multip
 
 Think of Dagster as a conductor for an orchestra. Just as a conductor coordinates musicians to create harmonious music, Dagster coordinates data processing steps to create reliable pipelines. The conductor doesn't play an instrument—they ensure everyone plays at the right time, in the right order, with the right dependencies.
 
-![Dagster Orchestration](images/dagster-orchestration.png)
-*Figure 1: Dagster orchestrates data processing steps, ensuring dependencies are satisfied and providing observability into pipeline execution.*
+Dagster orchestrates data processing steps, ensuring dependencies are satisfied and providing observability into pipeline execution. It tracks data artifacts, manages execution order, and provides real-time monitoring through its web UI.
 
 ### Why Dagster Over Other Tools?
 

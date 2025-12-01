@@ -24,6 +24,7 @@ Complete guide to extracting ML model metadata from OpenML, a platform for machi
 ### OpenML Data Model
 
 **Runs** are the central entity:
+
 - Each run represents one ML experiment
 - A run uses a **flow** (model/algorithm) on a **dataset** for a **task**
 - Runs contain performance metrics and configurations
@@ -44,12 +45,14 @@ Run #12345
 ### Step 1: Extract Runs
 
 **What happens:**
+
 1. Connect to OpenML Python API
 2. Fetch N most recent runs
 3. Extract run metadata (flow ID, dataset ID, task ID, results)
 4. Store raw JSON files
 
 **Output:**
+
 - `/data/raw/openml/<timestamp>_<uuid>/runs.json`
 
 **Example data:**
@@ -69,11 +72,13 @@ Run #12345
 ### Step 2: Identify Related Entities
 
 **What happens:**
+
 1. Scan runs to identify unique datasets, flows, and tasks
 2. Extract entity IDs from run metadata
 3. Build entity ID sets
 
 **Entity Types Identified:**
+
 - **Datasets:** Training/test datasets referenced in runs
 - **Flows:** ML algorithms/models used in runs
 - **Tasks:** ML problem definitions
@@ -94,12 +99,14 @@ Identified entities:
 ### Step 3: Extract Related Entities
 
 **What happens:**
+
 1. Take identified entity IDs
 2. Fetch full metadata from OpenML API
 3. Optionally scrape additional statistics from website
 4. Store enriched entity data
 
 **Output:**
+
 - `/data/raw/openml/<timestamp>_<uuid>/datasets.json`
 - `/data/raw/openml/<timestamp>_<uuid>/flows.json`
 - `/data/raw/openml/<timestamp>_<uuid>/tasks.json`
@@ -111,12 +118,14 @@ Identified entities:
 ### 1. API-based Extraction (Primary)
 
 **How it works:**
+
 - Uses OpenML Python package (`openml` library)
 - Direct API calls to OpenML server
 - Fast and reliable
 - Handles pagination automatically
 
 **What's extracted:**
+
 - Run metadata (flow, dataset, task IDs, results)
 - Dataset metadata (name, description, features, instances)
 - Flow metadata (algorithm name, parameters, version)
@@ -125,25 +134,30 @@ Identified entities:
 ### 2. Web Scraping (Optional)
 
 **How it works:**
+
 - Selenium-based browser automation
 - Scrapes dataset statistics from OpenML website
 - Used when data isn't available via API
 
 **What's scraped:**
+
 - Dataset statistics (downloads, likes, issues)
 - Additional metadata not in API
 
 **When to use:**
+
 - Need dataset statistics (downloads, likes)
 - Data not available via API
 - ⚠️ **Warning:** Much slower than API extraction
 
 **Enable scraping:**
+
 ```bash
 OPENML_ENABLE_SCRAPING=true
 ```
 
 **Limitations:**
+
 - ⚠️ Very slow (browser automation)
 - ⚠️ May break if website structure changes
 - ⚠️ Requires Chrome/Chromium browser
@@ -170,6 +184,7 @@ clients/
 ```
 
 **Responsibilities:**
+
 - Make API calls via OpenML Python package
 - Handle pagination
 - Parse API responses
@@ -188,6 +203,7 @@ entity_identifiers/
 ```
 
 **How they work:**
+
 - Scan runs for dataset_id, flow_id, task_id
 - Extract unique entity IDs
 - Return sets of entity IDs
@@ -202,6 +218,7 @@ scrapers/
 ```
 
 **Features:**
+
 - Thread-safe browser pool
 - Exponential backoff and retry logic
 - Auto-disables on connection failures
@@ -229,10 +246,12 @@ The OpenML extraction is exposed as Dagster assets:
 ### Extraction Assets
 
 **`openml_run_folder`**
+
 - Creates unique run folder for this materialization
 - Returns: Path to run folder
 
 **`openml_raw_runs`**
+
 - Extracts runs from OpenML
 - Depends on: `openml_run_folder`
 - Returns: Tuple of (runs_json_path, run_folder)
@@ -240,11 +259,13 @@ The OpenML extraction is exposed as Dagster assets:
 ### Enrichment Assets
 
 **Identification Assets:**
+
 - `openml_identified_datasets` - Identifies dataset references
 - `openml_identified_flows` - Identifies flow references
 - `openml_identified_tasks` - Identifies task references
 
 **Enrichment Assets:**
+
 - `openml_enriched_datasets` - Fetches full dataset metadata
 - `openml_enriched_flows` - Fetches full flow metadata
 - `openml_enriched_tasks` - Fetches full task metadata
@@ -285,6 +306,7 @@ All configuration is via environment variables:
 ### Web Scraping Configuration
 
 When `OPENML_ENABLE_SCRAPING=true`:
+
 - Uses Selenium browser automation
 - Scrapes dataset statistics (downloads, likes, issues)
 - Much slower than API extraction
@@ -331,6 +353,7 @@ OpenML extractor wraps fields with extraction metadata:
 ```
 
 **Benefits:**
+
 - Track extraction method (API vs scraping)
 - Confidence scores for data quality
 - Provenance information
@@ -392,11 +415,13 @@ entity_paths = enrichment.enrich_from_runs_json(
 ### Runs
 
 **What they represent:**
+
 - Individual ML experiments
 - Link flows (models) to datasets and tasks
 - Contain performance metrics and configurations
 
 **Key fields:**
+
 - `run_id`: Unique run identifier
 - `flow_id`: Algorithm/model used
 - `dataset_id`: Dataset used
@@ -407,10 +432,12 @@ entity_paths = enrichment.enrich_from_runs_json(
 ### Datasets
 
 **What they represent:**
+
 - Training and test datasets
 - Used in ML experiments
 
 **Key fields:**
+
 - `dataset_id`: Unique dataset identifier
 - `name`: Dataset name
 - `version`: Dataset version
@@ -420,6 +447,7 @@ entity_paths = enrichment.enrich_from_runs_json(
 - `number_of_classes`: Number of classes (for classification)
 
 **Optional scraped fields:**
+
 - `downloads`: Number of downloads
 - `likes`: Number of likes
 - `issues`: Number of issues
@@ -427,10 +455,12 @@ entity_paths = enrichment.enrich_from_runs_json(
 ### Flows (Models)
 
 **What they represent:**
+
 - ML algorithms/models
 - Reusable across multiple experiments
 
 **Key fields:**
+
 - `flow_id`: Unique flow identifier
 - `name`: Flow name
 - `version`: Flow version
@@ -440,10 +470,12 @@ entity_paths = enrichment.enrich_from_runs_json(
 ### Tasks
 
 **What they represent:**
+
 - ML problem definitions
 - Standardized task descriptions
 
 **Key fields:**
+
 - `task_id`: Unique task identifier
 - `task_type`: Type of task (classification, regression, etc.)
 - `evaluation_measure`: How to evaluate (accuracy, F1, etc.)
@@ -470,6 +502,7 @@ entity_paths = enrichment.enrich_from_runs_json(
 **Problem:** Cannot connect to OpenML API
 
 **Solutions:**
+
 - Check internet connection
 - Verify OpenML server is accessible
 - Check firewall settings
@@ -480,6 +513,7 @@ entity_paths = enrichment.enrich_from_runs_json(
 **Problem:** Web scraping fails
 
 **Solutions:**
+
 - Ensure Chrome/Chromium is installed
 - Check `OPENML_ENABLE_SCRAPING=true` is set
 - Review browser logs
@@ -490,6 +524,7 @@ entity_paths = enrichment.enrich_from_runs_json(
 **Problem:** Some entities not found
 
 **Solutions:**
+
 - Verify entity IDs are valid
 - Check OpenML server status
 - Review logs for specific errors
@@ -500,6 +535,7 @@ entity_paths = enrichment.enrich_from_runs_json(
 **Problem:** Extraction is slow
 
 **Solutions:**
+
 - Disable web scraping (if enabled)
 - Reduce `OPENML_NUM_INSTANCES`
 - Increase `OPENML_THREADS` (if not rate-limited)

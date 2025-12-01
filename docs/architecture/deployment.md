@@ -1,14 +1,5 @@
 # Deployment
 
-Production deployment guide for MLentory ETL.
+Production deployment guide for the MLentory ETL pipeline, covering local development, Docker Compose, and production considerations.
 
-## Local Development
-
-## Docker Compose
-
-## Production Considerations
-
----
-
-*Content to be added*
-
+YET TO UPDATE

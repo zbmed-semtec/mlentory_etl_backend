@@ -1,68 +1,37 @@
-# FAIR4ML Schema Reference
+# FAIR4ML Schema
 
-This comprehensive guide explains the FAIR4ML schema, a standardized vocabulary designed specifically for describing machine learning model metadata. Whether you're a researcher trying to understand how ML models are described, a developer implementing transformations, or someone curious about metadata standards, this document will walk you through every aspect of FAIR4ML in detail.
-
----
-
-## Understanding FAIR4ML: The Foundation
-
-Imagine you're trying to find information about a machine learning model. You might search on HuggingFace, OpenML, or other platforms, but each platform describes models differently. One uses `modelId`, another uses `flow_id`, and yet another uses completely different field names. This inconsistency makes it nearly impossible to compare models across platforms or build unified search systems.
-
-**FAIR4ML** (FAIR for Machine Learning) solves this problem by providing a standardized vocabulary that all platforms can use to describe ML models. Think of it as a universal language for ML model metadata—just as English allows people from different countries to communicate, FAIR4ML allows different platforms to describe models in a way that computers can understand and compare.
-
-![FAIR4ML Concept Diagram](images/fair4ml-concept.png)
-*Figure 1: FAIR4ML acts as a universal translator, converting platform-specific formats into a standardized vocabulary that enables comparison and integration across different ML model repositories.*
-
-### The FAIR Principles Connection
-
-FAIR4ML is built on the **FAIR principles**, which stand for Findable, Accessible, Interoperable, and Reusable. These aren't just buzzwords—they represent real challenges in scientific data management that FAIR4ML addresses:
-
-**Findable** means that models have unique, persistent identifiers (like URLs) that make them easy to locate. Instead of searching through thousands of platforms, you can use a single identifier to find a model anywhere it's referenced.
-
-**Accessible** means that metadata is retrievable using standard protocols. You don't need special software or proprietary formats—standard web technologies work.
-
-**Interoperable** means that different systems can work together. A model described in FAIR4ML can be understood by systems that use schema.org, RDF, or other semantic web standards.
-
-**Reusable** means that rich metadata makes it clear how models can be used, what they're trained on, and what their limitations are. This enables researchers to make informed decisions about model reuse.
-
-### Official Resources and Standards
-
-FAIR4ML is maintained by the Research Data Alliance (RDA) FAIR4ML Interest Group, ensuring it's developed through community consensus and follows best practices. The official vocabulary is available at `https://w3id.org/fair4ml#`, which uses content negotiation—meaning you can request the vocabulary in different formats (JSON-LD, RDF, HTML) depending on your needs.
-
-The current stable version is **v0.1.0**, released in October 2024. This version includes all the core properties needed to describe ML models comprehensively. Future versions are being discussed in the [RDA FAIR4ML Interest Group](https://github.com/RDA-FAIR4ML/FAIR4ML-schema) and will include enhancements like structured evaluation metrics and hyperparameter representations.
+This comprehensive guide provides a detailed reference for the FAIR4ML schema properties. For an overview of how FAIR4ML fits into MLentory's schema ecosystem, see [Schemas Overview](schemas.md).
 
 ---
 
-## How FAIR4ML Extends Schema.org
+## 📋 About This Reference
 
-To understand FAIR4ML, it helps to understand its relationship with schema.org. Schema.org is a collaborative effort by Google, Microsoft, Yahoo, and Yandex to create a common vocabulary for structured data on the web. It provides properties like `name`, `description`, and `author` that work for any type of content.
+This document provides detailed explanations of every FAIR4ML property, organized by functional groups. Each property includes:
 
-FAIR4ML takes this foundation and adds ML-specific properties. For example, schema.org has `name` and `description`, which work perfectly for ML models. But schema.org doesn't have properties for ML tasks, model categories, or training datasets—these are ML-specific concepts that FAIR4ML adds.
+- **Purpose**: What the property represents
+- **Type**: Expected data type
+- **Usage**: How it's used in practice
+- **Examples**: Real-world examples
 
-![Schema.org Extension Diagram](images/schema-org-extension.png)
-*Figure 2: FAIR4ML extends schema.org by adding ML-specific properties while reusing general-purpose properties like name, description, and author.*
+**FAIR4ML v0.1.0** (released October 2024) is the current stable version, maintained by the [RDA FAIR4ML Interest Group](https://github.com/RDA-FAIR4ML/FAIR4ML-schema).
 
-This design choice is brilliant because it means:
+### 📚 Official Resources
 
-1. **Compatibility**: Any system that understands schema.org can understand the basic properties of a FAIR4ML model
-2. **Extensibility**: ML-specific properties are clearly marked with the `fair4ml:` namespace
-3. **Integration**: Models can be described alongside their datasets (using Croissant ML), software dependencies (using CodeMeta), and other research artifacts
+- **Vocabulary**: [https://w3id.org/fair4ml](https://w3id.org/fair4ml)
+- **Specification**: [FAIR4ML v0.1.0](https://rda-fair4ml.github.io/FAIR4ML-schema/release/0.1.0/index.html)
+- **Repository**: [RDA-FAIR4ML/FAIR4ML-schema](https://github.com/RDA-FAIR4ML/FAIR4ML-schema)
 
-### Understanding Namespaces
+### 🏷️ Understanding Namespaces
 
-In FAIR4ML, you'll see properties prefixed with different namespaces. This might seem technical, but it's actually quite simple:
+FAIR4ML properties use namespaces to indicate their source:
 
 - **`schema:`** properties come from schema.org (e.g., `schema:name`, `schema:description`)
 - **`fair4ml:`** properties are ML-specific (e.g., `fair4ml:mlTask`, `fair4ml:modelCategory`)
-- **`codemeta:`** properties come from CodeMeta schema for software metadata (e.g., `codemeta:readme`)
+- **`codemeta:`** properties come from CodeMeta schema (e.g., `codemeta:readme`)
 
-When you see `schema:name`, it means "the name property from the schema.org vocabulary." When you see `fair4ml:mlTask`, it means "the mlTask property from the FAIR4ML vocabulary."
+### 📝 JSON-LD Format
 
-### JSON-LD: The Machine-Readable Format
-
-FAIR4ML data is typically represented in JSON-LD (JSON for Linked Data) format. This format is both human-readable (it's JSON, which developers are familiar with) and machine-readable (computers can understand the semantic meaning).
-
-Here's what a simple FAIR4ML model looks like in JSON-LD:
+FAIR4ML data is represented in JSON-LD format. The `@context` defines namespaces, and `@type` specifies the entity type:
 
 ```json
 {
@@ -77,19 +46,17 @@ Here's what a simple FAIR4ML model looks like in JSON-LD:
 }
 ```
 
-The `@context` tells systems where to find the definitions of `schema:` and `fair4ml:` properties. The `@type` tells systems that this is a FAIR4ML MLModel entity. The rest is the actual data.
-
 ---
 
-## The MLModel Entity: A Deep Dive
+## 🔍 The MLModel Entity: Property Reference
 
 The **MLModel** entity is the heart of FAIR4ML. It represents a trained machine learning model with all its metadata. Let's explore each group of properties in detail, understanding not just what they are, but why they matter and how they're used.
 
-### Core Identification: Who Are You?
+### 🆔 Core Identification
 
 Every model needs a way to be uniquely identified. Think of it like a passport—without proper identification, you can't tell one model from another, and you certainly can't link related information together.
 
-The **`identifier`** property is a list of unique identifiers, typically URLs. Why a list? Because a model might be available on multiple platforms. For example, a model might have a HuggingFace URL, an arXiv paper URL, and a GitHub repository URL. All of these are valid identifiers, and listing them all helps systems find the model regardless of which platform they're using.
+The **`identifier`** property is a list of unique identifiers, typically URLs. It is a list because a model might be available on multiple platforms.For example, a model might have a HuggingFace URL, an arXiv paper URL, and a GitHub repository URL. All of these are valid identifiers, and listing them all helps systems find the model regardless of which platform they're using.
 
 The **`name`** property is the human-readable name of the model. This is what users see when browsing models. It should be descriptive but concise—"BERT Base Uncased" tells you it's a BERT model, the base variant, and it's uncased (doesn't distinguish between uppercase and lowercase).
 
@@ -97,21 +64,22 @@ The **`url`** property is the primary URL where the model can be accessed. This 
 
 Together, these three properties ensure that every model can be uniquely identified, found, and accessed. They're the foundation that makes all other properties meaningful.
 
-### Authorship and Provenance: Who Created This?
+### 👤 Authorship and Provenance
 
 Understanding who created a model and who shared it is crucial for attribution, trust, and legal compliance. FAIR4ML distinguishes between two related but different concepts:
 
-**`author`** represents the person or organization who actually created the model. This is the intellectual creator—the researcher or team who designed and trained the model. For example, Google created BERT, so "Google" would be the author.
+**`author`** represents the person or organization who actually created the model. This is the intellectual creator: the researcher or team who designed and trained the model. For example, Google created BERT, so "Google" would be the author.
 
 **`sharedBy`** represents the person or organization who shared the model online. This might be the same as the author, but often it's different. For example, a researcher might create a model, but HuggingFace might host and share it. In that case, the author is the researcher, and HuggingFace is who shared it.
 
 This distinction matters because:
+
 - **Attribution**: You want to credit the right person
 - **Licensing**: The author and the platform might have different licensing terms
 - **Support**: Questions about the model might go to the author, while platform issues go to the sharer
 - **Trust**: Understanding the source helps users evaluate model quality
 
-### Temporal Information: When Did This Happen?
+### 📅 Temporal Information
 
 Dates in FAIR4ML help you understand the model's lifecycle and relevance. Three dates are particularly important:
 
@@ -123,7 +91,7 @@ Dates in FAIR4ML help you understand the model's lifecycle and relevance. Three 
 
 These dates help researchers understand model evolution, track updates, and make decisions about which version to use.
 
-### Description and Documentation: What Is This Model?
+### 📝 Description and Documentation
 
 The description properties help users understand what the model does and how to use it:
 
@@ -137,11 +105,12 @@ The description properties help users understand what the model does and how to 
 
 **`referencePublication`** links to research papers that describe the model. This is typically an arXiv URL, DOI, or other publication identifier. These papers provide the theoretical foundation, training details, and evaluation results that help users understand the model deeply.
 
-### ML Task and Category: What Can This Model Do?
+### 🤖 ML Task and Category
 
 These are the most ML-specific properties in FAIR4ML, and they're crucial for model discovery:
 
 **`mlTask`** specifies what machine learning task(s) the model addresses. This is an array because models can often perform multiple tasks. Common tasks include:
+
 - `fill-mask`: Predicting masked words in text (like BERT)
 - `text-generation`: Generating new text
 - `text-classification`: Classifying text into categories
@@ -154,6 +123,7 @@ These are the most ML-specific properties in FAIR4ML, and they're crucial for mo
 When someone searches for "models for sentiment analysis," systems can match this to models with `mlTask` containing "text-classification" or "sentiment-analysis".
 
 **`modelCategory`** describes the model's architecture or category. This helps users understand the technical approach:
+
 - `transformer`: Transformer-based models (BERT, GPT, etc.)
 - `CNN`: Convolutional Neural Networks
 - `RNN`: Recurrent Neural Networks
@@ -162,27 +132,26 @@ When someone searches for "models for sentiment analysis," systems can match thi
 
 This property helps researchers find models with specific architectures, which is important for understanding performance characteristics, computational requirements, and use cases.
 
-### Model Lineage: Where Did This Come From?
+### 🌳 Model Lineage
 
 Model lineage tracks how models are related to each other, which is crucial for understanding model evolution and dependencies:
 
 **`fineTunedFrom`** specifies the base model(s) that this model was fine-tuned from. Fine-tuning is the process of taking a pre-trained model and adapting it for a specific task. For example, a sentiment analysis model might be fine-tuned from BERT. This property creates a family tree of models, showing how they're related.
 
 This is an array because:
+
 - A model might be fine-tuned from multiple base models (ensemble approaches)
 - Multi-stage fine-tuning might involve intermediate models
 - Some models combine features from multiple base models
 
 Understanding lineage helps users:
+
 - Find related models that might be better suited to their needs
 - Understand model capabilities (a model fine-tuned from BERT inherits BERT's capabilities)
 - Track model evolution and improvements
 - Identify base models that might be more general-purpose
 
-![Model Lineage Diagram](images/model-lineage.png)
-*Figure 3: Model lineage shows how models are related through fine-tuning, creating a family tree that helps users understand model evolution and relationships.*
-
-### Usage and Code: How Do I Use This?
+### 💻 Usage and Code
 
 These properties help users actually use the model:
 
@@ -192,11 +161,12 @@ These properties help users actually use the model:
 
 **`codeSampleSnippet`** is actual code that demonstrates model usage. This is typically a short Python snippet showing how to load and use the model. Code examples are invaluable because they show exactly what works, reducing the barrier to entry for new users.
 
-### Ethics and Risks: What Should I Know?
+### ⚠️ Ethics and Risks
 
 These properties address the critical responsibility of documenting model limitations and ethical considerations:
 
 **`modelRisksBiasLimitations`** describes known issues with the model. This might include:
+
 - Performance limitations (e.g., "Works poorly on non-standard English")
 - Bias issues (e.g., "May exhibit gender bias in certain contexts")
 - Data limitations (e.g., "Trained only on English text")
@@ -205,12 +175,14 @@ These properties address the critical responsibility of documenting model limita
 This information is crucial for responsible AI deployment. Users need to understand limitations to avoid misuse and to make informed decisions about when the model is appropriate.
 
 **`ethicalSocial`** addresses broader ethical and social considerations. This might include:
+
 - Potential misuse cases (e.g., "Should not be used for surveillance")
 - Social impact considerations
 - Fairness and equity concerns
 - Community guidelines
 
 **`legal`** covers legal considerations, including:
+
 - Liability disclaimers
 - Compliance requirements
 - Jurisdictional restrictions
@@ -218,21 +190,24 @@ This information is crucial for responsible AI deployment. Users need to underst
 
 These properties help ensure models are used responsibly and ethically, which is increasingly important as AI systems become more powerful and widespread.
 
-### Training and Evaluation Data: How Was This Model Built?
+### 📊 Training and Evaluation Data
 
 Understanding what data a model was trained and evaluated on is crucial for:
+
 - Reproducing results
 - Understanding model capabilities and limitations
 - Assessing model quality
 - Making informed decisions about model suitability
 
 **`trainedOn`** lists the datasets used for training. This is an array because models are often trained on multiple datasets. For example, BERT was trained on Wikipedia and BookCorpus. Knowing training data helps users understand:
+
 - What the model has seen during training
 - Potential biases (if training data is biased, the model likely is too)
 - Domain coverage (what types of data the model understands)
 - Data quality implications
 
 **`testedOn`**, **`validatedOn`**, and **`evaluatedOn`** specify datasets used for different stages of model development:
+
 - **Tested on**: Datasets used for final testing before release
 - **Validated on**: Datasets used for validation during development
 - **Evaluated on**: Datasets used for benchmarking and comparison
@@ -240,12 +215,13 @@ Understanding what data a model was trained and evaluated on is crucial for:
 These distinctions help researchers understand the rigor of model evaluation and the contexts in which performance was measured.
 
 **`evaluationMetrics`** lists the metrics and their values. This might include "F1: 0.92", "Accuracy: 0.89", "BLEU: 0.85", or other task-specific metrics. These metrics help users:
+
 - Compare models on the same benchmarks
 - Understand model performance quantitatively
 - Make informed decisions about which model to use
 - Set expectations for model performance
 
-### Additional URLs: Where Can I Learn More?
+### 🔗 Additional URLs
 
 These properties provide links to additional resources:
 
@@ -257,23 +233,25 @@ These properties provide links to additional resources:
 
 **`issueTracker`** links to bug trackers or issue management systems where users can report problems and track fixes.
 
-### Technical and Environmental Information
+### ⚙️ Technical and Environmental Information
 
 **`memoryRequirements`** specifies the computational resources needed to run the model. This might be "512MB RAM, 2GB disk space" or more detailed specifications. This helps users determine if they have the resources to use the model.
 
 **`hasCO2eEmissions`** documents the carbon footprint of training the model. This is increasingly important as the environmental impact of large-scale ML training becomes a concern. Values might be "15.2 kg CO2e" or similar. This helps researchers make environmentally conscious choices.
 
-### Platform-Specific Extensions
+### 🔧 Platform-Specific Extensions
 
 **`metrics`** is a MLentory-specific extension that stores platform-specific metrics like download counts, likes, stars, or other engagement metrics. While not part of the official FAIR4ML specification, this provides valuable context about model popularity and community adoption.
 
 **`extraction_metadata`** is another MLentory extension that tracks how each field was extracted. This includes:
+
 - **`extraction_method`**: How the field was obtained (e.g., "Parsed_from_HF_dataset", "Inferred_from_tags")
 - **`confidence`**: How confident we are in the extraction (0.0 to 1.0)
 - **`source_field`**: The original field name in the source data
 - **`notes`**: Additional context about the extraction
 
 This metadata is crucial for:
+
 - Debugging transformation issues
 - Understanding data quality
 - Tracking provenance
@@ -281,7 +259,7 @@ This metadata is crucial for:
 
 ---
 
-## Related Entities: The Ecosystem
+## 🔗 Related Entities: The Ecosystem
 
 ML models don't exist in isolation—they're part of a rich ecosystem of datasets, papers, authors, and organizations. FAIR4ML references other schemas to describe these related entities:
 
@@ -299,7 +277,7 @@ This ecosystem approach means that models, datasets, papers, and people can all 
 
 ---
 
-## A Complete Example: Seeing It All Together
+## 💡 Complete Example: Seeing It All Together
 
 Let's look at a complete FAIR4ML model description to see how all these properties work together:
 
@@ -350,6 +328,7 @@ Let's look at a complete FAIR4ML model description to see how all these properti
 ```
 
 This example shows a complete, realistic model description. Notice how:
+
 - Core identification ensures the model can be found
 - Authorship provides attribution
 - Temporal information shows when it was created
@@ -361,11 +340,12 @@ This example shows a complete, realistic model description. Notice how:
 
 ---
 
-## FAIR4ML Versions and Evolution
+## 🔄 FAIR4ML Versions and Evolution
 
 FAIR4ML v0.1.0, released in October 2024, represents the first stable version with comprehensive ML model properties. The development process involved extensive community feedback through the RDA FAIR4ML Interest Group, ensuring the vocabulary meets real-world needs.
 
 Future versions are being actively discussed and will likely include:
+
 - **Structured evaluation metrics**: Instead of free-form strings, structured representations of metrics and their values
 - **Hyperparameter representation**: Standardized ways to describe model hyperparameters
 - **Model generation process**: Detailed information about how the model was created
@@ -375,7 +355,7 @@ This evolutionary approach ensures FAIR4ML stays relevant as the ML field evolve
 
 ---
 
-## Compatibility: Working with Other Standards
+## 🌐 Compatibility: Working with Other Standards
 
 FAIR4ML is designed to work seamlessly with other research metadata schemas. This compatibility is crucial because ML models are part of a larger research ecosystem:
 
@@ -384,6 +364,7 @@ FAIR4ML is designed to work seamlessly with other research metadata schemas. Thi
 **RDA Standards** like Research Metadata Schemas and FAIR Digital Objects provide frameworks for packaging and describing research artifacts, and FAIR4ML models fit naturally into these frameworks.
 
 This compatibility means:
+
 - Models can be described alongside their datasets using compatible schemas
 - Models can reference their software dependencies using CodeMeta
 - Models can be packaged as FAIR Digital Objects for preservation and sharing
@@ -391,7 +372,7 @@ This compatibility means:
 
 ---
 
-## Key Takeaways
+## 🎓 Key Takeaways
 
 FAIR4ML is more than just a vocabulary—it's a foundation for making ML models findable, accessible, interoperable, and reusable. By standardizing how models are described, FAIR4ML enables:
 
@@ -405,7 +386,7 @@ Whether you're a researcher looking for the right model, a developer building ML
 
 ---
 
-## Further Reading
+## 📖 Further Reading
 
 To dive deeper into FAIR4ML:
 
@@ -417,11 +398,11 @@ To dive deeper into FAIR4ML:
 
 ---
 
-## Next Steps
+## 🚀 Next Steps
 
-Now that you understand FAIR4ML, explore how it's used in MLentory:
+Explore how FAIR4ML is used in MLentory:
 
-- See [Schema Structure](structure.md) - How we implement FAIR4ML using Pydantic models
-- Explore [Source Schemas](source-schemas.md) - How we transform platform-specific data into FAIR4ML
-- Check [Transformers](../transformers/overview.md) - How the transformation process works
-- Review [Schemas API](../api/schemas.md) - Complete API reference for developers
+- **[Schemas Overview](schemas.md)** → How FAIR4ML fits with Croissant and Schema.org
+- **[Schema Structure](structure.md)** → Pydantic implementation details
+- **[Source Schemas](source-schemas.md)** → How source data maps to FAIR4ML
+- **[Transformers Overview](../transformers/overview.md)** → Transformation process
