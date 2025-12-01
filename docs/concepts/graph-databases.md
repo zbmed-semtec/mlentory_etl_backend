@@ -12,8 +12,7 @@ Traditional databases (like PostgreSQL or MySQL) store data in tables with rows 
 
 Think of it like social networks. In a traditional database, you might have a "users" table and a "friendships" table. To find "friends of friends," you need to JOIN these tables, which gets slow as the network grows. In a graph database, you just traverse relationships—start from a user, follow "friend" relationships, then follow them again. This is fast and intuitive.
 
-![Graph Database Structure](images/graph-database-structure.png)
-*Figure 1: Graph databases store data as nodes (entities) and relationships (connections), making relationship queries fast and intuitive.*
+Graph databases store data as nodes (entities) and relationships (connections), making relationship queries fast and intuitive. Nodes represent entities (models, datasets, papers), and relationships represent connections (USES_DATASET, CITES_PAPER, BASED_ON).
 
 ### Visual Example: Understanding the Graph Model
 

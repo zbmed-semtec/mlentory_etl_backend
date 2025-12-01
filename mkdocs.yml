@@ -1,7 +1,7 @@
-site_name: MLentory ETL Documentation
-site_description: Comprehensive documentation for the MLentory ETL pipeline
+site_name: MLentory Documentation
+site_description: Comprehensive documentation for MLentory ETL pipeline and Backend API
 site_author: MLentory Team
-site_url: https://mlentory.github.io/etl-docs
+site_url: https://mlentory.github.io/docs
 
 repo_name: mlentory/etl-backend
 repo_url: https://github.com/zbmed-semtec/mlentory_etl_backend/
@@ -68,38 +68,70 @@ nav:
   - Getting Started:
     - getting-started/quickstart.md
     - getting-started/configuration.md
-    - getting-started/first-run.md
-  - Architecture:
-    - architecture/overview.md
-    - architecture/system-design.md
-    - architecture/data-flow.md
-    - architecture/components.md
-    - architecture/deployment.md
-  - Concepts:
-    - concepts/etl-overview.md
-    - concepts/fair4ml-schema.md
-    - concepts/dagster-basics.md
-    - concepts/graph-databases.md
-  - Extractors:
-    - extractors/overview.md
-    - extractors/huggingface.md
-    - extractors/openml.md
-    - extractors/ai4life.md
-    - extractors/adding-extractor.md
-  - Transformers:
-    - transformers/overview.md
-    - transformers/huggingface.md
-    - transformers/architecture.md
-    - transformers/adding-transformer.md
-  - Loaders:
-    - loaders/overview.md
-    - loaders/neo4j.md
-    - loaders/elasticsearch.md
-    - loaders/rdf.md
+  - Key Concepts Tutorial:
+    - concepts-tutorial.md
+    - concepts-tutorial/schema.md
+    - concepts-tutorial/etl.md
+    - concepts-tutorial/dagster.md
+    - concepts-tutorial/neo4j.md
+    - concepts-tutorial/elasticsearch.md
   - Schemas:
+    - schemas/schemas.md
     - schemas/fair4ml.md
     - schemas/structure.md
     - schemas/source-schemas.md
+  - ETL Pipeline:
+    - Architecture:
+      - architecture/overview.md
+      - architecture/system-design.md
+      - architecture/data-flow.md
+      - architecture/components.md
+      - architecture/deployment.md
+    - Extractors:
+      - extractors/overview.md
+      - extractors/code-flow.md
+      - extractors/huggingface.md
+      - extractors/openml.md
+      - extractors/ai4life.md
+      - extractors/adding-extractor.md
+    - Transformers:
+      - transformers/overview.md
+      - transformers/code-flow.md
+      - transformers/huggingface.md
+      - transformers/adding-transformer.md
+    - Loaders:
+      - loaders/overview.md
+      - loaders/code-flow.md
+      - loaders/neo4j.md
+      - loaders/elasticsearch.md
+      - loaders/rdf.md
+  - Backend API:
+    - API Overview: backend-api/overview.md
+    - API Architecture:
+      - backend-api/architecture.md
+      - backend-api/components.md
+      - backend-api/data-flow.md
+    - API Endpoints:
+      - backend-api/endpoints/models.md
+      - backend-api/endpoints/graph.md
+      - backend-api/endpoints/stats.md
+      - backend-api/endpoints/health.md
+    - API Usage:
+      - backend-api/usage/quickstart.md
+      - backend-api/usage/examples.md
+    - API Reference:
+      - backend-api/reference/schemas.md
+      - backend-api/reference/errors.md
+  - Examples:
+    - examples/basic-etl.md
+    - examples/custom-extractor.md
+    - examples/neo4j-queries.md
+    - examples/elasticsearch-queries.md
+  - Guides:
+    - guides/adding-source.md
+    - guides/custom-transformations.md
+    - guides/performance.md
+    - guides/best-practices.md
   - Development:
     - development/setup.md
     - development/code-style.md
@@ -111,19 +143,4 @@ nav:
     - operations/monitoring.md
     - operations/troubleshooting.md
     - operations/maintenance.md
-  - API Reference:
-    - api/extractors.md
-    - api/transformers.md
-    - api/loaders.md
-    - api/schemas.md
-  - Examples:
-    - examples/basic-etl.md
-    - examples/custom-extractor.md
-    - examples/neo4j-queries.md
-    - examples/elasticsearch-queries.md
-  - Guides:
-    - guides/adding-source.md
-    - guides/custom-transformations.md
-    - guides/performance.md
-    - guides/best-practices.md
 

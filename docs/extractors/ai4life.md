@@ -7,6 +7,7 @@ Complete guide to extracting ML model metadata from AI4Life, a platform for biom
 ## AI4Life Platform Overview
 
 **AI4Life** (Artificial Intelligence for Life Sciences) is a platform focused on biomedical AI models and datasets, particularly in:
+
 - **Bioimaging:** Image analysis models for microscopy, medical imaging
 - **Life Sciences:** Models for biological data analysis
 - **Biomedical Research:** AI tools for healthcare and research
@@ -21,6 +22,7 @@ Complete guide to extracting ML model metadata from AI4Life, a platform for biom
 ### AI4Life Data Model
 
 AI4Life uses the **Hypha** platform for artifact management:
+
 - **Artifacts:** Models, datasets, and other research artifacts
 - **Parent-Child Structure:** Artifacts organized in hierarchies
 - **Metadata:** Rich descriptions and metadata for each artifact
@@ -32,15 +34,18 @@ AI4Life uses the **Hypha** platform for artifact management:
 ### Step 1: Fetch Records
 
 **What happens:**
+
 1. Connect to AI4Life Hypha API
 2. Request artifact list from specified parent
 3. Fetch metadata for N models
 4. Store raw JSON files
 
 **Output:**
+
 - `/data/raw/ai4life/<timestamp>_<uuid>/ai4life_records.json`
 
 **Configuration:**
+
 - `AI4LIFE_NUM_MODELS`: Number of models to extract (default: 50)
 - `AI4LIFE_BASE_URL`: API base URL (default: https://hypha.aicell.io)
 - `AI4LIFE_PARENT_ID`: Parent ID for extraction (default: bioimage-io/bioimage.io)
@@ -48,6 +53,7 @@ AI4Life uses the **Hypha** platform for artifact management:
 ### Step 2: Wrap with Metadata
 
 **What happens:**
+
 - Each field is wrapped with extraction metadata
 - Tracks extraction method, confidence, timestamp
 - Follows same pattern as OpenML extractor
@@ -67,6 +73,7 @@ AI4Life uses the **Hypha** platform for artifact management:
 ```
 
 **Benefits:**
+
 - Provenance tracking
 - Extraction method documentation
 - Confidence scores for data quality
@@ -91,6 +98,7 @@ extractor = AI4LifeExtractor(
 ```
 
 **Responsibilities:**
+
 - Fetch records from Hypha API
 - Wrap fields with extraction metadata
 - Handle errors and retries
@@ -98,6 +106,7 @@ extractor = AI4LifeExtractor(
 ### No Entity Enrichment
 
 Unlike HuggingFace and OpenML, AI4Life extractor:
+
 - Does not perform entity enrichment
 - Extracts model records directly
 - Simpler data model (no relationships to discover)
@@ -111,10 +120,12 @@ The AI4Life extraction is exposed as Dagster assets:
 ### Extraction Assets
 
 **`ai4life_run_folder`**
+
 - Creates unique run folder for this materialization
 - Returns: Path to run folder
 
 **`ai4life_raw_records`**
+
 - Fetches records from AI4Life API
 - Depends on: `ai4life_run_folder`
 - Returns: Tuple of (records_json_path, run_folder)
@@ -122,16 +133,19 @@ The AI4Life extraction is exposed as Dagster assets:
 ### Transformation Assets
 
 **`ai4life_normalized_models`**
+
 - Normalizes AI4Life records to FAIR4ML
 - Depends on: `ai4life_raw_records`
 - Returns: Path to normalized models JSON
 
 **`ai4life_normalized_datasets`**
+
 - Normalizes AI4Life datasets to FAIR4ML
 - Depends on: `ai4life_raw_records`
 - Returns: Path to normalized datasets JSON
 
 **`ai4life_normalized_papers`**
+
 - Normalizes AI4Life papers to FAIR4ML
 - Depends on: `ai4life_raw_records`
 - Returns: Path to normalized papers JSON
@@ -265,6 +279,7 @@ wrapped_records = [
 **Problem:** Cannot connect to AI4Life API
 
 **Solutions:**
+
 - Check internet connection
 - Verify `AI4LIFE_BASE_URL` is correct
 - Check firewall settings
@@ -275,6 +290,7 @@ wrapped_records = [
 **Problem:** Extraction returns empty results
 
 **Solutions:**
+
 - Check `AI4LIFE_PARENT_ID` is correct
 - Verify parent exists in AI4Life
 - Increase `AI4LIFE_NUM_MODELS`
@@ -285,6 +301,7 @@ wrapped_records = [
 **Problem:** Some expected fields are missing
 
 **Solutions:**
+
 - Check AI4Life data structure
 - Review raw JSON output
 - Some fields may be optional

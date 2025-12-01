@@ -1,34 +1,31 @@
-# Source Schemas: Understanding Platform-Specific Data Formats
+# Source Schemas
+## Understanding Platform-Specific Data Formats
 
 This comprehensive guide explains how different ML model platforms structure their data and how we transform that data into the standardized FAIR4ML format. Understanding source schemas is crucial for debugging transformation issues, extending support to new platforms, and understanding why certain mappings exist.
 
 ---
 
-## The Challenge of Multiple Formats
+## 🎯 The Challenge of Multiple Formats
 
-Imagine you're building a system that needs to work with ML models from different platforms. HuggingFace uses `modelId` to identify models, OpenML uses `flow_id`, and AI4Life uses `id`. Each platform has different field names, different data structures, and different conventions. Some platforms store dates as ISO 8601 strings, others as Unix timestamps. Some use arrays for tags, others use comma-separated strings.
+We are building a system that needs to work with ML models from different platforms. HuggingFace uses `modelId` to identify models, OpenML uses `flow_id`, and AI4Life uses `id`. Each platform has different field names, different data structures, and different conventions. Some platforms store dates as ISO 8601 strings, others as Unix timestamps. Some use arrays for tags, others use comma-separated strings.
 
 This diversity is the fundamental challenge that source schemas address. By understanding each platform's format and how it maps to FAIR4ML, we can build robust transformation logic that handles these differences gracefully.
-
-![Source Schema Transformation](images/source-schema-transformation.png)
-*Figure 1: Each source platform uses different data formats, which must be transformed into the unified FAIR4ML schema. Understanding these formats is key to building accurate transformations.*
-
 ---
 
-## HuggingFace: The Most Comprehensive Source
+## 🤗 HuggingFace: The Most Comprehensive Source
 
 HuggingFace Hub is the largest repository of ML models, with millions of models covering every imaginable task. Their data format is relatively rich, providing extensive metadata about models, but it's structured in a HuggingFace-specific way that requires careful transformation.
 
-### Understanding HuggingFace's Data Structure
+### 📊 Understanding HuggingFace's Data Structure
 
-HuggingFace stores model metadata as JSON objects with a flat structure. Each model has a unique `modelId` (like "bert-base-uncased") that serves as its primary identifier. The metadata includes everything from basic information (name, author) to detailed model cards written in Markdown.
+HuggingFace stores model metadata as JSON objects with a flat structure. Each model has a unique `modelId` that serves as its primary identifier. The metadata includes everything from basic information (name, author) to detailed model cards written in Markdown/html files.
 
 Here's what a typical HuggingFace model looks like:
 
 ```json
 {
-  "modelId": "bert-base-uncased",
-  "author": "google",
+  "modelId": "google-bert/bert-base-uncased",
+  "author": "google-bert",
   "createdAt": "2020-01-01T00:00:00Z",
   "last_modified": "2020-06-15T10:30:00Z",
   "downloads": 1000000,
@@ -45,7 +42,7 @@ Here's what a typical HuggingFace model looks like:
 }
 ```
 
-### Key Fields
+### 🔑 Key Fields
 
 | HuggingFace Field | Type | Description |
 |-------------------|------|-------------|
@@ -62,33 +59,43 @@ Here's what a typical HuggingFace model looks like:
 | `base_model` | string | Base model identifier |
 | `siblings` | array of objects | Model files |
 
-### HuggingFace → FAIR4ML Mapping
+### 🔄 HuggingFace → FAIR4ML Mapping
 
-| HuggingFace Field | FAIR4ML Property | Transformation |
-|-------------------|------------------|----------------|
-| `modelId` | `identifier` | `["https://huggingface.co/{modelId}"]` |
-| `modelId` | `name` | Direct copy |
-| `modelId` | `url` | `"https://huggingface.co/{modelId}"` |
-| `author` | `author` | Direct copy |
-| `author` | `sharedBy` | Direct copy (if same) |
-| `createdAt` | `dateCreated` | Parse ISO 8601 → datetime |
-| `last_modified` | `dateModified` | Parse ISO 8601 → datetime |
-| `card` | `description` | Extract from Markdown |
-| `tags` | `keywords` | Filter out language codes and licenses |
-| `tags` | `inLanguage` | Extract language codes (e.g., "en", "de") |
-| `tags` | `license` | Extract from "license:xxx" tags |
-| `pipeline_tag` | `mlTask` | `[pipeline_tag]` |
-| `library_name` | `modelCategory` | Infer from library (e.g., "transformers" → "transformer") |
-| `base_model` | `fineTunedFrom` | `["https://huggingface.co/{base_model}"]` |
-| `downloads`, `likes` | `metrics` | `{"downloads": ..., "likes": ...}` |
+**Implemented Mappings:**
 
-### Example Transformation
+| HuggingFace Field | FAIR4ML Property | Transformation | Status |
+|-------------------|------------------|----------------|--------|
+| `modelId` | `identifier` | `["https://huggingface.co/{modelId}", mlentory_id]` | ✅ Implemented |
+| `modelId` | `name` | Extract name part (last component after "/") | ✅ Implemented |
+| `modelId` | `url` | `"https://huggingface.co/{modelId}"` | ✅ Implemented |
+| `author` | `author` | Direct copy | ✅ Implemented |
+| `author` | `sharedBy` | Direct copy (assumed same as author) | ✅ Implemented |
+| `createdAt` | `dateCreated` | Parse ISO 8601 → datetime | ✅ Implemented |
+| `last_modified` | `dateModified` | Parse ISO 8601 → datetime | ✅ Implemented |
+| `createdAt` | `datePublished` | Parse ISO 8601 → datetime (uses createdAt) | ✅ Implemented |
+| `card` | `description` | Extract from Markdown (frontmatter removed) | ✅ Implemented |
+| `modelId` | `discussionUrl` | `"https://huggingface.co/{modelId}/discussions"` | ✅ Implemented |
+| `modelId` | `readme` | `"https://huggingface.co/{modelId}/blob/main/README.md"` | ✅ Implemented |
+| `downloads`, `likes` | `metrics` | `{"downloads": ..., "likes": ...}` | ✅ Implemented |
+
+**Planned Mappings (Not Yet Implemented):**
+
+| HuggingFace Field | FAIR4ML Property | Transformation | Status |
+|-------------------|------------------|----------------|--------|
+| `tags` | `keywords` | Filter out language codes and licenses | ⏳ TODO |
+| `tags` | `inLanguage` | Extract language codes (e.g., "en", "de") | ⏳ TODO |
+| `tags` | `license` | Extract from "license:xxx" tags | ⏳ TODO |
+| `pipeline_tag` | `mlTask` | `[pipeline_tag]` | ⏳ TODO |
+| `library_name` | `modelCategory` | Infer from library (e.g., "transformers" → "transformer") | ⏳ TODO |
+| `base_model` | `fineTunedFrom` | `["https://huggingface.co/{base_model}"]` | ⏳ TODO |
+
+### 💡 Example Transformation
 
 **Input (HuggingFace):**
 ```json
 {
-  "modelId": "bert-base-uncased",
-  "author": "google",
+  "modelId": "google-bert/bert-base-uncased",
+  "author": "google-bert",
   "createdAt": "2020-01-01T00:00:00Z",
   "pipeline_tag": "fill-mask",
   "tags": ["bert", "transformer", "nlp", "en", "license:apache-2.0"],
@@ -99,27 +106,36 @@ Here's what a typical HuggingFace model looks like:
 **Output (FAIR4ML):**
 ```json
 {
-  "identifier": ["https://huggingface.co/bert-base-uncased"],
+  "identifier": [
+    "https://huggingface.co/google-bert/bert-base-uncased",
+    "mlentory:model:abc123..."
+  ],
   "name": "bert-base-uncased",
-  "url": "https://huggingface.co/bert-base-uncased",
-  "author": "google",
-  "sharedBy": "google",
+  "url": "https://huggingface.co/google-bert/bert-base-uncased",
+  "author": "google-bert",
+  "sharedBy": "google-bert",
   "dateCreated": "2020-01-01T00:00:00Z",
-  "mlTask": ["fill-mask"],
-  "keywords": ["bert", "transformer", "nlp"],
-  "inLanguage": ["en"],
-  "license": "apache-2.0",
+  "dateModified": null,
+  "datePublished": "2020-01-01T00:00:00Z",
+  "description": null,
+  "discussionUrl": "https://huggingface.co/google-bert/bert-base-uncased/discussions",
+  "readme": "https://huggingface.co/google-bert/bert-base-uncased/blob/main/README.md",
   "metrics": {
-    "downloads": 1000000
+    "downloads": 1000000,
+    "likes": 0
   }
 }
 ```
 
+**Note:** Fields like `mlTask`, `keywords`, `inLanguage`, `license`, `modelCategory`, and `fineTunedFrom` are not yet implemented in the transformation code. See the mapping table above for implementation status.
+
 ---
 
-## OpenML Raw Schema
+## 📊 OpenML Raw Schema
 
-### Data Structure
+> **⚠️ Note:** OpenML transformation is not yet implemented. This section describes the expected raw data format and planned mappings.
+
+### 📋 Data Structure
 
 OpenML uses a **wrapped metadata format** where each field is wrapped with extraction metadata:
 
@@ -160,7 +176,7 @@ OpenML uses a **wrapped metadata format** where each field is wrapped with extra
 }
 ```
 
-### Key Fields
+### 🔑 Key Fields
 
 | OpenML Field | Type | Description |
 |--------------|------|-------------|
@@ -171,7 +187,7 @@ OpenML uses a **wrapped metadata format** where each field is wrapped with extra
 | `setup_string` | string | Configuration string |
 | `upload_time` | string (ISO 8601) | Upload timestamp |
 
-### Flow (Model) Schema
+### 🔄 Flow (Model) Schema
 
 ```json
 {
@@ -183,7 +199,7 @@ OpenML uses a **wrapped metadata format** where each field is wrapped with extra
 }
 ```
 
-### Dataset Schema
+### 📊 Dataset Schema
 
 ```json
 {
@@ -195,18 +211,18 @@ OpenML uses a **wrapped metadata format** where each field is wrapped with extra
 }
 ```
 
-### OpenML → FAIR4ML Mapping
+### 🔄 OpenML → FAIR4ML Mapping (Planned)
 
 **For Flows (Models):**
 
-| OpenML Field | FAIR4ML Property | Transformation |
-|--------------|------------------|----------------|
-| `flow_id` | `identifier` | `["https://www.openml.org/f/{flow_id}"]` |
-| `name` | `name` | Extract from wrapped format |
-| `flow_id` | `url` | `"https://www.openml.org/f/{flow_id}"` |
-| `uploader` | `author` | Resolve user ID to name |
-| `upload_date` | `datePublished` | Parse ISO 8601 → datetime |
-| `version` | `description` | Include in description |
+| OpenML Field | FAIR4ML Property | Transformation | Status |
+|--------------|------------------|----------------|--------|
+| `flow_id` | `identifier` | `["https://www.openml.org/f/{flow_id}"]` | ⏳ TODO |
+| `name` | `name` | Extract from wrapped format | ⏳ TODO |
+| `flow_id` | `url` | `"https://www.openml.org/f/{flow_id}"` | ⏳ TODO |
+| `uploader` | `author` | Resolve user ID to name | ⏳ TODO |
+| `upload_date` | `datePublished` | Parse ISO 8601 → datetime | ⏳ TODO |
+| `version` | `description` | Include in description | ⏳ TODO |
 
 **For Runs:**
 
@@ -215,7 +231,7 @@ Runs are not directly mapped to FAIR4ML models. Instead:
 - Relationships are created in the Load stage
 - Performance metrics from runs are stored separately
 
-### Example Transformation
+### 💡 Example Transformation
 
 **Input (OpenML Flow):**
 ```json
@@ -238,9 +254,11 @@ Runs are not directly mapped to FAIR4ML models. Instead:
 
 ---
 
-## AI4Life Raw Schema
+## 🔬 AI4Life Raw Schema
 
-### Data Structure
+> **⚠️ Note:** AI4Life transformation is not yet implemented. This section describes the expected raw data format and planned mappings.
+
+### 📋 Data Structure
 
 AI4Life models are stored as JSON objects from the Hypha platform:
 
@@ -258,7 +276,7 @@ AI4Life models are stored as JSON objects from the Hypha platform:
 }
 ```
 
-### Key Fields
+### 🔑 Key Fields
 
 | AI4Life Field | Type | Description |
 |---------------|------|-------------|
@@ -272,21 +290,21 @@ AI4Life models are stored as JSON objects from the Hypha platform:
 | `license` | string | License identifier |
 | `parent_id` | string | Parent collection ID |
 
-### AI4Life → FAIR4ML Mapping
+### 🔄 AI4Life → FAIR4ML Mapping (Planned)
 
-| AI4Life Field | FAIR4ML Property | Transformation |
-|---------------|------------------|----------------|
-| `id` | `identifier` | `["https://hypha.aicell.io/{id}"]` |
-| `name` | `name` | Direct copy |
-| `id` | `url` | `"https://hypha.aicell.io/{id}"` |
-| `author` | `author` | Direct copy |
-| `created` | `dateCreated` | Parse ISO 8601 → datetime |
-| `updated` | `dateModified` | Parse ISO 8601 → datetime |
-| `description` | `description` | Direct copy |
-| `tags` | `keywords` | Direct copy |
-| `license` | `license` | Direct copy |
+| AI4Life Field | FAIR4ML Property | Transformation | Status |
+|---------------|------------------|----------------|--------|
+| `id` | `identifier` | `["https://hypha.aicell.io/{id}"]` | ⏳ TODO |
+| `name` | `name` | Direct copy | ⏳ TODO |
+| `id` | `url` | `"https://hypha.aicell.io/{id}"` | ⏳ TODO |
+| `author` | `author` | Direct copy | ⏳ TODO |
+| `created` | `dateCreated` | Parse ISO 8601 → datetime | ⏳ TODO |
+| `updated` | `dateModified` | Parse ISO 8601 → datetime | ⏳ TODO |
+| `description` | `description` | Direct copy | ⏳ TODO |
+| `tags` | `keywords` | Direct copy | ⏳ TODO |
+| `license` | `license` | Direct copy | ⏳ TODO |
 
-### Example Transformation
+### 💡 Example Transformation
 
 **Input (AI4Life):**
 ```json
@@ -317,45 +335,62 @@ AI4Life models are stored as JSON objects from the Hypha platform:
 
 ---
 
-## Common Transformation Patterns
+## 🔧 Common Transformation Patterns
 
-### Pattern 1: Direct Mapping
+### 1️⃣ Pattern 1: Direct Mapping
 
 **Simple field copy:**
 ```python
 fair4ml["author"] = raw["author"]
 ```
 
-### Pattern 2: URL Construction
+### 2️⃣ Pattern 2: URL Construction
 
 **Build identifier/URL from ID:**
 ```python
 model_id = raw["modelId"]
-fair4ml["identifier"] = [f"https://huggingface.co/{model_id}"]
-fair4ml["url"] = f"https://huggingface.co/{model_id}"
+mlentory_id = generate_mlentory_id(model_id)  # Generate unique ID
+hf_url = f"https://huggingface.co/{model_id}"
+fair4ml["identifier"] = [hf_url, mlentory_id]  # Both URL and mlentory_id
+fair4ml["url"] = hf_url
 ```
 
-### Pattern 3: Array Conversion
+### 3️⃣ Pattern 3: Name Extraction
+
+**Extract model name from full model ID:**
+```python
+# HuggingFace: "google-bert/bert-base-uncased" (full ID)
+# FAIR4ML: "bert-base-uncased" (name only)
+model_id = raw["modelId"]
+fair4ml["name"] = model_id.split("/")[-1] if "/" in model_id else model_id
+```
+
+### 4️⃣ Pattern 4: Array Conversion
 
 **Single value → array:**
 ```python
 # HuggingFace: "fill-mask" (string)
 # FAIR4ML: ["fill-mask"] (array)
-fair4ml["mlTask"] = [raw["pipeline_tag"]]
+if raw.get("pipeline_tag"):
+    fair4ml["mlTask"] = [raw["pipeline_tag"]]
 ```
 
-### Pattern 4: Field Extraction
+**Note:** This pattern is planned but not yet implemented in the HuggingFace transformer.
+
+### 5️⃣ Pattern 5: Field Extraction
 
 **Extract from complex field:**
 ```python
 # Extract license from tags
-tags = raw["tags"]
+tags = raw.get("tags", [])
 license_tags = [t for t in tags if t.startswith("license:")]
 if license_tags:
     fair4ml["license"] = license_tags[0].replace("license:", "")
 ```
 
-### Pattern 5: Wrapped Metadata Unwrapping
+**Note:** This pattern is planned but not yet implemented in the HuggingFace transformer.
+
+### 6️⃣ Pattern 6: Wrapped Metadata Unwrapping
 
 **OpenML format:**
 ```python
@@ -366,17 +401,20 @@ if wrapped and len(wrapped) > 0:
     fair4ml["name"] = wrapped[0]["data"]
 ```
 
-### Pattern 6: Date Parsing
+**Note:** This pattern is for OpenML transformation, which is not yet implemented.
+
+### 7️⃣ Pattern 7: Date Parsing
 
 **ISO 8601 → datetime:**
 ```python
 from datetime import datetime
 
 date_str = raw["createdAt"]
+# Handle timezone: replace 'Z' with '+00:00' for fromisoformat
 fair4ml["dateCreated"] = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
 ```
 
-### Pattern 7: Field Combination
+### 8️⃣ Pattern 8: Field Combination
 
 **Combine multiple fields:**
 ```python
@@ -389,9 +427,9 @@ fair4ml["keywords"] = keywords
 
 ---
 
-## Schema Evolution
+## 🔄 Schema Evolution
 
-### Handling Missing Fields
+### ⚠️ Handling Missing Fields
 
 **Strategy:**
 - Optional fields can be omitted
@@ -407,7 +445,7 @@ fair4ml["description"] = raw.get("card") or raw.get("description") or None
 fair4ml["name"] = raw.get("modelId") or raw.get("name") or "Unknown Model"
 ```
 
-### Handling Type Mismatches
+### 🔧 Handling Type Mismatches
 
 **Strategy:**
 - Convert types when possible
@@ -425,7 +463,7 @@ elif isinstance(raw["mlTask"], list):
 
 ---
 
-## Key Takeaways
+## 🎓 Key Takeaways
 
 1. **Each source** has its own schema format
 2. **Mapping rules** convert source fields to FAIR4ML
@@ -435,7 +473,7 @@ elif isinstance(raw["mlTask"], list):
 
 ---
 
-## Next Steps
+## 🚀 Next Steps
 
 - See [FAIR4ML Schema Reference](fair4ml.md) - Complete FAIR4ML property reference
 - Explore [Schema Structure](structure.md) - Pydantic implementation details

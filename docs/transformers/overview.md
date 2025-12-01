@@ -1,4 +1,4 @@
-# Transformers Overview: Converting Data into a Common Language
+#Overview
 
 Transformers are the second stage of the MLentory ETL pipeline, responsible for converting source-specific raw data into the standardized FAIR4ML schema format. This transformation is what makes it possible to compare models from different platforms, build unified search systems, and create knowledge graphs that span multiple sources.
 
@@ -10,12 +10,12 @@ Imagine you're trying to build a search system that works across HuggingFace, Op
 
 **Transformation** is the process of converting all these different formats into a single, standardized format—FAIR4ML. Think of it as translating multiple languages into one common language. Just as a translator converts English, Spanish, and French into a target language, transformers convert HuggingFace format, OpenML format, and AI4Life format into FAIR4ML format.
 
-![Transformation Process](images/transformation-process.png)
-*Figure 1: Transformation acts as a universal translator, converting platform-specific formats into the standardized FAIR4ML schema that enables comparison and integration.*
+Transformation acts as a universal translator, converting platform-specific formats into the standardized FAIR4ML schema that enables comparison and integration.
 
 ### The Problem Transformation Solves
 
 Without transformation, you'd need separate search logic for each platform. Want to find all models for sentiment analysis? You'd need to:
+
 - Search HuggingFace for models with `pipeline_tag` containing "sentiment"
 - Search OpenML for flows with `task_type` equal to "classification" and check descriptions
 - Search AI4Life using yet another approach
@@ -165,8 +165,7 @@ The HuggingFace transformer uses a sophisticated modular architecture where diff
 
 **Testability** is enhanced because each property group can be tested independently. You can test license extraction without running the entire transformation.
 
-![Modular Transformation Architecture](images/modular-transformation-architecture.png)
-*Figure 2: Modular architecture enables parallel processing of property groups, improving performance and maintainability.*
+The modular architecture enables parallel processing of property groups, improving performance and maintainability. Each property group is extracted independently, then merged into complete FAIR4ML objects.
 
 ### Property Groups: Organized by Function
 
@@ -315,6 +314,7 @@ Enrichment adds information that wasn't explicitly in the raw data but can be co
 ```
 
 Notice how the raw data is enriched with:
+
 - Full URL identifiers (computed from modelId)
 - MLentory ID (minted for cross-platform compatibility)
 - Extraction metadata (tracks provenance)
@@ -497,6 +497,5 @@ Understanding transformation helps you debug issues, extend the system to new so
 ## Next Steps
 
 - Learn about [HuggingFace Transformation](huggingface.md) - Detailed guide to the most comprehensive transformer
-- See [Transformation Architecture](architecture.md) - Deep dive into the modular design
 - Check [Adding a Transformer](adding-transformer.md) - How to add transformers for new sources
 - Explore [Loaders](../loaders/overview.md) - How normalized data is loaded into storage systems
