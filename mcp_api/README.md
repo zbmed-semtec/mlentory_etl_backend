@@ -90,7 +90,7 @@ Get detailed information about a specific ML model.
 - `model_id` (string, required): Model identifier (URI or alphanumeric ID)
   - Examples: `"https://w3id.org/mlentory/model/abc123"` or `"abc123"`
 - `resolve_properties` (list of strings, optional): Relationship types to resolve as full entities
-  - Examples: `["HAS_LICENSE", "author", "dataset"]`
+  - Examples: `["schema__license", "schema__author", "fair4ml__relatedDataset"]`
 
 **Returns:**
 ```json
@@ -104,7 +104,7 @@ Get detailed information about a specific ML model.
   "keywords": ["bert", "transformer"],
   "platform": "Hugging Face",
   "related_entities": {
-    "HAS_LICENSE": [
+    "schema__license": [
       {
         "uri": "https://spdx.org/licenses/Apache-2.0",
         "name": "Apache License 2.0",
@@ -119,7 +119,7 @@ Get detailed information about a specific ML model.
 ```
 Get model details with license information:
   model_id: "bert-base-uncased"
-  resolve_properties: ["HAS_LICENSE"]
+  resolve_properties: ["schema__license"]
 ```
 
 ## Running the MCP API
@@ -136,16 +136,16 @@ The MCP API is included in the main `docker-compose.yml`:
 
 ```bash
 # Start MCP API with dependencies
-docker-compose --profile api up mcp-api
+docker compose --profile mcp up
 
 # Or start everything
-docker-compose --profile complete up
+docker compose --profile complete up
 
 # View logs
-docker-compose logs -f mcp-api
+docker logs -f mlentory-mcp-api
 
 # Stop services
-docker-compose down
+docker compose --profile mcp down
 ```
 
 ### Standalone (Development)
@@ -164,6 +164,28 @@ export ELASTIC_PORT=9201
 
 # Run the server
 python -m mcp_api.server
+```
+
+### Using ngrok
+
+If you want to make the mcp server public for development proposes you can use ngrok to expose it.
+
+You need to get an API key from ngrok and set it in the NGROK_AUTHTOKEN environment variable.
+```bash
+export NGROK_AUTHTOKEN=<your-ngrok-api-key>
+```
+
+Then you have two options:
+
+1. We use a docker container to run ngrok, you can run it yourself:
+```bash
+docker pull ngrok/ngrok
+docker run --net=host -it -e NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN ngrok/ngrok:latest http --url=believably-graphitic-ann.ngrok-free.dev 80
+```
+
+2. You can use the one configured in the docker-compose.yml file:
+```bash
+docker compose up ngrok
 ```
 
 ## Configuration
@@ -210,37 +232,17 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
 
 Then restart Claude Desktop. The MLentory tools will be available in the conversation.
 
-### Other MCP Clients
+### Connecting to HF chat
 
-Any MCP-compatible client can connect to the server. The server uses stdio transport by default.
+You have to specify the MCP link in the HF chat.
+For development proposes we use ngrok to expose the MCP API to the internet.
 
-**Example with `mcp` CLI:**
-```bash
-# Install mcp CLI
-npm install -g @modelcontextprotocol/cli
-
-# Connect to the server
-mcp connect docker exec -i mlentory-mcp-api python -m mcp_api.server
+The final link will be something like this:
 ```
+https://<ngrok-subdomain>.ngrok-free.app/mcp
+```
+You need to specify the full link in the HF chat and add `/mcp` to the end.
 
-## Example Conversations
-
-Once connected to an AI assistant:
-
-**Search for models:**
-> "Can you search for BERT models in MLentory?"
-
-The assistant will use `search_ml_models` with query="bert" and show you the results.
-
-**Get model details:**
-> "Tell me more about the bert-base-uncased model, including its license"
-
-The assistant will use `get_ml_model_detail` with the model ID and resolve_properties=["HAS_LICENSE"].
-
-**Browse models:**
-> "Show me the first 5 image classification models"
-
-The assistant will use `search_ml_models` with query="image classification" and page_size=5.
 
 ## Differences from REST API
 
@@ -251,7 +253,7 @@ The assistant will use `search_ml_models` with query="image classification" and 
 | **Client** | Any HTTP client | MCP-compatible AI assistants |
 | **Use Case** | Web apps, integrations | AI assistant interactions |
 | **Features** | Full (search, graph, stats, facets) | Minimal (search, detail) |
-| **Port** | 8008 | N/A (stdio) |
+| **Port** | 8008 |8009 |
 
 The MCP API is designed for AI assistant interactions, while the REST API is for web applications and integrations. Both share the same underlying services and database connections.
 
@@ -288,8 +290,8 @@ def my_new_mcp_tool(param: str) -> Dict[str, Any]:
 
 3. Rebuild the container:
 ```bash
-docker-compose build mcp-api
-docker-compose up mcp-api
+docker compose build mlentory-mcp-api
+docker compose up mlentory-mcp-api
 ```
 
 ### Code Reuse
@@ -306,14 +308,14 @@ This ensures consistency between the REST API and MCP API without code duplicati
 ### Connection Errors
 
 **Issue**: `Elasticsearch connection failed`
-- Ensure Elasticsearch is running: `docker-compose ps elasticsearch`
+- Ensure Elasticsearch is running: `docker compose ps elasticsearch`
 - Check environment variables in `.env`
-- View logs: `docker-compose logs elasticsearch`
+- View logs: `docker logs elasticsearch`
 
 **Issue**: `Neo4j connection failed`
-- Ensure Neo4j is running: `docker-compose ps neo4j`
+- Ensure Neo4j is running: `docker compose ps neo4j`
 - Check environment variables in `.env`
-- View logs: `docker-compose logs neo4j`
+- View logs: `docker logs neo4j`
 
 ### MCP Client Issues
 
@@ -321,10 +323,10 @@ This ensures consistency between the REST API and MCP API without code duplicati
 - Ensure the MCP API container is running
 - Check Claude Desktop configuration is correct
 - Restart Claude Desktop after configuration changes
-- View MCP API logs: `docker-compose logs mcp-api`
+- View MCP API logs: `docker logs mcp-api`
 
 **Issue**: "Module not found" errors
-- Rebuild the container: `docker-compose build mcp-api`
+- Rebuild the container: `docker build mcp-api`
 - Ensure all volumes are mounted correctly in `docker-compose.yml`
 
 ### Empty Results
@@ -339,11 +341,8 @@ This ensures consistency between the REST API and MCP API without code duplicati
 Potential additions to the MCP API:
 
 - [ ] **Graph exploration tool**: Traverse the knowledge graph from any entity
-- [ ] **Statistics tool**: Get platform and model statistics
 - [ ] **Faceted search tool**: Advanced filtering with dynamic facets
-- [ ] **Batch operations**: Get multiple models in one call
 - [ ] **MCP resources**: Expose models as readable resources
-- [ ] **Streaming results**: Support large result sets with pagination
 
 ## Related Documentation
 
