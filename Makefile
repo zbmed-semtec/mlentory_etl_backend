@@ -20,7 +20,7 @@ help: ## Display this help message
 
 up: ## Start all services
 	@echo "$(BLUE)Starting MLentory ETL services...$(NC)"
-	docker compose up -d
+	docker compose --profile=complete up -d
 	@echo "$(GREEN)Services started!$(NC)"
 	@echo "Dagster UI: http://localhost:3000"
 	@echo "Neo4j Browser: http://localhost:7474"
