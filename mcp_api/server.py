@@ -129,7 +129,7 @@ def get_ml_model_detail(
     
     return result
 
-@mcp.custom_route("/health", methods=["GET"])
+@mcp.custom_route("/health", methods=["POST"])
 async def health_check(request):
     return JSONResponse({"status": "healthy", "service": "mcp-server"})
 
