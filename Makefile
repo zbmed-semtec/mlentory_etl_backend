@@ -20,7 +20,9 @@ help: ## Display this help message
 
 up: ## Start all services
 	@echo "$(BLUE)Starting MLentory ETL services...$(NC)"
-	docker compose up -d
+	sudo chown -R 1000:1000 ./config
+	sudo chmod -R 775 ./config
+	sudo docker compose --profile=complete up -d
 	@echo "$(GREEN)Services started!$(NC)"
 	@echo "Dagster UI: http://localhost:3000"
 	@echo "Neo4j Browser: http://localhost:7474"
@@ -28,7 +30,7 @@ up: ## Start all services
 
 down: ## Stop all services
 	@echo "$(BLUE)Stopping MLentory ETL services...$(NC)"
-	docker compose down
+	sudo docker compose down
 	@echo "$(GREEN)Services stopped!$(NC)"
 
 restart: down up ## Restart all services
