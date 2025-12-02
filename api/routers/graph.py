@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from api.schemas.entities import EntityBatchRequest, EntityBatchResponse
+from api.schemas.entities import EntityBatchRequest, EntityBatchResponse, RelatedEntitiesResponse
 from api.schemas.graph import GraphResponse
 from api.services.graph_service import graph_service
 
@@ -57,6 +57,46 @@ async def get_entities_batch(request: EntityBatchRequest) -> EntityBatchResponse
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/graph/related_entities", response_model=RelatedEntitiesResponse)
+async def get_related_entities(
+    entity_ids: List[str] = Query(
+        ...,
+        description="List of entity IDs to fetch related entities for"
+    )
+) -> RelatedEntitiesResponse:
+    """
+    🔗 Fetch related entities by entity IDs.
+
+    This endpoint retrieves all properties and relationships for the given entity IDs.
+    Plus the neighboring entities for each entity.
+
+    **Parameters:**
+    - `entity_ids`: List of entity IDs (can be compact IDs or full URIs)
+
+    **Response:**
+    - `related_entities`: Map of URI -> {property/relation: [values]}
+    - `count`: Total number of entities found
+
+    **Example:**
+    ```
+    GET /api/v1/entities/related_by_prefix?entity_ids=model_123&entity_ids=model_456
+    ```
+    """
+    try:
+        logger.info(f"Fetching related entities for {len(entity_ids)} entity IDs")
+        
+        related_data = graph_service.get_related_entities(entity_ids=entity_ids)
+        
+        return RelatedEntitiesResponse(
+            count=len(related_data),
+            related_entities=related_data
+        )
+
+    except Exception as e:
+        logger.error(f"Error in related entities fetch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/graph/{entity_id}", response_model=GraphResponse)
 async def get_entity_graph(
     entity_id: str,
@@ -91,7 +131,7 @@ async def get_entity_graph(
 
     **Example:**
     ```
-    GET /api/v1/graph/https%3A%2F%2Fw3id.org%2Fmlentory%2Fmodel%2F123?depth=2&direction=outgoing
+    GET /api/v1/graph/123abc?depth=2&direction=outgoing
     ```
     """
     try:
@@ -107,12 +147,16 @@ async def get_entity_graph(
         )
         
         graph_data = graph_service.get_entity_graph(
-            entity_uri=entity_id,
+            entity_id=entity_id,
             depth=depth,
             relationships=relationships,
             direction=direction,
             entity_label=entity_type,
         )
+        
+        logger.info("\n--------------------------------\n")
+        logger.info(f"Graph data: {graph_data}")
+        logger.info("\n--------------------------------\n")
         
         if not graph_data.nodes:
             # Check if it's just because the entity doesn't exist vs having no neighbors

@@ -364,7 +364,7 @@ async def get_model_detail(
     model_id: str,
     resolve_properties: List[str] = Query(
         [],
-        description="List of properties/relationships to resolve as full entities (e.g., 'HAS_LICENSE', 'author')",
+        description="List of properties/relationships to resolve as full entities (e.g., 'schema__DefinedTerm', 'schema__author')",
         examples=["HAS_LICENSE", "author", "dataset"],
     ),
 ) -> ModelDetail:

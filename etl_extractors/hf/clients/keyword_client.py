@@ -173,7 +173,7 @@ class HFKeywordClient:
         """
         url = "https://en.wikipedia.org/w/api.php"
         # Prioritize technology and AI context
-        search_query = f"{keyword} technology artificial intelligence"
+        search_query = f"{keyword} AI"
         
         params = {
             "action": "query",
