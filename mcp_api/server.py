@@ -43,7 +43,7 @@ from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
 
-from mcp_api.tools import get_model_detail, search_models
+from mcp_api.tools import get_model_detail, search_models, get_schema_name_definitions
 
 from starlette.responses import JSONResponse
 
@@ -128,6 +128,33 @@ def get_ml_model_detail(
         logger.info(f"get_ml_model_detail returned model: {result.get('name')}")
     
     return result
+
+@mcp.custom_route("/health", methods=["POST"])
+@mcp.tool()
+def get_schema(
+    properties: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Get definitions about schema properties.
+    Args:
+        properties: Optional list of schema property names to retrieve.
+                    If None, returns all available properties.
+    Returns:
+        Dictionary containing the definition of one or more schema properties.
+    """
+    logger.info("get_schema called")
+
+    result = get_schema_name_definitions(
+        properties=properties
+    )
+    
+    if "error" in result:
+        logger.warning(f"get_schema error: {result['error']}")
+    else:
+        logger.info("get_schema returned")
+    
+    return result
+
 
 @mcp.custom_route("/health", methods=["POST"])
 async def health_check(request):
