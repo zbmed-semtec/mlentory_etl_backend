@@ -152,7 +152,7 @@ services:
   # =============================================================================
 
   mcp-api:
-    profiles: ["api", "mcp", "complete"]
+    profiles: ["mcp"]
     build:
       context: .
       dockerfile: mcp_api/Dockerfile
@@ -175,6 +175,19 @@ services:
     tty: true         # Allocate a pseudo-TTY
     command: python -m mcp_api.server
 
+  ngrok:
+    profiles: ["mcp"]
+    image: ngrok/ngrok:latest
+    container_name: mlentory-ngrok
+    # ports:
+    #   - "80:80"
+    environment:
+      - NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN
+    command: http --url=believably-graphitic-ann.ngrok-free.dev mlentory-mcp-api:8009
+    # network:
+    #   - host
+    networks:
+      - mlentory-network
 # =============================================================================
 # Networks
 # =============================================================================
