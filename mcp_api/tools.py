@@ -67,7 +67,7 @@ def search_models(
     try:
         # Validate and constrain parameters
         page = max(1, page)
-        page_size = max(1, min(100, page_size))
+        page_size = max(1, min(10, page_size))
 
         # Call the existing elasticsearch service
         models, total_count = elasticsearch_service.search_models(
