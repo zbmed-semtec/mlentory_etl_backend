@@ -1,0 +1,4 @@
+fastmcp==2.11.3
+mcp==1.22.0
+httpx==0.28.1
+cyclopts>=5.0.0a1 #FastMCP depends on Cyclopts for CLI functionality. 
