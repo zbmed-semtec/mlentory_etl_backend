@@ -104,7 +104,7 @@ mlentory_etl_backend/
 
 3. **Start the services**
    ```bash
-   make up
+   sudo make up
    # or
    docker-compose up -d
    ```
@@ -118,28 +118,28 @@ mlentory_etl_backend/
 
 ```bash
 # Start all services
-make up
+sudo make up
 
 # View logs
-make logs
+sudo make logs
 
 # Stop services
-make down
+sudo make down
 
 # Run tests
-make test
+sudo make test
 
 # Format code
-make format
+sudo make format
 
 # Type check
-make typecheck
+sudo make typecheck
 
 # Run a specific extractor
-make extract SOURCE=huggingface
+sudo make extract SOURCE=huggingface
 
 # Full ETL pipeline
-make etl-run
+sudo make etl-run
 ```
 
 ## 🔧 Configuration
@@ -156,7 +156,7 @@ Key configurations:
 
 ```bash
 # Run all tests
-make test
+sudo make test
 
 # Run unit tests only
 pytest tests/unit/
