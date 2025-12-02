@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.graph_service import graph_service
+from schemas.fair4ml.mlmodel import MLModel
 
 logger = logging.getLogger(__name__)
 
@@ -237,3 +238,30 @@ def get_model_detail(
             "description": None,
         }
 
+def get_schema_name_definitions(properties: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+    """
+    Return the name and description of MLModel fields based on input properties.
+
+    Args:
+        properties: Optional list of property names to include.
+                    If None, returns all fields.
+
+    Returns:
+        Dictionary mapping field name -> {"name": <field name>, "description": <field description>}
+    """
+    result: Dict[str, Dict[str, Any]] = {}
+    all_schema_properties = MLModel.model_fields.keys()
+    try:
+        for property in properties:
+            if property in all_schema_properties:
+                alias = MLModel.model_fields[property].alias
+                description = MLModel.model_fields[property].description
+                result[property] = {
+                    "alias": alias or "",
+                    "description": description or "",
+                }
+        return result
+    except Exception as e:
+        logger.error(f"Error getting schema name/definitions: {e}", exc_info=True)
+        return {"error": str(e)}
+    
