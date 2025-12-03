@@ -441,6 +441,97 @@ class GraphService:
         
         return f"https://w3id.org/mlentory/mlentory_graph/{entity_id}"
 
+    def find_entity_uri_by_name(self, entity_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Find entity URI by name (exact match, case-insensitive).
+        
+        Args:
+            entity_name: The entity name to search for
+            
+        Returns:
+            Dictionary with uri, name, and entity_types, or None if not found
+        """
+        query = """
+        MATCH (e)
+        WHERE toLower(e.schema__name) = toLower($searchValue)
+        RETURN e.uri as uri,
+            e.schema__name as name,
+            labels(e) as entity_types
+        LIMIT 1
+        """
+        
+        try:
+            results = _run_cypher(query, {"searchValue": entity_name}, self.config)
+            if not results:
+                return None
+            
+            record = results[0]
+            return {
+                "uri": record.get("uri"),
+                "name": record.get("name"),
+                "entity_types": record.get("entity_types", [])
+            }
+        except Exception as e:
+            logger.error(f"Error finding entity URI by name '{entity_name}': {e}", exc_info=True)
+            return None
+
+
+    def get_models_by_entity_uri(self, entity_uri: str) -> List[Dict[str, Any]]:
+        """
+        Get all models related to an entity URI.
+        
+        Args:
+            entity_uri: The entity URI to find related models for
+            
+        Returns:
+            List of dictionaries containing model information and relationship types
+        """
+        query = """
+        MATCH (e {uri: $entityURI})
+        MATCH (m:fair4ml__MLModel)-[r]-(e)
+        RETURN DISTINCT 
+            m.uri as model_uri,
+            m.schema__name as model_name,
+            type(r) as relationship_type,
+            properties(m) as model_properties
+        ORDER BY m.schema__name
+        """
+        
+        try:
+            results = _run_cypher(query, {"entityURI": entity_uri}, self.config)
+
+            models: List[Dict[str, Any]] = []
+            for record in results:
+                raw_props: Dict[str, Any] = record.get("model_properties", {}) or {}
+
+                # Normalize Neo4j property values (including DateTime) into JSON‑serializable types
+                normalized_props: Dict[str, Any] = {}
+                for key, value in raw_props.items():
+                    if value is None:
+                        continue
+                    # Collections – convert each element to string
+                    if isinstance(value, (list, tuple, set)):
+                        normalized_props[key] = [str(v) for v in value if v is not None]
+                    # Scalar – convert to string to safely handle neo4j.time.DateTime and others
+                    else:
+                        normalized_props[key] = str(value)
+
+                models.append(
+                    {
+                        "model_uri": record.get("model_uri"),
+                        "model_name": record.get("model_name"),
+                        "relationship_type": record.get("relationship_type"),
+                        "model_properties": normalized_props,
+                    }
+                )
+
+            return models
+        except Exception as e:
+            logger.error(
+                f"Error getting models for entity URI '{entity_uri}': {e}",
+                exc_info=True,
+            )
+            return []
 
 # Global service instance
 graph_service = GraphService()
