@@ -1,9 +1,6 @@
-import os
-import torch
 import re
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
-from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
 import numpy as np
 import hashlib
