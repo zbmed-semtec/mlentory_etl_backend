@@ -206,7 +206,7 @@ def get_ml_model_detail(
     
     return result
 
-# @mcp.custom_route("/health", methods=["POST"])
+
 @mcp.tool()
 def get_schema(
     properties: Optional[List[str]] = None,
