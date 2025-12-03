@@ -43,7 +43,12 @@ from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
 
-from mcp_api.tools import get_model_detail, search_models, get_schema_name_definitions
+from mcp_api.tools import (
+    get_model_detail,
+    search_models,
+    get_schema_name_definitions,
+    get_related_models_by_entity as get_related_models_by_entity_tool,
+)
 
 from starlette.responses import JSONResponse
 
@@ -206,7 +211,59 @@ def get_ml_model_detail(
     
     return result
 
-# @mcp.custom_route("/health", methods=["POST"])
+@mcp.tool()
+def get_related_models_by_entity(
+    entity_name: str,
+) -> Dict[str, Any]:
+    """
+    Get ML models that are related to a given entity name in the MLentory graph.
+
+    This tool performs a two-step lookup in the Neo4j-backed knowledge graph:
+    it first resolves a human-readable entity name (for example, a dataset
+    title, license name, or organization) to its canonical graph URI, and then
+    retrieves all ML models that are connected to that entity.
+
+    Args:
+        entity_name: Human-readable name of the entity to search for.
+                     Examples include:
+                     - Dataset names (e.g., "GLUE", "MNLI")
+                     - Licenses (e.g., "Apache-2.0")
+                     - Organizations or authors (e.g., "Google", "Meta AI")
+                     - Model names (e.g., "BERT", "GPT-3")
+                     - Keywords (e.g., "bert", "transformer")
+                     - MLTask (e.g., "fill-mask", "text-classification")
+
+    Returns:
+        Dictionary containing either:
+        - On success:
+            - models: List of related model objects associated with the entity
+            - count: Total number of related models found
+        - On failure:
+            - error: Error message describing what went wrong
+                     (for example, when the entity cannot be found)
+
+    Examples:
+        # Find models trained on a well-known dataset
+        get_related_models_by_entity(entity_name="GLUE")
+
+        # Find models associated with a particular organization
+        get_related_models_by_entity(entity_name="Google")
+
+        # Handle entity-not-found cases in a client
+        result = get_related_models_by_entity(entity_name="Nonexistent Dataset")
+        if "error" in result:
+            print(result["error"])
+    """
+    logger.info(f"get_related_models_by_entity called: entity_uri='{entity_name}'")
+    result = get_related_models_by_entity_tool(entity_name=entity_name)
+
+    if "error" in result:
+        logger.warning(f"get_related_models_by_entity error: {result['error']}")
+    else:
+        logger.info(f"get_related_models_by_entity returned {result.get('count', 0)} related models")
+    
+    return result
+
 @mcp.tool()
 def get_schema(
     properties: Optional[List[str]] = None,
