@@ -352,4 +352,28 @@ def get_schema_name_definitions(properties: Optional[List[str]] = None) -> Dict[
     except Exception as e:
         logger.error(f"Error getting schema name/definitions: {e}", exc_info=True)
         return {"error": str(e)}
-    
+
+
+def get_related_models_by_entity(
+    entity_name: str,
+) -> Dict[str, Any]:
+    """
+    Get the related models by an entity name.
+    """
+    logger.info(f"get_related_models_by_entity called: entity_name='{entity_name}'")
+    try:
+        result = graph_service.find_entity_uri_by_name(entity_name=entity_name)
+        if not result:
+            return {
+                "error": f"Entity not found: {entity_name}",
+            }
+        result = graph_service.get_models_by_entity_uri(entity_uri=result["uri"])
+        return {
+            "models": result,
+            "count": len(result),
+        }
+    except Exception as e:
+        logger.error(f"Error getting related models by entity: {e}", exc_info=True)
+        return {
+            "error": str(e),
+        }
