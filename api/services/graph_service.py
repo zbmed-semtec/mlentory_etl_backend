@@ -533,7 +533,7 @@ class GraphService:
             )
             return []
 
-    def list_entities(self, entity_type: List[str]) -> Tuple[Dict[str, List[str]], int]:
+    def grouped_facet_values(self, entity_type: List[str]) -> Tuple[Dict[str, List[str]], int]:
         """
         List all entities grouped by relationship type.
         
@@ -600,9 +600,14 @@ class GraphService:
                 entity_name = record.get("entity_name")
                 shared_by = record.get("shared_by")
                 
-                # Collect unique shared_by values
+                # Collect unique shared_by values (handle both single values and lists)
                 if shared_by:
-                    shared_by_values.add(shared_by)
+                    if isinstance(shared_by, list):
+                        for val in shared_by:
+                            if val:
+                                shared_by_values.add(str(val))
+                    else:
+                        shared_by_values.add(str(shared_by))
                 
                 if rel_type and entity_name:
                     # Normalize the relationship type key
@@ -610,13 +615,14 @@ class GraphService:
                     
                     if normalized_key not in grouped:
                         grouped[normalized_key] = []
-                    # ensure uniqueness per key
-                    if entity_name not in grouped[normalized_key]:
-                        grouped[normalized_key].append(entity_name)
+                    # ensure uniqueness per key and entity_name is a string
+                    entity_name_str = str(entity_name) if entity_name else None
+                    if entity_name_str and entity_name_str not in grouped[normalized_key]:
+                        grouped[normalized_key].append(entity_name_str)
             
-            # Add shared_by as a new key with unique values
+            # Add shared_by as a new key with unique values (sorted strings)
             if shared_by_values:
-                grouped["shared_by"] = sorted(list(shared_by_values))
+                grouped["shared_by"] = sorted([str(v) for v in shared_by_values])
             
             return grouped, count
         except Exception as e:

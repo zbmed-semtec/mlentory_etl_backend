@@ -12,9 +12,9 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from api.schemas.entities import EntityBatchRequest, EntityBatchResponse, RelatedEntitiesResponse, EntityURIResponse, RelatedModelsResponse, ListEntitiesResponse
+from api.schemas.entities import EntityBatchRequest, EntityBatchResponse, RelatedEntitiesResponse, EntityURIResponse, RelatedModelsResponse
 
-from api.schemas.graph import GraphResponse
+from api.schemas.graph import GraphResponse, GroupedFacetValuesResponse
 from api.services.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,42 @@ async def get_related_entities(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/graph/grouped_facet_values", response_model=GroupedFacetValuesResponse)
+async def grouped_facet_values(entity_type: List = Query(
+    ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy", "fair4ml__trainedOn", "fair4ml__testedOn", "fair4ml__validatedOn", "fair4ml__evaluatedOn"], 
+    description="Entity type to list"
+)) -> GroupedFacetValuesResponse:
+    """
+    📋 List all entities grouped by relationship type.
+
+    Retrieves a list of entities in the graph filtered by the given relationship
+    types to `fair4ml__MLModel` nodes. Entities are grouped by normalized
+    relationship keys (e.g., "keywords", "mlTask", "license", "sharedBy", "datasets").
+
+    Args:
+        entity_type: A list of relationship types to include. Defaults to
+            ["fair4ml__mlTask", "schema__keywords", "schema__license", "fair4ml__sharedBy",
+            "fair4ml__trainedOn", "fair4ml__testedOn",
+            "fair4ml__validatedOn", "fair4ml__evaluatedOn"].
+
+    Returns:
+        GroupedFacetValuesResponse: Contains facets (grouped entities by relationship type)
+        and the total count of entities returned.
+    """
+    try:
+        grouped_facet_values, total_count = graph_service.grouped_facet_values(entity_type=entity_type)
+        
+        return GroupedFacetValuesResponse(
+            facets=grouped_facet_values,
+            count=total_count
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing entities: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @router.get("/graph/{entity_id}", response_model=GraphResponse)
 async def get_entity_graph(
     entity_id: str,
@@ -174,7 +210,7 @@ async def get_entity_graph(
         logger.error(f"Error retrieving graph: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/entities/uri", response_model=EntityURIResponse)
+@router.get("/graph/entities/get_entity_uri", response_model=EntityURIResponse)
 async def find_entity_uri_by_name(
     name: str = Query(..., description="Entity name to search for (exact match, case-insensitive)")
 ) -> EntityURIResponse:
@@ -215,7 +251,7 @@ async def find_entity_uri_by_name(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/entities/related_models", response_model=RelatedModelsResponse)
+@router.get("/graph/entities/related_models", response_model=RelatedModelsResponse)
 async def get_models_by_entity_uri(
     entity_uri: str = Query(
         ...,
@@ -252,37 +288,4 @@ async def get_models_by_entity_uri(
     
     except Exception as e:
         logger.error(f"Error getting models for entity URI: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.get("/entities/list", response_model=ListEntitiesResponse)
-async def list_entities(entity_type: List = Query(
-    ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy", "fair4ml__trainedOn", "fair4ml__testedOn", "fair4ml__validatedOn", "fair4ml__evaluatedOn"], 
-    description="Entity type to list"
-)) -> ListEntitiesResponse:
-    """
-    📋 List all entities grouped by relationship type.
-
-    Retrieves a list of entities in the graph filtered by the given relationship
-    types to `fair4ml__MLModel` nodes. Entities are grouped by normalized
-    relationship keys (e.g., "keywords", "mlTask", "license", "sharedBy", "datasets").
-
-    Args:
-        entity_type: A list of relationship types to include. Defaults to
-            ["fair4ml__mlTask", "schema__keywords", "schema__license", "fair4ml__sharedBy",
-            "fair4ml__trainedOn", "fair4ml__testedOn",
-            "fair4ml__validatedOn", "fair4ml__evaluatedOn"].
-
-    Returns:
-        ListEntitiesResponse: Contains facets (grouped entities by relationship type)
-        and the total count of entities returned.
-    """
-    try:
-        grouped_entities, total_count = graph_service.list_entities(entity_type=entity_type)
-        
-        return ListEntitiesResponse(
-            facets=grouped_entities,
-            count=total_count
-        )
-    except Exception as e:
-        logger.error(f"Error listing entities: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

@@ -37,3 +37,12 @@ class GraphResponse(BaseModel):
     edges: List[GraphEdge] = Field(description="List of edges in the subgraph")
     metadata: Dict[str, Any] = Field(description="Additional metadata about the graph query", default_factory=dict)
 
+class GroupedFacetValuesResponse(BaseModel):
+    """Response model for listing entities grouped by relationship type."""
+    
+    facets: Dict[str, List[str]] = Field(
+        description="Dictionary mapping normalized relationship keys (e.g., 'keywords', 'mlTask', 'license', 'sharedBy', 'datasets') -> list of entity names",
+        default_factory=dict
+    )
+    count: int = Field(description="Total number of unique entities across all relationship types")
+
