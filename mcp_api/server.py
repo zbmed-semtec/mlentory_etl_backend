@@ -66,22 +66,60 @@ def search_ml_models(
     query: str = "",
     page: int = 1,
     page_size: int = 20,
+    filters: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     """
-    Search for ML models in the MLentory knowledge graph.
+    Search for ML models in the MLentory knowledge graph with faceted filtering.
 
-    Searches across model names, descriptions, and keywords using full-text search.
-    Results are paginated for efficient retrieval.
+    Searches across model names, descriptions, and keywords using full-text search
+    with advanced faceting capabilities.
 
     Args:
         query: Text search query (searches name, description, keywords). Leave empty for all models.
         page: Page number (1-based, default: 1)
         page_size: Results per page (1-100, default: 20)
+        filters: Optional filters to narrow results. Dictionary with facet names as keys
+                and lists of values to match. Available facets:
+                - mlTask: ML task types (e.g., ["fill-mask", "text-classification"])
+                - license: License identifiers (e.g., ["apache-2.0", "mit"])
+                - keywords: Model tags/keywords (e.g., ["bert", "transformer"])
+                - platform: Hosting platform (e.g., ["Hugging Face"])
+                - sharedBy: Author/organization (e.g., ["google", "meta"])
 
     Returns:
-        Dictionary with models list, total count, and pagination info
+        Dictionary containing:
+        - models: List of model objects with cleaned descriptions
+        - total: Total number of matching models
+        - page: Current page number
+        - page_size: Number of results per page
+        - has_next: Whether more results are available
+        - has_prev: Whether previous results exist
+        - facets: Available facet values with counts for further filtering
+        - filters: Echo of applied filters
+
+    Examples:
+        # Find all transformer models
+        search_ml_models(query="transformer", page_size=5)
+        
+        # Find BERT models for fill-mask task
+        search_ml_models(
+            query="bert",
+            filters={"mlTask": ["fill-mask"]}
+        )
+        
+        # Find Apache 2.0 licensed models from Google
+        search_ml_models(
+            filters={
+                "license": ["apache-2.0"],
+                "sharedBy": ["google"]
+            }
+        )
+        
+        # Browse all models and explore available facets
+        result = search_ml_models(page_size=10)
+        # Check result['facets'] to see available filter options
     """
-    logger.info(f"search_ml_models called: query='{query}', page={page}, page_size={page_size}")
+    logger.info(f"search_ml_models called: query='{query}', page={page}, page_size={page_size}, filters={filters}")
     
     # Convert empty string to None for the underlying service
     search_query = query if query else None
@@ -90,6 +128,7 @@ def search_ml_models(
         query=search_query,
         page=page,
         page_size=page_size,
+        filters=filters,
     )
     
     logger.info(f"search_ml_models returned {result.get('total', 0)} total models")
@@ -108,12 +147,50 @@ def get_ml_model_detail(
     fetches related entities from the Neo4j graph database.
 
     Args:
-        model_id: Model identifier (URI or alphanumeric ID)
-        resolve_properties: Optional list of relationship types to resolve
-                          (e.g., ["HAS_LICENSE", "author", "dataset"])
+        model_id: Model identifier (URI or alphanumeric ID).
+                 Can be a full URI like "https://w3id.org/mlentory/model/abc123"
+                 or just the ID portion like "abc123"
+        resolve_properties: Optional list of relationship types to resolve from Neo4j.
+                          Common relationships:
+                          - "schema__license": License information
+                          - "schema__author": Author details
+                          - "fair4ml__trainedOn": Training datasets
+                          - "fair4ml__evaluatedOn": Evaluation datasets
+                          - "fair4ml__fineTunedFrom": Base model information
+                          - "codemeta__referencePublication": Related papers
 
     Returns:
-        Dictionary with model details and optional related entities
+        Dictionary containing:
+        - identifier: Model URI(s)
+        - name: Model name
+        - description: Model description
+        - sharedBy: Author/organization
+        - license: License identifier
+        - mlTask: List of ML tasks
+        - keywords: List of keywords/tags
+        - platform: Hosting platform
+        - related_entities: Dict of resolved related entities (if resolve_properties provided)
+
+    Examples:
+        # Get basic model information
+        get_ml_model_detail(model_id="bert-base-uncased")
+        
+        # Get model with license details
+        get_ml_model_detail(
+            model_id="bert-base-uncased",
+            resolve_properties=["schema__license"]
+        )
+        
+        # Get model with full context (datasets, papers, base model)
+        get_ml_model_detail(
+            model_id="distilbert-base-uncased",
+            resolve_properties=[
+                "schema__license",
+                "fair4ml__trainedOn",
+                "fair4ml__fineTunedFrom",
+                "codemeta__referencePublication"
+            ]
+        )
     """
     logger.info(f"get_ml_model_detail called: model_id='{model_id}', resolve_properties={resolve_properties}")
     
@@ -129,7 +206,7 @@ def get_ml_model_detail(
     
     return result
 
-@mcp.custom_route("/health", methods=["POST"])
+# @mcp.custom_route("/health", methods=["POST"])
 @mcp.tool()
 def get_schema(
     properties: Optional[List[str]] = None,
