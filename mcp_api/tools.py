@@ -27,61 +27,136 @@ from typing import Any, Dict, List, Optional
 
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.graph_service import graph_service
+from etl_extractors.hf.hf_readme_parser import MarkdownParser
 from schemas.fair4ml.mlmodel import MLModel
 
 logger = logging.getLogger(__name__)
+
+
+def _clean_description(description: Optional[str], max_section_length: int = 300) -> Optional[str]:
+    """
+    Clean and format model description by removing tables/lists and truncating long sections.
+    
+    Args:
+        description: Raw description text (markdown format)
+        max_section_length: Maximum length for each section before truncation
+        
+    Returns:
+        Cleaned description text or None if input is None/empty
+    """
+    if not description or not description.strip():
+        return description
+    
+    try:
+        parser = MarkdownParser()
+        
+        # Remove tables and lists (set max_lines to 0 to remove them entirely)
+        cleaned_text = parser.trim_tables_and_lists(description, max_lines=0)
+        
+        # Extract sections and truncate long ones
+        sections = parser.extract_hierarchical_sections(cleaned_text, max_section_length=max_section_length)
+        
+        # Build final cleaned text from sections
+        cleaned_parts = []
+        for section in sections:
+            content = section.content.strip()
+            if content:
+                # Truncate if longer than max_section_length
+                if len(content) > max_section_length:
+                    content = content[:max_section_length].rsplit(' ', 1)[0] + "..."
+                cleaned_parts.append(content)
+        
+        # Join sections with double newline
+        result = "\n\n".join(cleaned_parts)
+        
+        # If cleaning resulted in empty text, return original
+        return result if result.strip() else description
+        
+    except Exception as e:
+        logger.warning(f"Error cleaning description: {e}", exc_info=True)
+        # Fall back to original description on error
+        return description
 
 
 def search_models(
     query: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
+    filters: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     """
-    Search for ML models in the MLentory knowledge graph.
+    Search for ML models in the MLentory knowledge graph with faceted navigation.
 
     This tool searches across model names, descriptions, and keywords using
-    Elasticsearch full-text search. Results are paginated for efficient retrieval.
+    Elasticsearch full-text search with advanced faceting capabilities. 
+    Results are paginated for efficient retrieval, and descriptions are 
+    cleaned to remove tables and overly long sections.
 
     Args:
         query: Optional text search query. If not provided, returns all models.
                Searches across model name, description, and keywords.
         page: Page number (1-based). Default is 1.
         page_size: Number of results per page (1-100). Default is 20.
+        filters: Optional dictionary of filters to apply. Keys are facet names,
+                values are lists of filter values to match.
+                Available facets: mlTask, license, keywords, platform, sharedBy
 
     Returns:
         Dictionary containing:
-            - models: List of model objects with basic information
+            - models: List of model objects with basic information and cleaned descriptions
             - total: Total number of matching models
             - page: Current page number
             - page_size: Number of results per page
             - has_next: Whether there are more results
             - has_prev: Whether there are previous results
+            - facets: Dictionary of facet aggregations with counts
+            - filters: Applied filters (echo back)
 
-    Example:
+    Examples:
+        >>> # Basic text search
         >>> result = search_models(query="transformer", page=1, page_size=10)
         >>> print(f"Found {result['total']} models")
-        >>> for model in result['models']:
-        ...     print(f"- {model['name']}")
+        >>> 
+        >>> # Search with filters
+        >>> result = search_models(
+        ...     query="bert",
+        ...     filters={"mlTask": ["fill-mask"], "license": ["apache-2.0"]}
+        ... )
+        >>> print(f"Found {result['total']} BERT models for fill-mask with Apache 2.0 license")
+        >>> 
+        >>> # Filter by platform and shared by
+        >>> result = search_models(
+        ...     filters={"platform": ["Hugging Face"], "sharedBy": ["google"]}
+        ... )
+        >>> print(f"Found {result['total']} Google models on Hugging Face")
+        >>> 
+        >>> # Explore available facet values
+        >>> result = search_models(query="nlp")
+        >>> print("Available ML tasks:", [f['value'] for f in result['facets']['mlTask']])
+        >>> print("Available licenses:", [f['value'] for f in result['facets']['license']])
     """
     try:
         # Validate and constrain parameters
         page = max(1, page)
         page_size = max(1, min(10, page_size))
 
-        # Call the existing elasticsearch service
-        models, total_count = elasticsearch_service.search_models(
-            search_query=query,
+        # Call the faceted search service
+        models, total_count, facet_results = elasticsearch_service.search_models_with_facets(
+            query=query or "",
+            filters=filters,
             page=page,
             page_size=page_size,
+            facets=["mlTask", "license", "keywords", "platform", "sharedBy"],
+            facet_size=20,
+            facet_query=None,
         )
 
-        # Convert Pydantic models to dictionaries
+        # Convert Pydantic models to dictionaries and clean descriptions
         models_list = [
             {
                 "db_identifier": model.db_identifier,
                 "name": model.name,
-                "description": model.description,
+                "description": _clean_description(model.description),
                 "sharedBy": model.sharedBy,
                 "license": model.license,
                 "mlTask": model.mlTask,
@@ -90,6 +165,15 @@ def search_models(
             }
             for model in models
         ]
+
+        # Convert facet results to dictionaries
+        facets_dict = {
+            facet_key: [
+                {"value": fv.value, "count": fv.count}
+                for fv in facet_values
+            ]
+            for facet_key, facet_values in facet_results.items()
+        }
 
         # Calculate pagination info
         has_next = (page * page_size) < total_count
@@ -102,6 +186,8 @@ def search_models(
             "page_size": page_size,
             "has_next": has_next,
             "has_prev": has_prev,
+            "facets": facets_dict,
+            "filters": filters or {},
         }
 
     except Exception as e:
@@ -114,6 +200,8 @@ def search_models(
             "page_size": page_size,
             "has_next": False,
             "has_prev": False,
+            "facets": {},
+            "filters": filters or {},
         }
 
 
