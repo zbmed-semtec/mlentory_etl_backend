@@ -72,6 +72,16 @@ class FacetedSearchMixin:
                 supports_search=True,
                 pinned=False
             ),
+            "datasets": FacetConfig(
+                field="datasets",
+                label="Datasets",
+                type="keyword",
+                icon="mdi-database",
+                is_high_cardinality=True,
+                default_size=10,
+                supports_search=True,
+                pinned=False
+            ),
             "platform": FacetConfig(
                 field="platform",
                 label="Platform",
@@ -290,7 +300,7 @@ class FacetedSearchMixin:
 
         # Default facets if none specified
         if facets is None:
-            facets = ["mlTask", "license", "keywords", "platform"]
+            facets = ["mlTask", "license", "keywords", "platform", "datasets"]
 
         filters = filters or {}
         facet_query = facet_query or {}
@@ -321,9 +331,16 @@ class FacetedSearchMixin:
             },
             "aggs": aggs,
             "_source": [
-                "name", "ml_tasks", "shared_by", "db_identifier", "keywords",
-                "license", "description", "platform"
-            ]
+                "name",
+                "ml_tasks",
+                "shared_by",
+                "db_identifier",
+                "keywords",
+                "license",
+                "description",
+                "platform",
+                "datasets",
+            ],
         }
 
         try:
@@ -339,7 +356,7 @@ class FacetedSearchMixin:
             total_count = total.get("value", 0) if isinstance(total, dict) else total
 
             # Process models
-            models = []
+            models: List[ModelListItem] = []
             for hit in hits_data.get("hits", []):
                 source = hit.get("_source", {})
                 model = ModelListItem(
@@ -350,7 +367,8 @@ class FacetedSearchMixin:
                     license=source.get("license"),
                     mlTask=source.get("ml_tasks", []),
                     keywords=source.get("keywords", []),
-                    platform=source.get("platform", "Unknown")
+                    datasets=source.get("datasets", []) or [],
+                    platform=source.get("platform", "Unknown"),
                 )
                 models.append(model)
 
