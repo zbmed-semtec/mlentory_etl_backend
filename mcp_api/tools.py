@@ -381,14 +381,6 @@ def get_related_models_by_entity(
         }
 
 
-# -----------------------------------------------
-# 1. PRE-CLEAN USER QUERY
-# -----------------------------------------------
-
-# Load spaCy English model
-
-
-
 def clean_query(text: str):
     """
     Lowercase, remove punctuation (except hyphens),
@@ -403,32 +395,22 @@ def clean_query(text: str):
     nlp = spacy.load("en_core_web_sm")
 
     text = text.lower().strip()
-
     # Extract quoted phrases first
     quoted_phrases = re.findall(r'"([^"]+)"', text)
-
     # Remove quoted phrases from main text
     text_no_quotes = re.sub(r'"[^"]+"', '', text)
-
     # Remove punctuation except hyphens
     text_no_quotes = re.sub(r"[^a-z0-9\- ]+", " ", text_no_quotes)
-
     # Tokenize
     tokens = text_no_quotes.split()
-
     # Use spaCy to remove stop words
     cleaned_tokens = [
         token for token in tokens
         if len(token) > 2 and token.lower() not in nlp.Defaults.stop_words
     ]
-    print(f"Tokens: {tokens}, Quoted: {quoted_phrases}")
     return cleaned_tokens, quoted_phrases
 
 
-# -----------------------------------------------
-# 2. SEMANTIC INTERPRETATION (MAPPING LAYER)
-# -----------------------------------------------
-# Controlled schema (Layer 1)
 FACET_SCHEMA = {
     "mlTask": [
         "token-classification",
@@ -455,7 +437,6 @@ FACET_SCHEMA = {
 }
 
 def map_to_facets(tokens, quoted_phrases):
-    # Collect facet values
     extracted = {facet: [] for facet in FACET_SCHEMA}
     domain_terms = []
 
@@ -465,17 +446,14 @@ def map_to_facets(tokens, quoted_phrases):
     for t in tokens + quoted_phrases:
         matched = False
 
-        # Check each facet list
         for facet, values in FACET_SCHEMA.items():
             if t in values:
                 extracted[facet].append(t)
                 matched = True
                 break
 
-        # If it does not match any facet value → domain term
         if not matched:
             domain_terms.append(t)
-    # Remove literal facet keys and stop words from domain_terms
     domain_terms = [
         term for term in set(domain_terms)
         if term not in facet_keys
@@ -483,21 +461,15 @@ def map_to_facets(tokens, quoted_phrases):
         and len(term) > 2
     ]
 
-    # Deduplicate & remove empty facets
     extracted = {
         facet: list(set(vals))
         for facet, vals in extracted.items()
-        if vals  # filter empty lists
+        if vals
     }
 
     domain_terms = list(set(domain_terms))
-
-    print(f"Extracted facets: {extracted}, Domain terms: {domain_terms}")
     return extracted, domain_terms
 
-# -----------------------------------------------
-# 3. BUILD NORMALIZED OUTPUT
-# -----------------------------------------------
 
 def build_output(ml_tasks, licenses, platforms, providers, domain_terms):
     normalized_query = " ".join(domain_terms)
@@ -518,10 +490,6 @@ def build_output(ml_tasks, licenses, platforms, providers, domain_terms):
     }
 
 
-# -----------------------------------------------
-# MAIN ENTRYPOINT (Tool)
-# -----------------------------------------------
-
 def normalize_query(user_query: str):
     tokens, quoted = clean_query(user_query)
     extracted, domain_terms = map_to_facets(tokens, quoted)
@@ -531,12 +499,8 @@ def normalize_query(user_query: str):
     lic = extracted.get("license", [])
     plat = extracted.get("platform", [])
     prov = extracted.get("sharedBy", [])
-    print(build_output(ml, lic, plat, prov, domain_terms))
     return build_output(ml, lic, plat, prov, domain_terms)
 
-if __name__ == "__main__":
-    # improved_query = normalize_query("llama models using permissive license by meta")
-    # normalize_query("heart-disease embedding model on huggingface")
-    improved_query = normalize_query("find me model for sentiment-analysis by openml")
-    # improved_query = normalize_query("find me meta model for image-classification under apache-2 license on openml")
+# if __name__ == "__main__":
+#     improved_query = normalize_query("find me meta model for image-classification under apache-2 license on openml")
     # search_models(query=improved_query["query"],filters=improved_query["filters"],page=1,page_size=20)

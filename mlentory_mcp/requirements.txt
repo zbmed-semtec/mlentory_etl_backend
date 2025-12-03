@@ -5,4 +5,4 @@ anyio
 fastapi
 uvicorn
 cyclopts>=5.0.0a1
-spacy==3.5.3 
+spacy==3.5.3
