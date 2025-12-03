@@ -163,6 +163,7 @@ services:
       - ./mcp_api:/app/mcp_api
       - ./api:/app/api
       - ./etl_loaders:/app/etl_loaders
+      - ./etl_extractors:/app/etl_extractors
       - ./schemas:/app/schemas
     networks:
       - mlentory-network
