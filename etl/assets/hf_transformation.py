@@ -24,7 +24,7 @@ import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Tuple, List, Dict, Any, Optional, Callable
 import logging
 
 import pandas as pd
@@ -270,8 +270,7 @@ def hf_entity_linking(
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, articles, keywords, licenses}
-
+    Create entity linking mapping: model_id -> {datasets, articles, keywords, licenses, base_models, languages, tasks}
     Links identified entities with their enriched metadata.
 
     Args:
@@ -279,6 +278,8 @@ def hf_entity_linking(
         articles_mapping: Tuple of ({model_id: [arxiv_ids]}, run_folder)
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
+        languages_mapping: Tuple of ({model_id: [language_ids]}, run_folder)
+        tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
         base_models_mapping: Tuple of ({model_id: [base_model_ids]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
 
@@ -325,17 +326,141 @@ def hf_entity_linking(
 @asset(
     group_name="hf_transformation",
     ins={
+        "datasets_json": AssetIn("hf_datasets_normalized"),
+        "articles_json": AssetIn("hf_articles_normalized"),
+        "keywords_json": AssetIn("hf_keywords_normalized"),
+        "licenses_json": AssetIn("hf_licenses_normalized"),
+        "languages_json": AssetIn("hf_languages_normalized"),
+        "models_json": AssetIn("hf_models_normalized"),
+        "tasks_json": AssetIn("hf_tasks_normalized"),
+        "run_folder_data": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl"}
+)
+def hf_create_translation_mapping(
+    datasets_json: str,
+    articles_json: str,
+    keywords_json: str,
+    licenses_json: str,
+    models_json: Tuple[str, str],
+    languages_json: str,
+    tasks_json: str,
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Create translation mapping: uri/identifier -> human-readable name grouped by schema property.
+    
+    Args:
+        datasets_json: Path to enriched datasets JSON file.
+        articles_json: Path to enriched arXiv articles JSON file.
+        keywords_json: Path to enriched keywords JSON file.
+        licenses_json: Path to enriched licenses JSON file.
+        models_json: Tuple of (models_json_path, normalized_folder).
+        languages_json: Path to enriched languages JSON file.
+        tasks_json: Path to enriched tasks JSON file.
+        run_folder_data: Tuple of (models_json_path, normalized_folder).
+
+    Returns:
+        Path to saved translation mapping JSON file.
+    """
+    _, normalized_folder = run_folder_data
+
+    def _first_non_empty(*values: Any) -> Optional[str]:
+        for value in values:
+            if value is None:
+                continue
+            value_str = str(value).strip()
+            if value_str:
+                return value_str
+        return None
+
+    def _get_name(record: Dict[str, Any]) -> Optional[str]:
+        return _first_non_empty(record.get("https://schema.org/name"))
+
+    entity_configs: List[Dict[str, Any]] = [
+        {
+            "label": "datasets",
+            "path": datasets_json
+        },
+        {
+            "label": "articles",
+            "path": articles_json,
+        },
+        {
+            "label": "keywords",
+            "path": keywords_json,
+        },
+        {
+            "label": "licenses",
+            "path": licenses_json,
+        },
+        {
+            "label": "base_models",
+            "path": models_json[0],
+        },
+        {
+            "label": "languages",
+            "path": languages_json,
+        },
+        {
+            "label": "tasks",
+            "path": tasks_json,
+        },
+    ]
+
+    translation_mapping: Dict[str, str] = {}
+    uri_prefix = "https://w3id.org/mlentory/mlentory_graph/"
+
+    for config in entity_configs:
+        records = _load_entity_records(config["path"], config["label"])
+        if not records:
+            continue
+
+        for record in records:
+            # logger.info(f"Record: {record}")
+            if not isinstance(record, dict):
+                continue
+
+            uri_candidates = record.get("https://schema.org/identifier")
+            
+            uri = None
+            
+            for uri_candidate in uri_candidates:
+                if not isinstance(uri_candidate, str) or not uri_candidate.startswith(uri_prefix):
+                    continue
+
+                uri = uri_candidate.strip()
+                break
+            
+            if not uri:
+                continue
+
+            display_name = _get_name(record)
+            if not display_name:
+                continue
+            
+            translation_mapping[uri] = display_name
+    
+    output_path = Path(normalized_folder) / "translation_mapping.json"
+    with open(output_path, "w", encoding="utf-8") as file_handle:
+        json.dump(translation_mapping, file_handle, indent=2, ensure_ascii=False)
+
+    logger.info(
+        "Saved translation mapping for %s schema properties to %s",
+        len(translation_mapping),
+        output_path,
+    )
+
+    return str(output_path)
+
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
         "models_data": AssetIn("hf_normalized_run_folder"),
         "basic_properties": AssetIn("hf_extract_basic_properties"),
         "entity_linking": AssetIn("hf_entity_linking"),
-        # TODO: Add more partial schema inputs as we implement them:
-        # "keywords_language": AssetIn("hf_extract_keywords_language"),
-        # "task_category": AssetIn("hf_extract_task_category"),
-        # "license_data": AssetIn("hf_extract_license"),
-        # "lineage": AssetIn("hf_extract_lineage"),
-        # "code_usage": AssetIn("hf_extract_code_usage"),
-        # "datasets": AssetIn("hf_extract_datasets"),
-        # "ethics_risks": AssetIn("hf_extract_ethics_risks"),
     },
     tags={"pipeline": "hf_etl"}
 )
