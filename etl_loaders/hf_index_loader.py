@@ -14,7 +14,11 @@ from typing import Any, Dict, List, Optional
 
 from elasticsearch_dsl import Document, Keyword, Text, connections
 
-from etl_loaders.elasticsearch_store import ElasticsearchConfig, create_elasticsearch_client
+from etl_loaders.elasticsearch_store import (
+    ElasticsearchConfig,
+    create_elasticsearch_client,
+    clean_index,
+)
 from etl_loaders.load_helpers import LoadHelpers
 
 logger = logging.getLogger(__name__)
@@ -67,8 +71,8 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str) -> HFModelDo
         db_identifier=str(identifier),
         name=str(name) if name is not None else "",
         description=str(description) if description is not None else "",
-        shared_by=str(shared_by) if shared_by is not None else "",
-        license=str(license_value) if license_value is not None else "",
+        shared_by=str(shared_by) if shared_by is not None else "Unknown",
+        license=str(license_value) if license_value is not None else "Unknown",
         ml_tasks=_extract_list(ml_tasks),
         keywords=_extract_list(keywords),
         platform="Hugging Face",
@@ -149,6 +153,80 @@ def index_hf_models(
         "index": config.hf_models_index,
         "input_file": str(json_file),
     }
+
+
+def clean_hf_models_index(
+    es_config: Optional[ElasticsearchConfig] = None,
+) -> Dict[str, Any]:
+    """Clean the Hugging Face models Elasticsearch index.
+
+    This removes all documents from the HF models index configured via
+    ``ELASTIC_HF_MODELS_INDEX`` while keeping the index and its mappings.
+    """
+    config = es_config or ElasticsearchConfig.from_env()
+    return clean_index(config.hf_models_index, cfg=config)
+
+
+def check_elasticsearch_connection(
+    es_config: Optional[ElasticsearchConfig] = None,
+) -> Dict[str, Any]:
+    """Check Elasticsearch connection and cluster health.
+
+    Args:
+        es_config: Optional ElasticsearchConfig. If None, loads from env.
+
+    Returns:
+        Dictionary with connection status and cluster info.
+
+    Raises:
+        ConnectionError: If Elasticsearch is not reachable.
+    """
+    config = es_config or ElasticsearchConfig.from_env()
+    es_client = create_elasticsearch_client(config)
+
+    try:
+        # Ping the cluster
+        if not es_client.ping():
+            raise ConnectionError(
+                f"Cannot ping Elasticsearch at {config.scheme}://{config.host}:{config.port}"
+            )
+
+        # Get cluster health
+        health = es_client.cluster.health()
+        cluster_name = health.get("cluster_name", "unknown")
+        status = health.get("status", "unknown")
+        num_nodes = health.get("number_of_nodes", 0)
+
+        logger.info(
+            "Elasticsearch connection verified: cluster=%s, status=%s, nodes=%s",
+            cluster_name,
+            status,
+            num_nodes,
+        )
+
+        return {
+            "status": "ready",
+            "cluster_name": cluster_name,
+            "cluster_status": status,
+            "number_of_nodes": num_nodes,
+            "host": config.host,
+            "port": config.port,
+            "scheme": config.scheme,
+            "hf_models_index": config.hf_models_index,
+        }
+
+    except Exception as exc:
+        logger.error(
+            "Failed to connect to Elasticsearch at %s://%s:%s: %s",
+            config.scheme,
+            config.host,
+            config.port,
+            exc,
+            exc_info=True,
+        )
+        raise ConnectionError(
+            f"Elasticsearch connection failed: {exc}"
+        ) from exc
 
 
 

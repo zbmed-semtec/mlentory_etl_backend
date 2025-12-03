@@ -45,3 +45,13 @@ class EntityBatchResponse(BaseModel):
         default_factory=dict
     )
 
+
+class RelatedEntitiesResponse(BaseModel):
+    """Response model for related entities by prefix lookup."""
+
+    count: int = Field(description="Total number of related entities found")
+    related_entities: Dict[str, Dict[str, List[str]]] = Field(
+        description="Map of Entity URI -> { Property/Relationship Name -> List[Values] }",
+        default_factory=dict
+    )
+
