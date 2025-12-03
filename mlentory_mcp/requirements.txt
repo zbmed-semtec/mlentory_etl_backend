@@ -4,4 +4,5 @@ httpx==0.28.1
 anyio
 fastapi
 uvicorn
-cyclopts>=5.0.0a1 
+cyclopts>=5.0.0a1
+spacy==3.5.3 

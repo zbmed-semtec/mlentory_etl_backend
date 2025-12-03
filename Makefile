@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run build
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run build hf-etl run-by-tag
 
 # Default target
 .DEFAULT_GOAL := help
@@ -30,7 +30,7 @@ up: ## Start all services
 
 down: ## Stop all services
 	@echo "$(BLUE)Stopping MLentory ETL services...$(NC)"
-	sudo docker compose down
+	sudo docker compose --profile=complete down 
 	@echo "$(GREEN)Services stopped!$(NC)"
 
 restart: down up ## Restart all services
@@ -149,6 +149,18 @@ load: ## Run loading for a specific source (usage: make load SOURCE=huggingface)
 etl-run: ## Run full ETL pipeline for all sources
 	@echo "$(BLUE)Running full ETL pipeline...$(NC)"
 	docker compose exec dagster-webserver dagster job execute -j etl_pipeline
+
+hf-etl: ## Run HuggingFace ETL pipeline (all assets tagged with pipeline:hf_etl)
+	@echo "$(BLUE)Running HuggingFace ETL pipeline...$(NC)"
+	docker compose exec dagster-webserver dagster asset materialize -t pipeline:hf_etl
+
+run-by-tag: ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline:hf_etl")
+	@if [ -z "$(TAG)" ]; then \
+		echo "$(YELLOW)Please specify TAG, e.g., make run-by-tag TAG=\"pipeline:hf_etl\"$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Running assets with tag $(TAG)...$(NC)"
+	docker compose exec dagster-webserver dagster asset materialize -t $(TAG)
 
 ##@ Setup
 

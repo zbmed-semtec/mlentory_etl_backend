@@ -275,6 +275,10 @@ def get_schema(
                     If None, returns all available properties.
     Returns:
         Dictionary containing the definition of one or more schema properties.
+
+    Examples:
+        # Get all schema property definitions
+        get_schema(["name", "description", "license"])        
     """
     logger.info("get_schema called")
 
@@ -288,6 +292,10 @@ def get_schema(
         logger.info("get_schema returned")
     
     return result
+
+
+def refine_query():
+    pass
 
 
 @mcp.custom_route("/health", methods=["POST"])
