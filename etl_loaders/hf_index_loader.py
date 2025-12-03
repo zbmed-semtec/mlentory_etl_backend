@@ -34,6 +34,7 @@ class HFModelDocument(Document):
     license = Keyword()
     ml_tasks = Keyword(multi=True)
     keywords = Keyword(multi=True)
+    datasets = Keyword(multi=True)
     platform = Keyword()
 
     class Index:
@@ -51,8 +52,19 @@ def _extract_list(value: Any) -> List[str]:
     return [str(value)]
 
 
-def build_hf_model_document(model: Dict[str, Any], index_name: str) -> HFModelDocument:
-    """Create `HFModelDocument` from a normalized FAIR4ML model dict."""
+def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_mapping: Dict[str, str]) -> HFModelDocument:
+    """
+    Create `HFModelDocument` from a normalized FAIR4ML model dict.
+    
+    Args:
+        model: Normalized FAIR4ML model dict.
+        index_name: Name of the Elasticsearch index.
+        translation_mapping: Dictionary of URIs to human readable names.
+
+    Returns:
+        `HFModelDocument` object.
+    """
+    
     identifier = model.get("https://schema.org/identifier") or LoadHelpers.mint_subject(model)
     name = model.get("https://schema.org/name")
     description = model.get("https://schema.org/description")
@@ -66,6 +78,18 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str) -> HFModelDo
 
     ml_tasks = model.get("https://w3id.org/fair4ml/mlTask") or []
     keywords = model.get("https://schema.org/keywords") or []
+    
+    
+    datasets = list(set([*model.get("https://w3id.org/fair4ml/trainedOn"),
+                *model.get("https://w3id.org/fair4ml/testedOn"),
+                *model.get("https://w3id.org/fair4ml/validatedOn"),
+                *model.get("https://w3id.org/fair4ml/evaluatedOn")]))
+    
+    # Translate entities to human readable names
+    datasets = [translation_mapping.get(dataset, dataset) for dataset in datasets]
+    ml_tasks = [translation_mapping.get(ml_task, ml_task) for ml_task in ml_tasks]
+    keywords = [translation_mapping.get(keyword, keyword) for keyword in keywords]
+    license_value = translation_mapping.get(license_value, license_value)
 
     doc = HFModelDocument(
         db_identifier=str(identifier),
@@ -75,6 +99,7 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str) -> HFModelDo
         license=str(license_value) if license_value is not None else "Unknown",
         ml_tasks=_extract_list(ml_tasks),
         keywords=_extract_list(keywords),
+        datasets=_extract_list(datasets),
         platform="Hugging Face",
         meta={"id": str(identifier)},
     )
@@ -86,12 +111,14 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str) -> HFModelDo
 
 def index_hf_models(
     json_path: str,
+    translation_mapping_path: str,
     es_config: Optional[ElasticsearchConfig] = None,
 ) -> Dict[str, Any]:
     """Index normalized HF models into Elasticsearch.
 
     Args:
         json_path: Path to normalized models JSON (mlmodels.json).
+        translation_mapping_path: Path to translation mapping JSON file. Maps URIs to human readable names.
         es_config: Optional ElasticsearchConfig. If None, loads from env.
 
     Returns:
@@ -105,11 +132,21 @@ def index_hf_models(
     logger.info("Loading normalized HF models from %s for Elasticsearch indexing", json_path)
     with open(json_file, "r", encoding="utf-8") as f:
         models = json.load(f)
-
+    
     if not isinstance(models, list):
         raise ValueError(f"Expected list of models, got {type(models)}")
 
     logger.info("Loaded %s normalized HF models", len(models))
+    
+    logger.info("Loading translation mapping from %s", translation_mapping_path)
+    with open(translation_mapping_path, "r", encoding="utf-8") as f:
+        translation_mapping = json.load(f)
+    
+    if not isinstance(translation_mapping, dict):
+        raise ValueError(f"Expected dict of translation mapping, got {type(translation_mapping)}")
+
+    logger.info("Loaded %s translation mapping entries", len(translation_mapping))
+
 
     # Create client and bind it to elasticsearch-dsl connections
     es_client = create_elasticsearch_client(config)
@@ -124,7 +161,7 @@ def index_hf_models(
 
     for idx, model in enumerate(models):
         try:
-            doc = build_hf_model_document(model, config.hf_models_index)
+            doc = build_hf_model_document(model, config.hf_models_index, translation_mapping)
             doc.save(using=es_client, refresh=False)
             indexed += 1
         except Exception as exc:
@@ -154,6 +191,33 @@ def index_hf_models(
         "input_file": str(json_file),
     }
 
+def _get_names_from_uris(models: List[Dict[str, Any]]) -> Dict[str, str]:
+    """ 
+    Translate the uris that are find in all the model properties into human readable names. 
+    
+    Args:
+        models: List of normalized models.
+
+    Returns:
+        Dict[str, str] Dictionary of URIs to names.
+    """
+    identified_uris = set()
+    
+    
+    for model in models:
+        for prop, value in model.items():
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and item.startswith("https://w3id.org/mlentory/mlentory_graph/"):
+                        identified_uris.add(item)
+            elif isinstance(value, str) and value.startswith("https://w3id.org/mlentory/mlentory_graph/"):
+                identified_uris.add(value)
+    
+    identified_uris_list = list(identified_uris)
+    
+    
+    
+    
 
 def clean_hf_models_index(
     es_config: Optional[ElasticsearchConfig] = None,
