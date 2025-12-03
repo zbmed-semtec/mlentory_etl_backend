@@ -14,7 +14,7 @@ platforms:
   # HuggingFace Configuration
   huggingface:
     # Number of latest models to extract
-    num_models: 20
+    num_models: 50
     # Whether to prioritize recently updated models
     update_recent: true
     # Number of parallel threads for extraction
@@ -33,7 +33,7 @@ platforms:
     # Number of run instances to extract
     num_instances: 50
     # Offset for pagination
-    offset: 0
+    offset: 20
     # Number of parallel threads for extraction
     threads: 4
     # Number of threads for enrichment operations

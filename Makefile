@@ -30,7 +30,7 @@ up: ## Start all services
 
 down: ## Stop all services
 	@echo "$(BLUE)Stopping MLentory ETL services...$(NC)"
-	sudo docker compose down
+	sudo docker compose --profile=complete down 
 	@echo "$(GREEN)Services stopped!$(NC)"
 
 restart: down up ## Restart all services
