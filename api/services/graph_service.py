@@ -9,7 +9,7 @@ up to a configurable depth and returns a structured graph response.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from api.config import get_neo4j_config
 from api.schemas.graph import GraphEdge, GraphNode, GraphResponse
@@ -532,6 +532,96 @@ class GraphService:
                 exc_info=True,
             )
             return []
+
+    def list_entities(self, entity_type: List[str]) -> Tuple[Dict[str, List[str]], int]:
+        """
+        List all entities grouped by relationship type.
+        
+        Args:
+            entity_type: List of relationship types to filter by
+            
+        Returns:
+            Tuple of (grouped dictionary, total count) where dictionary maps
+            normalized relationship keys -> list of entity names
+        """
+
+        def _normalize_relationship_key(rel_type: str) -> str:
+            """
+            Normalize relationship type to simplified key.
+            
+            Maps dataset-related types to "datasets" and removes prefixes.
+            
+            Args:
+                rel_type: Original relationship type (e.g., "fair4ml__mlTask", "schema__keywords")
+                
+            Returns:
+                Simplified key (e.g., "mlTask", "keywords", "datasets")
+            """
+            # Dataset-related relationship types
+            dataset_types = {
+                "fair4ml__fineTunedFrom",
+                "fair4ml__trainedOn",
+                "fair4ml__testedOn",
+                "fair4ml__validatedOn",
+                "fair4ml__evaluatedOn"
+            }
+            
+            if rel_type in dataset_types:
+                return "datasets"
+            
+            # Remove prefixes: "schema__" and "fair4ml__"
+            if rel_type.startswith("schema__"):
+                return rel_type.replace("schema__", "")
+            elif rel_type.startswith("fair4ml__"):
+                return rel_type.replace("fair4ml__", "")
+            
+            return rel_type
+
+        query = """
+        MATCH (m:fair4ml__MLModel)-[r]-(e)
+        WHERE type(r) IN $entity_types
+        RETURN DISTINCT
+            m.fair4ml__sharedBy as shared_by,
+            e.schema__name as entity_name,
+            type(r) as relationship_type
+        ORDER BY type(r), e.schema__name
+        """
+
+        try:
+            results = _run_cypher(query, {"entity_types": entity_type}, self.config)
+            count = len(results)
+            
+            # Group entities by normalized relationship type
+            grouped: Dict[str, List[str]] = {}
+            shared_by_values = set()
+            
+            for record in results:
+                rel_type = record.get("relationship_type")
+                entity_name = record.get("entity_name")
+                shared_by = record.get("shared_by")
+                
+                # Collect unique shared_by values
+                if shared_by:
+                    shared_by_values.add(shared_by)
+                
+                if rel_type and entity_name:
+                    # Normalize the relationship type key
+                    normalized_key = _normalize_relationship_key(rel_type)
+                    
+                    if normalized_key not in grouped:
+                        grouped[normalized_key] = []
+                    # ensure uniqueness per key
+                    if entity_name not in grouped[normalized_key]:
+                        grouped[normalized_key].append(entity_name)
+            
+            # Add shared_by as a new key with unique values
+            if shared_by_values:
+                grouped["shared_by"] = sorted(list(shared_by_values))
+            
+            return grouped, count
+        except Exception as e:
+            logger.error(f"Error listing entities: {e}", exc_info=True)
+            return {}, 0      
 
 # Global service instance
 graph_service = GraphService()
