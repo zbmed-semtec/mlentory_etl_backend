@@ -80,10 +80,28 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
     keywords = model.get("https://schema.org/keywords") or []
     
     
-    datasets = list(set([*model.get("https://w3id.org/fair4ml/trainedOn"),
-                *model.get("https://w3id.org/fair4ml/testedOn"),
-                *model.get("https://w3id.org/fair4ml/validatedOn"),
-                *model.get("https://w3id.org/fair4ml/evaluatedOn")]))
+    dataset_fields = [
+        "https://w3id.org/fair4ml/trainedOn",
+        "https://w3id.org/fair4ml/testedOn",
+        "https://w3id.org/fair4ml/validatedOn",
+        "https://w3id.org/fair4ml/evaluatedOn",
+    ]
+
+    datasets_set = set()
+    for field in dataset_fields:
+        values = model.get(field)
+        if values is None:
+            continue
+        if isinstance(values, list):
+            for v in values:
+                if v is not None:
+                    datasets_set.add(str(v))
+        else:
+            if values is not None:
+                datasets_set.add(str(values))
+    datasets = list(datasets_set)
+    
+    logger.debug(f"Datasets!!!!!!!!!!!!!!:\n {datasets}")
     
     # Translate entities to human readable names
     datasets = [translation_mapping.get(dataset, dataset) for dataset in datasets]
