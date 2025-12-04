@@ -22,20 +22,23 @@ Example:
 
 from __future__ import annotations
 
-import re
-import spacy
 import logging
+import re
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
+
+import spacy
 
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.graph_service import graph_service
-# from etl_extractors.hf.hf_readme_parser import MarkdownParser
+from etl_extractors.hf.hf_readme_parser import MDParserChunker
 from schemas.fair4ml.mlmodel import MLModel
 
 logger = logging.getLogger(__name__)
 
 
-def _clean_description(description: Optional[str], max_section_length: int = 300) -> Optional[str]:
+
+def _clean_description(description: Optional[str], max_section_length: int = 300, min_section_words: int = 20) -> Optional[str]:
     """
     Clean and format model description by removing tables/lists and truncating long sections.
     
@@ -48,32 +51,51 @@ def _clean_description(description: Optional[str], max_section_length: int = 300
     """
     if not description or not description.strip():
         return description
-    
+
     try:
-        parser = MarkdownParser()
-        
-        # Remove tables and lists (set max_lines to 0 to remove them entirely)
-        cleaned_text = parser.trim_tables_and_lists(description, max_lines=0)
-        
-        # Extract sections and truncate long ones
-        sections = parser.extract_hierarchical_sections(cleaned_text, max_section_length=max_section_length)
-        
-        # Build final cleaned text from sections
-        cleaned_parts = []
+        md_parser_chunker = MDParserChunker(logger=logger)
+
+        # Build AST and section-like chunks from the markdown description
+        ast = md_parser_chunker.generate_ast(description)
+        chunks = md_parser_chunker.generate_chunks(ast, min_len=min_section_words)
+
+        # Make the dicts compatible with the old section objects
+        for d in chunks:
+            # original key from chunker is "text"
+            d["content"] = d.pop("text", "")
+            parent = d.get("parent")
+            d["title"] = (parent + "/" if parent else "") + d["id"]
+
+        sections = [SimpleNamespace(**d) for d in chunks]
+
+        # Build final cleaned text from sections, skipping code/table chunks
+        cleaned_parts: List[str] = []
         for section in sections:
-            content = section.content.strip()
-            if content:
-                # Truncate if longer than max_section_length
-                if len(content) > max_section_length:
-                    content = content[:max_section_length].rsplit(' ', 1)[0] + "..."
-                cleaned_parts.append(content)
-        
+            section_type = getattr(section, "type", "")
+            if section_type in {"code", "table"}:
+                continue
+
+            content = getattr(section, "content", "") or ""
+            content = content.strip()
+            if not content:
+                continue
+
+            # Truncate if longer than max_section_length (in characters)
+            if len(content) > max_section_length:
+                truncated = content[:max_section_length]
+                # avoid cutting mid-word when possible
+                if " " in truncated:
+                    truncated = truncated.rsplit(" ", 1)[0]
+                content = truncated + "..."
+
+            cleaned_parts.append(content)
+
         # Join sections with double newline
         result = "\n\n".join(cleaned_parts)
-        
+
         # If cleaning resulted in empty text, return original
         return result if result.strip() else description
-        
+
     except Exception as e:
         logger.warning(f"Error cleaning description: {e}", exc_info=True)
         # Fall back to original description on error
