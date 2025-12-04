@@ -23,6 +23,9 @@ Architecture:
 Available Tools:
     - search_models: Search for ML models with text queries and pagination
     - get_model_detail: Get detailed information about a specific model
+    - get_related_models_by_entity: Find models related to a given entity
+    - get_schema: Retrieve schema property definitions
+    - refine_query: Normalize user queries for better search results
 
 Example Client Usage:
     # Using Claude Desktop or other MCP client
@@ -48,6 +51,7 @@ from mcp_api.tools import (
     search_models,
     get_schema_name_definitions,
     get_related_models_by_entity as get_related_models_by_entity_tool,
+    normalize_query
 )
 
 from starlette.responses import JSONResponse
@@ -66,7 +70,11 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
+@mcp.tool(description=(
+        "Search ML models in the MLentory knowledge graph. Supports text queries, "
+        "pagination, and faceted filtering. Returns matching models, available facets, "
+        "and pagination metadata. Use when the user needs to search or browse ML models."
+    ))
 def search_ml_models(
     query: str = "",
     page: int = 1,
@@ -140,7 +148,11 @@ def search_ml_models(
     return result
 
 
-@mcp.tool()
+@mcp.tool(description=(
+        "Retrieve detailed information about a specific ML model by ID. Supports "
+        "optional resolution of related entities such as licenses, datasets, authors, "
+        "and publications. Use when the user requests full metadata for a known model."
+    ))
 def get_ml_model_detail(
     model_id: str,
     resolve_properties: Optional[List[str]] = None,
@@ -211,14 +223,19 @@ def get_ml_model_detail(
     
     return result
 
-@mcp.tool()
+@mcp.tool(description=(
+        "Find ML models connected to a specific entity name (e.g., dataset, license, "
+        "organization, author, ML task, or keyword). Resolves the entity in the graph "
+        "and returns all related models. Use when the user wants models associated with "
+        "a dataset, organization, keyword, or other named entity."
+    ))
 def get_related_models_by_entity(
     entity_name: str,
 ) -> Dict[str, Any]:
     """
     Get ML models that are related to a given entity name in the MLentory graph.
 
-    This tool performs a two-step lookup in the Neo4j-backed knowledge graph:
+    Performs a two-step lookup in the Neo4j-backed knowledge graph:
     it first resolves a human-readable entity name (for example, a dataset
     title, license name, or organization) to its canonical graph URI, and then
     retrieves all ML models that are connected to that entity.
@@ -264,12 +281,21 @@ def get_related_models_by_entity(
     
     return result
 
-@mcp.tool()
+@mcp.tool(description=(
+        "Retrieve definitions and meanings of MLentory schema properties. Call this "
+        "tool when the user asks what a field/property represents OR when you, the LLM, "
+        "are unsure about the meaning of a property in a query. Accepts an optional "
+        "list of property names, or returns all schema definitions if not specified."
+    ))
 def get_schema(
     properties: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Get definitions about schema properties.
+
+    Retrieves detailed definitions and explanations for one or more
+    schema properties used in the MLentory knowledge graph.
+    
     Args:
         properties: Optional list of schema property names to retrieve.
                     If None, returns all available properties.
@@ -294,8 +320,41 @@ def get_schema(
     return result
 
 
-def refine_query():
-    pass
+@mcp.tool(description=(
+        "Normalize and refine a natural-language query into a structured ML model "
+        "search query. This tool extracts possible filters (e.g., license, task, "
+        "platform), maps ambiguous terms to known properties, and removes noise from "
+        "the query. Call this when the user's query is unclear, conversational, "
+        "contains unmapped terms, or could benefit from refinement before calling "
+        "search_ml_models."
+    ))
+def refine_query(query: str) -> Dict[str, Any]:
+    """
+    Refines and normalizes a user query for improved model search.
+
+    Extracts filters (license, task, platform), maps ambiguous terms to properties,
+    and removes noise. Use when the query is conversational, ambiguous, or contains
+    unmapped terms, before calling search_ml_models.
+    
+    Args:
+        query: Original user query string.
+    Returns:
+        Dictionary containing:
+        - query: Refined query string.
+        - filters: Extracted filters for model search.
+    
+    Examples:
+        # Refine a user query
+        refine_query("find me an image-classification model under apache-2.0 license on openml")        
+    """
+    logger.info("refine_query called")
+    result = normalize_query(user_query=query)
+    if "error" in result:
+        logger.warning(f"refine_query error: {result['error']}")
+    else:
+        logger.info("refine_query returned")
+
+    return result
 
 
 @mcp.custom_route("/health", methods=["POST"])
