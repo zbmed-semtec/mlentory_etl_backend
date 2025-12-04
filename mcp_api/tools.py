@@ -36,9 +36,18 @@ from schemas.fair4ml.mlmodel import MLModel
 
 logger = logging.getLogger(__name__)
 
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    import subprocess
+    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
 
 
-def _clean_description(description: Optional[str], max_section_length: int = 300, min_section_words: int = 20) -> Optional[str]:
+TRIVIAL_TOKENS = {"model", "models", "task", "tasks", "dataset", "datasets", "example"}
+VALID_POS = {"NOUN", "PROPN", "ADJ"}
+
+
+def _clean_description(description: Optional[str], max_section_length: int = 300) -> Optional[str]:
     """
     Clean and format model description by removing tables/lists and truncating long sections.
     
@@ -360,6 +369,11 @@ def get_schema_name_definitions(properties: Optional[List[str]] = None) -> Dict[
 
     Returns:
         Dictionary mapping field name -> {"name": <field name>, "description": <field description>}
+    
+    Example:
+        >>> Get definitions for specific properties
+        >>> schema_info = get_schema_name_definitions(properties=["name", "description"])
+        >>> print(schema_info)
     """
     result: Dict[str, Dict[str, Any]] = {}
     all_schema_properties = MLModel.model_fields.keys()
@@ -383,6 +397,21 @@ def get_related_models_by_entity(
 ) -> Dict[str, Any]:
     """
     Get the related models by an entity name.
+
+    Args:
+        entity_name: Name of the entity (e.g., dataset, license, organization, author, ML task, keyword)    
+
+    Returns:
+        Dictionary containing:
+            - models: List of related model objects
+            - count: Number of related models
+    Examples:
+        >>> # Get models related to a specific dataset
+        >>> result = get_related_models_by_entity(entity_name="ImageNet")
+        >>> print(f"Found {result['count']} models related to ImageNet")
+        >>> # Get models related to a specific license
+        >>> result = get_related_models_by_entity(entity_name="apache-2.0")
+        >>> print(f"Found {result['count']} models with Apache 2.0 license")
     """
     logger.info(f"get_related_models_by_entity called: entity_name='{entity_name}'")
     try:
@@ -414,18 +443,19 @@ def get_related_models_by_entity(
         }
 
 
-def clean_query(text: str):
+def clean_query(text: str) -> tuple[List[str], List[str]]:
     """
-    Lowercase, remove punctuation (except hyphens),
-    extract quoted phrases, tokenize the rest.
-    """
-    try:
-        nlp = spacy.load("en_core_web_sm")
-    except OSError:
-        import subprocess
-        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+    Lowercase, remove punctuation (except hyphens), extract quoted phrases, tokenize the rest.
 
-    nlp = spacy.load("en_core_web_sm")
+    Args:
+        text: Input query string.
+    Returns:  
+        Tuple of (cleaned_tokens, quoted_phrases)
+    Examples:
+        >>> tokens, quotes = clean_query('Find "image classification" models with bert-based architectures.')
+        >>> print(tokens)  # ['find', 'models', 'bert-based', 'architectures']
+        >>> print(quotes)  # ['image classification']
+    """
 
     text = text.lower().strip()
     # Extract quoted phrases first
@@ -433,7 +463,7 @@ def clean_query(text: str):
     # Remove quoted phrases from main text
     text_no_quotes = re.sub(r'"[^"]+"', '', text)
     # Remove punctuation except hyphens
-    text_no_quotes = re.sub(r"[^a-z0-9\- ]+", " ", text_no_quotes)
+    text_no_quotes = re.sub(r"[^a-z0-9\-\. ]+", " ", text_no_quotes)
     # Tokenize
     tokens = text_no_quotes.split()
     # Use spaCy to remove stop words
@@ -443,40 +473,83 @@ def clean_query(text: str):
     ]
     return cleaned_tokens, quoted_phrases
 
+def pos_tag_tokens(tokens: list) -> list[tuple[str, str]]:
+    """
+    Return a list of (token_text, pos_tag) tuples.
 
-FACET_SCHEMA = {
-    "mlTask": [
-        "token-classification",
-        "text-classification",
-        "embedding",
-        "image-classification",
-        "sentiment-analysis",
-    ],
-    "license": [
-        "mit",
-        "apache-2",
-        "cc"
-    ],
-    "platform": [
-        "huggingface",
-        "openml",
-        "ai4life"
-    ],
-    "sharedBy": [
-        "meta",
-        "google",
-        "microsoft"
-    ]
-}
+    Args:
+        tokens: List of input tokens.
+    Returns:
+        List of (token_text, pos_tag) tuples.
+    Examples:
+        >>> tagged = pos_tag_tokens(['bert-based', 'models', 'classification'])
+        >>> print(tagged)  # [('bert-based', 'PROPN'), ('models', 'NOUN'), ('classification', 'NOUN')]  
+    """
+    doc = nlp(" ".join(tokens))
 
-def map_to_facets(tokens, quoted_phrases):
-    extracted = {facet: [] for facet in FACET_SCHEMA}
-    domain_terms = []
+    merged = []
+    buffer = []
 
+    for token in doc:
+        if token.text == "-":
+            # keep hyphen as part of the token
+            buffer.append("-")
+        else:
+            # if previous buffer contains a word and hyphens, merge them
+            if buffer:
+                merged[-1] = merged[-1] + "".join(buffer) + token.text
+                buffer = []
+            else:
+                merged.append(token.text)
+
+    return [(t, nlp(t)[0].pos_) for t in merged]
+
+
+def get_facets():
+    """
+    Retrieve available facet values from the graph service.
+    Returns:
+        Dictionary mapping facet name -> list of values
+    """
+    try:
+        facet_schema_raw = graph_service.grouped_facet_values(
+            ["fair4ml__mlTask", "schema__keywords", 
+             "schema__license", "schema__sharedBy", 
+             "fair4ml__trainedOn", "fair4ml__testedOn", 
+             "fair4ml__validatedOn", "fair4ml__evaluatedOn"])
+        return facet_schema_raw[0]
+
+    except Exception as e:
+        logger.error(f"Error fetching facet values: {e}", exc_info=True)
+        return {}
+
+
+def map_to_facets(tagged_tokens:list, quoted_phrases:list) -> tuple[Dict[str, list], list]:
+    """
+    Map tokens to facet values and clean domain terms using POS tags.
+    tagged_tokens: list of (token_text, pos_tag)
+    Args:
+        tagged_tokens: List of (token_text, pos_tag) tuples.
+        quoted_phrases: List of quoted phrases from the original query.
+    Returns:
+        Tuple of (extracted_facets, domain_terms)
+        where extracted_facets is a dict mapping facet name -> list of matched values,
+        and domain_terms is a list of remaining domain-specific terms.
+    Examples:
+        >>> tagged = [('bert-based', 'PROPN'), ('models', 'NOUN'), ('classification', 'NOUN')]
+        >>> quotes = ['image classification']
+        >>> facets, domain = map_to_facets(tagged, quotes)
+        >>> print(facets)  # {'mlTask': ['classification']}
+        >>> print(domain)  # ['bert-based', 'image classification'] 
+    """
+
+    FACET_SCHEMA = get_facets()
     facet_keys = set(FACET_SCHEMA.keys())
     facet_values_set = set(val for vals in FACET_SCHEMA.values() for val in vals)
+    extracted = {facet: [] for facet in facet_keys}
+    domain_candidates = []
 
-    for t in tokens + quoted_phrases:
+    for t, pos in tagged_tokens + [(q, "PROPN") for q in quoted_phrases]:
         matched = False
 
         for facet, values in FACET_SCHEMA.items():
@@ -486,11 +559,14 @@ def map_to_facets(tokens, quoted_phrases):
                 break
 
         if not matched:
-            domain_terms.append(t)
+            domain_candidates.append((t, pos))
+
     domain_terms = [
-        term for term in set(domain_terms)
-        if term not in facet_keys
+        term for term, pos in domain_candidates
+        if pos in VALID_POS
+        and term not in facet_keys
         and term not in facet_values_set
+        and term not in TRIVIAL_TOKENS
         and len(term) > 2
     ]
 
@@ -499,12 +575,40 @@ def map_to_facets(tokens, quoted_phrases):
         for facet, vals in extracted.items()
         if vals
     }
-
-    domain_terms = list(set(domain_terms))
     return extracted, domain_terms
 
-
-def build_output(ml_tasks, licenses, platforms, providers, domain_terms):
+def build_output(ml_tasks, licenses, platforms, providers, keywords, domain_terms):
+    """
+    Unpacks and builds the final output dictionary.
+    Args:      
+        ml_tasks: List of ML tasks
+        licenses: List of licenses      
+        platforms: List of platforms
+        providers: List of providers
+        keywords: List of keywords
+        domain_terms: List of remaining domain-specific terms
+    Returns:
+        Dictionary with 'query' and 'filters' keys.
+    Examples:
+        >>> output = build_output(      
+        ml_tasks=['classification'],
+        licenses=['apache-2.0'],    
+        platforms=['Hugging Face'],    
+        providers=['google'],    
+        keywords=['bert'],    
+        domain_terms=['image', 'segmentation']
+        )
+        >>> print(output)  
+        {   'query': 'image segmentation',
+            'filters': {
+                'task': ['classification'],
+                'license': ['apache-2.0'],
+                'platform': ['Hugging Face'],
+                'sharedBy': ['google'],
+                'keywords': ['bert']
+            }
+        }
+    """
     normalized_query = " ".join(domain_terms)
 
     filters = {}
@@ -516,7 +620,9 @@ def build_output(ml_tasks, licenses, platforms, providers, domain_terms):
         filters["platform"] = platforms
     if providers:
         filters["sharedBy"] = providers
-
+    if keywords:
+        filters["keywords"] = keywords
+    print("Normalized query:", normalized_query, "Filters:", filters)
     return {
         "query": normalized_query.strip(),
         "filters": filters
@@ -524,16 +630,30 @@ def build_output(ml_tasks, licenses, platforms, providers, domain_terms):
 
 
 def normalize_query(user_query: str):
+    """
+    Helper function to normalize and refine a user query.
+    Args:
+        user_query: Original user query string.
+    Returns:        
+        Dictionary with 'query' and 'filters' keys.
+    Examples:
+        >>> result = normalize_query('Find "image classification" models with bert-based architectures under apache-2.0 license.')
+        >>> print(result)   
+        {   'query': 'bert-based architectures image classification',
+            'filters': {
+                'task': ['classification'],
+                'license': ['apache-2.0']
+            }
+        }
+    """
     tokens, quoted = clean_query(user_query)
-    extracted, domain_terms = map_to_facets(tokens, quoted)
+    tagged_tokens = pos_tag_tokens(tokens)
+    extracted, domain_terms = map_to_facets(tagged_tokens, quoted)
 
-    # Unpack facet lists with default empty list if missing
     ml = extracted.get("mlTask", [])
     lic = extracted.get("license", [])
     plat = extracted.get("platform", [])
     prov = extracted.get("sharedBy", [])
-    return build_output(ml, lic, plat, prov, domain_terms)
+    keywords = extracted.get("keywords", [])
+    return build_output(ml, lic, plat, prov, keywords, domain_terms)
 
-# if __name__ == "__main__":
-#     improved_query = normalize_query("find me meta model for image-classification under apache-2 license on openml")
-    # search_models(query=improved_query["query"],filters=improved_query["filters"],page=1,page_size=20)
