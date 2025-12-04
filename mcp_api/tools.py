@@ -378,6 +378,10 @@ def get_schema_name_definitions(properties: Optional[List[str]] = None) -> Dict[
     result: Dict[str, Dict[str, Any]] = {}
     all_schema_properties = MLModel.model_fields.keys()
     try:
+        
+        if not properties:
+            return all_schema_properties
+        
         for property in properties:
             if property in all_schema_properties:
                 alias = MLModel.model_fields[property].alias
