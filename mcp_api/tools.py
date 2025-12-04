@@ -295,7 +295,7 @@ def get_model_detail(
         model_dict = {
             "identifier": [model.db_identifier],
             "name": model.name,
-            "description": model.description,
+            "description": _clean_description((model.description)),
             "sharedBy": model.sharedBy,
             "license": model.license,
             "mlTask": model.mlTask,
@@ -421,9 +421,20 @@ def get_related_models_by_entity(
                 "error": f"Entity not found: {entity_name}",
             }
         result = graph_service.get_models_by_entity_uri(entity_uri=result["uri"])
+        
+        # Transform results to only include requested fields
+        transformed_models = []
+        for model in result:
+            model_properties = model.get("model_properties", {})
+            transformed_models.append({
+                "model_name": model.get("model_name") or model_properties.get("schema__name", ""),
+                "model_description": model_properties.get("schema__description", ""),
+                "shared_by": model_properties.get("fair4ml__sharedBy", ""),
+            })
+        
         return {
-            "models": result,
-            "count": len(result),
+            "models": transformed_models,
+            "count": len(transformed_models),
         }
     except Exception as e:
         logger.error(f"Error getting related models by entity: {e}", exc_info=True)
