@@ -33,6 +33,19 @@ down: ## Stop all services
 	sudo docker compose --profile=complete down 
 	@echo "$(GREEN)Services stopped!$(NC)"
 
+mcp-up: ## Start MCP API service only
+	@echo "$(BLUE)Starting MCP API service...$(NC)"
+	sudo docker compose --profile=mcp up -d
+	@echo "$(GREEN)MCP API service started!$(NC)"
+	@echo "MCP API: http://localhost:8009"
+	@echo "Neo4j Browser: http://localhost:7474"
+	@echo "Elasticsearch: http://localhost:9200"
+
+mcp-down: ## Stop MCP services
+	@echo "$(BLUE)Stopping MCP API services...$(NC)"
+	sudo docker compose --profile=mcp down 
+	@echo "$(GREEN)Services stopped!$(NC)"
+
 restart: down up ## Restart all services
 
 logs: ## View logs from all services
