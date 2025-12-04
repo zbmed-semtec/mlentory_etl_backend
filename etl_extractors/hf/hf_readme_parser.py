@@ -1,607 +1,330 @@
-import re
-from typing import List, Dict, Tuple, Optional
-from dataclasses import dataclass
-from tqdm import tqdm
-import numpy as np
-import hashlib
-
-@dataclass
-class Section:
-    """Represents a section of text with its title and content"""
-
-    title: str
-    content: str
-    start_idx: int
-    end_idx: int
-
-    def to_dict(self) -> Dict[str, any]:
-        """Convert Section to dictionary for serialization"""
-        return {
-            "title": self.title,
-            "content": self.content, 
-            "start_idx": self.start_idx,
-            "end_idx": self.end_idx
-        }
-
-    def to_json(self) -> str:
-        """Convert Section to JSON string"""
-        import json
-        return json.dumps(self.to_dict(), indent=4)
+import mistune
+from html_to_markdown import convert as convert_to_md
+import logging
+from datetime import datetime
+import graphviz
+import textwrap
+import uuid
 
 
-class MarkdownParser:
-    """
-    A parser for markdown files that extracts structured sections and handles special markdown elements.
-    Provides methods to extract header-based sections and fine-grained sections from markdown text.
-    """
-    
-    def __init__(self):
-        """Initialize the markdown parser."""
-        pass
-    
-    def extract_sections(self, text: str) -> List[Section]:
+class MDParserChunker:
+
+    def __init__(self, logger):
+
+        self.logger = logger
+
+    def generate_ast(self, model_card):
         """
-        Extract sections from text based on markdown-style headers, maintaining header hierarchy.
-        Intelligently distinguishes between actual markdown headers and code comments or other
-        occurrences of # symbols.
+        Parses model card and restructures the abstract syntax tree (AST) from `mistune`
+        into a hierarchical tree based on heading levels (H1, H2, etc.).
+
+        The output format for each node is a dictionary with keys:
+        - "section_type": The type of the markdown element (e.g., 'Heading', 'Paragraph').
+        - "content": The direct text content of the element. For containers, this is empty.
+        - "children": A list of child nodes, forming the hierarchy.
 
         Args:
-            text (str): The text to segment
+            model_card: A string containing the model_card text.
 
         Returns:
-            List[Section]: List of extracted sections with hierarchical titles and content
-
-        Example:
-            >>> parser = MarkdownParser()
-            >>> sections = parser.extract_sections("# Header\\nContent\\n```python\\n# Not a header\\n```")
-            >>> len(sections)
-            1
+            A list of dictionaries representing the hierarchical structure of the document.
         """
-        # Split text into lines
-        lines = text.split("\n")
-        sections = []
-        current_title = ""
-        current_content = []
-        start_idx = 0
-        # Keep track of header hierarchy - using list of (level, title) tuples
-        # Lower levels (h1) have smaller numbers, higher levels (h6) have larger numbers
-        header_hierarchy = []
-        
-        # Track if we're inside a code block
-        in_code_block = False
-        code_block_markers = ["```", "~~~"]  # Common markdown code block delimiters
-        
-        for i, line in enumerate(lines):
-            stripped_line = line.strip()
-            
-            # Check if entering or exiting a code block
-            if any(stripped_line.startswith(marker) for marker in code_block_markers):
-                in_code_block = not in_code_block
-                current_content.append(line)
-                continue
-                
-            # Skip header detection if inside a code block
-            if in_code_block:
-                current_content.append(line)
-                continue
-                
-            # More robust markdown header detection:
-            # 1. Must start at beginning of line (no indentation)
-            # 2. Must have space after hash symbols
-            # 3. Cannot be inside a code block
-            header_match = None
-            if not stripped_line.startswith("#"):
-                # Fast path - not a header candidate
-                current_content.append(line)
-                continue
-                
-            # Only check if the line actually starts with # at the beginning
-            if line.lstrip() == stripped_line:  # No indentation
-                header_match = re.match(r"^(#{1,6})\s+(.+)$", stripped_line)
-            
-            # Process the line
-            is_last_line = (i == len(lines) - 1)
-            
-            if header_match or is_last_line:
-                # Save previous section if exists and has content
-                if current_title and current_content:
-                    # Remove empty lines and check if there's actual content
-                    filtered_content = [l for l in current_content if l.strip()]
-                    if filtered_content:
-                        sections.append(
-                            Section(
-                                title=current_title,
-                                content=current_title
-                                + ":\n"
-                                + "\n".join(filtered_content),
-                                start_idx=start_idx,
-                                end_idx=i,
-                            )
-                        )
 
-                if header_match:
-                    level = len(header_match.group(1))  # Number of # symbols
-                    title = header_match.group(2).strip()
+        def build_hierarchical_tree(flat_nodes):
+            hierarchical_tree = []
+            parent_stack = [{"children": hierarchical_tree, "level": 0}]
 
-                    # Update header hierarchy based on current level
-                    # Remove any headers of equal or higher level (smaller or equal numbers)
-                    header_hierarchy = [h for h in header_hierarchy if h[0] < level]
-                    # Add the current header to the hierarchy
-                    header_hierarchy.append((level, title))
-                    
-                    # Build the hierarchical title from the current hierarchy
-                    # Sort by level to get the correct order (h1 -> h2 -> h3)
-                    sorted_hierarchy = sorted(header_hierarchy)
-                    current_title = " > ".join(title for _, title in sorted_hierarchy)
-                    
-                    current_content = []
-                    start_idx = i
-                elif is_last_line and not header_match:
-                    current_content.append(line)
-            else:
-                current_content.append(line)
-
-        # Process any remaining content after the last iteration
-        # This handles the case where there's content after the last header without another header following
-        if current_title and current_content:
-            # Remove empty lines and check if there's actual content
-            filtered_content = [l for l in current_content if l.strip()]
-            if filtered_content:
-                sections.append(
-                    Section(
-                        title=current_title,
-                        content=current_title
-                        + ":\n"
-                        + "\n".join(filtered_content),
-                        start_idx=start_idx,
-                        end_idx=len(lines) - 1,  # End at the last line
-                    )
-                )
-        elif current_content:
-            # Remove empty lines and check if there's actual content
-            filtered_content = [l for l in current_content if l.strip()]
-            if filtered_content:
-                sections.append(
-                    Section(
-                        title="",
-                        content="\n".join(filtered_content),
-                        start_idx=start_idx,
-                        end_idx=len(lines) - 1,  # End at the last line
-                    )
-                )
-
-        return sections
-    
-    def _is_special_markdown_block(self, lines: List[str], start_idx: int) -> Tuple[bool, int]:
-        """
-        Detect if lines starting at start_idx form a special markdown block that should be kept intact.
-        
-        Args:
-            lines (List[str]): List of text lines
-            start_idx (int): Index to start checking from
-            
-        Returns:
-            Tuple[bool, int]: (is_special_block, end_idx)
-        """
-        if start_idx >= len(lines):
-            return False, start_idx
-            
-        current_line = lines[start_idx].strip()
-        
-        # Check for code blocks
-        if current_line.startswith("```") or current_line.startswith("~~~"):
-            marker = current_line[:3]
-            # Find the end of the code block
-            for i in range(start_idx + 1, len(lines)):
-                if lines[i].strip().startswith(marker):
-                    return True, i
-            # If no end marker is found, treat the rest as a code block
-            return True, len(lines) - 1
-            
-        # Check for tables (line containing | character)
-        if "|" in current_line and not current_line.startswith(">"):
-            # Find extent of table by looking for lines with | character
-            table_end = start_idx
-            for i in range(start_idx + 1, len(lines)):
-                if "|" in lines[i].strip():
-                    table_end = i
-                elif lines[i].strip() == "":
-                    break  # Empty line marks end of table
+            for node in flat_nodes:
+                if node.get("section_type") == "heading":
+                    heading_level = node.get("level", 1)
+                    while parent_stack[-1].get("level", 0) >= heading_level:
+                        parent_stack.pop()
+                    parent_stack[-1]["children"].append(node)
+                    parent_stack.append(node)
                 else:
-                    break  # Non-table line
-            if table_end > start_idx:  # At least 2 lines with | character
-                return True, table_end
-                
-        # Check for blockquotes (lines starting with >)
-        if current_line.startswith(">"):
-            blockquote_end = start_idx
-            for i in range(start_idx + 1, len(lines)):
-                if lines[i].strip().startswith(">") or lines[i].strip() == "":
-                    blockquote_end = i
-                else:
-                    break
-            if blockquote_end > start_idx:
-                return True, blockquote_end
-                
-        # Check for lists (lines starting with -, *, +, or numbered)
-        list_markers = ["-", "*", "+"]
-        # Improved regex for ordered lists that matches digits followed by period and space
-        numbered_pattern = re.compile(r"^\d+\.\s")
-        
-        # Check if current line is a list item (either unordered or ordered)
-        is_list_item = (
-            any(current_line.lstrip().startswith(marker + " ") for marker in list_markers) or
-            numbered_pattern.match(current_line.lstrip()) is not None
+                    parent_stack[-1]["children"].append(node)
+            return hierarchical_tree
+
+        def _get_content(node):
+            content = []
+            children_list = node.get("children")
+            if children_list:
+                for child in children_list:
+                    content.append(_get_content(child))
+            return node.get("raw", "".join(content))
+
+        def _flatten_and_transform(node):
+            node_type = node.get("type", "undefined_type")
+
+            if node_type in [
+                "blank_line",
+                "thematic_break",
+                "softbreak",
+                "linebreak",
+                "image",
+            ]:
+                return []
+
+            if node_type == "block_html":
+                html_str = node.get("raw", "")
+                if not html_str.strip():
+                    return []
+
+                md_str = convert_to_md(html_str)
+                sub_ast = mistune_generator(md_str)
+
+                unwrapped_nodes = []
+                for sub_node in sub_ast:
+                    unwrapped_nodes.extend(_flatten_and_transform(sub_node))
+                return unwrapped_nodes
+
+            transformed = {"section_type": node_type, "content": "", "children": []}
+
+            if node_type in ["text", "codespan", "block_code", "inline_html"]:
+                transformed["content"] = node.get("raw", "")
+
+            elif node_type == "link":
+                transformed["content"] = node.get("attrs", {}).get("url", "NA")
+
+            elif node_type == "heading":
+                transformed["content"] = _get_content(node)
+                transformed["level"] = node.get("attrs", {}).get("level", 1)
+                transformed["children"] = []
+                return [transformed]
+
+            if node.get("children"):
+                for child in node.get("children"):
+                    child_transformed_list = _flatten_and_transform(child)
+                    transformed["children"].extend(child_transformed_list)
+
+            return [transformed]
+
+        mistune_generator = mistune.create_markdown(
+            renderer="ast", escape=False, plugins=["table"]
         )
-        
-        if is_list_item:
-            list_end = start_idx
-            indentation_level = len(current_line) - len(current_line.lstrip())
-            in_list = True
-            i = start_idx + 1
-            
-            while i < len(lines) and in_list:
-                next_line = lines[i].strip()
-                next_line_indentation = len(lines[i]) - len(lines[i].lstrip()) if lines[i].strip() else 0
-                
-                # Check if this line is a list item or part of a list
-                if next_line == "":
-                    # Empty lines can be part of lists, but only if there is a list element after it
-                    if i + 1 < len(lines) and any(lines[i + 1].lstrip().startswith(marker + " ") for marker in list_markers) or numbered_pattern.match(lines[i + 1].lstrip()) is not None:
-                        list_end = i
-                    else:
-                        break
-                elif any(next_line.lstrip().startswith(marker + " ") for marker in list_markers) or numbered_pattern.match(next_line.lstrip()) is not None:
-                    # This is a list item - update the end marker
-                    list_end = i
-                    # Check if this is a sub-list item (more indented)
-                    if next_line_indentation > indentation_level:
-                        # Sublist item, continue
-                        pass
-                    elif next_line_indentation < indentation_level and next_line_indentation == 0:
-                        # Back to main text with no indentation - end of list
-                        break
-                elif next_line_indentation > indentation_level:
-                    # Indented continuation of previous list item
-                    list_end = i
-                elif next_line.startswith("#") or next_line.startswith("```") or next_line.startswith("~~~") or next_line.startswith(">"):
-                    # Start of a header, code block, or blockquote - end of list
-                    break
-                else:
-                    # Not clearly a list item, but might still be part of the list content
-                    # if it's at the same indentation level or more indented
-                    if next_line_indentation >= indentation_level:
-                        list_end = i
-                    else:
-                        # Less indented non-list item - end of list
-                        break
-                
-                i += 1
-                    
-            if list_end > start_idx:
-                return True, list_end
-                
-        return False, start_idx
-        
-    def extract_fine_grained_sections(
-        self, text: str, title: str = "", start_idx: int = 0, 
-        end_idx: int = 0, max_section_length: int = 1000
-    ) -> List[Section]:
+        doc = mistune_generator(model_card)
+
+        flat_nodes = []
+        for node in doc:
+            flat_nodes.extend(_flatten_and_transform(node))
+
+        return build_hierarchical_tree(flat_nodes)
+
+    def generate_graphviz(self, ast, output_filename):
+
+        def add_nodes_edges(graph, nodes, parent_name=None):
+            for i, node in enumerate(nodes):
+                node_name = f"{parent_name}_{i}" if parent_name else f"root_{i}"
+
+                section_type = node.get("section_type", "Unknown")
+                content = node.get("content", "")
+
+                label = section_type
+                if content:
+                    wrapped_content = textwrap.fill(str(content), width=50)
+                    label += f'\n\n"{wrapped_content}"'
+
+                graph.node(node_name, label=label)
+
+                if parent_name:
+                    graph.edge(parent_name, node_name)
+
+                if node.get("children"):
+                    add_nodes_edges(graph, node["children"], parent_name=node_name)
+
+        dot = graphviz.Digraph("AST", comment="Abstract Syntax Tree")
+        dot.attr("node", shape="box", style="rounded")
+        dot.attr(rankdir="TB")
+
+        add_nodes_edges(dot, ast)
+
+        dot.render(output_filename, view=True, format="svg", cleanup=True)
+
+    def generate_chunks(self, ast, min_len=20):
         """
-        Create fine-grained sections by splitting text into smaller chunks based on paragraphs and sentences.
-        Used to further segment content within each header section.
-        Keeps special markdown elements like tables, code blocks, blockquotes, and lists intact.
+        the chunking process main loop
 
         Args:
-            text (str): The text to segment
-            title (str): Title prefix for the sections (typically the header title)
-            start_idx (int): Starting line index in the original document
-            end_idx (int): Ending line index in the original document
-            max_section_length (int): Maximum length (in characters) for sections
+            ast (list): The list of nodes representing the document's AST.
 
         Returns:
-            List[Section]: List of fine-grained sections
-
-        Example:
-            >>> parser = MarkdownParser()
-            >>> sections = parser.extract_fine_grained_sections("Paragraph 1 with facts.\\n\\nParagraph 2 with different facts.", "Sample Title")
-            >>> len(sections) >= 1
-            True
+            list: A list of dictionaries, where each dictionary represents a chunk.
         """
-        lines = text.split("\n")
-        sections = []
-        
-        # Find special blocks (tables, code blocks, blockquotes, lists) that should be kept intact
-        special_blocks = []
-        i = 0
-        while i < len(lines):
-            is_special, block_end = self._is_special_markdown_block(lines, i)
-            if is_special:
-                special_blocks.append((i, block_end))
-                i = block_end + 1
-            else:
-                i += 1
-                
-        # Create regular paragraphs, making sure not to break special blocks
-        paragraphs = []
-        current_paragraph = []
-        in_special_block = False
-        special_block_start = -1
-        special_block_end = -1
-        
-        for i, line in enumerate(lines):
-            # Check if we're entering a special block
-            for block_start, block_end in special_blocks:
-                if i == block_start:
-                    # End the current paragraph if exists
-                    if current_paragraph and not in_special_block:
-                        paragraphs.append(current_paragraph)
-                        current_paragraph = []
-                    
-                    # Start a new paragraph for the special block
-                    in_special_block = True
-                    special_block_start = block_start
-                    special_block_end = block_end
-                    current_paragraph = [(j, lines[j]) for j in range(block_start, block_end + 1)]
-                    
-                    # Add it immediately as a paragraph
-                    paragraphs.append(current_paragraph)
-                    current_paragraph = []
-                    break
-                    
-            # Skip if we're in a special block
-            if in_special_block:
-                if i > special_block_end:
-                    in_special_block = False
-                    special_block_start = -1
-                    special_block_end = -1
-                continue
-                
-            # Regular paragraph processing
-            if line.strip():
-                current_paragraph.append((i, line))
-            elif current_paragraph:
-                paragraphs.append(current_paragraph)
-                current_paragraph = []
-                
-        # Add the last paragraph if not empty
-        if current_paragraph:
-            paragraphs.append(current_paragraph)
-            
-        # Create sections from paragraphs
-        for p_idx, paragraph in enumerate(paragraphs):
-            if not paragraph:
-                continue
-                
-            paragraph_content = "\n".join(line for _, line in paragraph)
-            
-            # Calculate relative line indices within this text chunk
-            relative_start = paragraph[0][0]
-            relative_end = paragraph[-1][0]
-            
-            # Convert to absolute indices in the original document
-            absolute_start = start_idx + relative_start
-            absolute_end = start_idx + relative_end
-                
-            # Check if this paragraph is a special block (code block, table, etc.)
-            is_special_block = False
-            for block_start, block_end in special_blocks:
-                if relative_start == block_start and relative_end == block_end:
-                    is_special_block = True
-                    break
-                    
-            # Special blocks should be kept intact
-            if is_special_block:
-                block_type = "Block"
-                if paragraph_content.strip().startswith("```") or paragraph_content.strip().startswith("~~~"):
-                    block_type = "Code Block"
-                elif "|" in paragraph_content and not paragraph_content.startswith(">"):
-                    block_type = "Table"
-                    # Just return the first 4 lines of the table
-                    paragraph_content = "\n".join(paragraph_content.split("\n")[:4])
-                    paragraph_content = paragraph_content + "\n..."
-                elif paragraph_content.strip().startswith(">"):
-                    block_type = "Blockquote"
-                elif any(paragraph_content.lstrip().startswith(marker + " ") for marker in ["-", "*", "+"]) or re.match(r"^\d+\.\s", paragraph_content.lstrip()):
-                    block_type = "List"
-                    # Just return the first 4 lines of the list
-                    paragraph_content = "\n".join(paragraph_content.split("\n")[:4])
-                    paragraph_content = paragraph_content + "\n..."
-                    
-                section_title = f"{title} - {block_type}" if title else f"{block_type}"
-                sections.append(
-                    Section(
-                        title=section_title,
-                        content=paragraph_content,
-                        start_idx=absolute_start,
-                        end_idx=absolute_end
-                    )
-                )
-                continue
-                
-            
-            # Create one section for the paragraph
-            section_title = f"{title} - Par. {p_idx+1}" if title else f"Paragraph {p_idx+1}"
-            sections.append(
-                Section(
-                    title=section_title,
-                    content=paragraph_content,
-                    start_idx=absolute_start,
-                    end_idx=absolute_end
-                )
-            )
-                
-        # If no sections were created (e.g., all paragraphs were too small),
-        # create one section for the entire content
-        if not sections and text.strip():
-            sections = [
-                Section(
-                    title=title,
-                    content=text,
-                    start_idx=start_idx,
-                    end_idx=end_idx
-                )
-            ]
-            
-        return sections
-    
-    def trim_tables_and_lists(self, text: str, max_lines: int = 5) -> str:
-        """
-        Finds tables and lists in the markdown text and trims them to a specified maximum number of lines.
 
-        Args:
-            text (str): The input markdown text.
-            max_lines (int): The maximum number of lines to keep for tables and lists. Defaults to 5.
+        def _word_count(sen):
+            return len(sen.split())
 
-        Returns:
-            str: The markdown text with tables and lists trimmed.
-        
-        Example:
-            >>> parser = MarkdownParser()
-            >>> markdown_text =
-            ... Some text
-            ... | Header 1 | Header 2 |
-            ... |----------|----------|
-            ... | Cell 1   | Cell 2   |
-            ... | Cell 3   | Cell 4   |
-            ... | Cell 5   | Cell 6   |
-            ... | Cell 7   | Cell 8   |
-            ... - Item 1
-            ... - Item 2
-            ... - Item 3
-            ... - Item 4
-            ... - Item 5
-            ... - Item 6
-            ... 
-            >>> trimmed_text = parser.trim_tables_and_lists(markdown_text, max_lines=3)
-            >>> print(trimmed_text)
-            <BLANKLINE>
-            # Title
-            Some text
-            | Header 1 | Header 2 |
-            |----------|----------|
-            | Cell 1   | Cell 2   |
-            ...
-            - Item 1
-            - Item 2
-            - Item 3
-            ...
-            <BLANKLINE>
-        """
-        lines = text.split("\n")
-        processed_lines = []
-        i = 0
-        while i < len(lines):
-            is_special, block_end = self._is_special_markdown_block(lines, i)
-            
-            # Check if the special block is a table or a list
-            is_table_or_list = False
-            if is_special:
-                block_content = "\n".join(lines[i : block_end + 1])
-                # Check for table characteristics (contains '|')
-                if "|" in block_content and not block_content.strip().startswith(">"):
-                    is_table_or_list = True
-                # Check for list characteristics (starts with list markers)
-                elif any(
-                    block_content.lstrip().startswith(marker + " ") for marker in ["-", "*", "+"]
-                ) or re.match(r"^\d+\.\s", block_content.lstrip()):
-                    is_table_or_list = True
+        def _get_all_text(node):
+            """
+            recursively traverses a node and its children to extract all text content, returning it as a single string
+            """
 
-            if is_special and is_table_or_list:
-                # If it's a table or list and longer than max_lines, trim it
-                if (block_end - i + 1) > max_lines:
-                    processed_lines.extend(lines[i : i + max_lines])
-                    processed_lines.append("...")
-                else:
-                    # If not longer, add as is
-                    processed_lines.extend(lines[i : block_end + 1])
-                i = block_end + 1
-            else:
-                # If not a table/list or not special, add line as is
-                processed_lines.append(lines[i])
-                i += 1
-        
-        return "\n".join(processed_lines)
-    
-    def extract_chunk_sections(self, text: str, max_section_length: int = 2000, max_list_table_lines: int = 5) -> List[Section]:
-        """
-        Extract sections from text by splitting it into chunks of the given maximum length.
-        """
-        sections = []
-        # First we want to trim any tables and lists to 5 lines in the original text
-        
-        text = self.trim_tables_and_lists(text, max_lines=max_list_table_lines)
-        
-        for i in range(0, len(text), max_section_length):
-            sections.append(Section(title=f"Chunk {i//max_section_length+1}", content=text[i:i+max_section_length], start_idx=i, end_idx=i+max_section_length))
-        
-        return sections
-    
-    def extract_hierarchical_sections(self, text: str, max_section_length: int = 5000) -> List[Section]:
-        """
-        Extract sections from text by combining header-based sections with fine-grained paragraph sections.
-        This approach keeps the hierarchical structure but adds additional granularity within each section.
-        Special markdown elements like tables, code blocks, blockquotes, and lists are kept intact.
+            # base case: if the node is a text node, return its content.
+            if node.get("section_type") in ["text"]:
+                return node.get("content", "")
 
-        Args:
-            text (str): The text to segment
-            max_section_length (int): Maximum length for fine-grained sections
+            all_text = ""
+            # include the node's own content if it exists
+            if node.get("content", "") and node.get("section_type") not in [
+                "link"
+            ]:  # if there is content in node but not link node
+                all_text += node.get("content", "") + " "
 
-        Returns:
-            List[Section]: Combined list of sections with varying granularity
+            # recursive step: if the node has children, process them
+            if "children" in node and node["children"]:
+                for child in node["children"]:
+                    all_text += _get_all_text(child) + " "
 
-        Example:
-            >>> parser = MarkdownParser()
-            >>> sections = parser.extract_hierarchical_sections("# Header\\nLong content here.\\n## Subheader\\nMore details.")
-            >>> len(sections) > 0
-            True
-        """
-        content_map: Dict[str, Section] = {} # Use content hash as key, section as value
+            return all_text.strip()
 
-        # Helper function to add sections while handling duplicates
-        def add_or_update_section(section: Section):
-            if section.title == "" or section.content == "":
+        def _process_heading_node(
+            heading_node,
+            parent_id,
+            parent_heading_text=None,
+        ):
+            """
+            recursively processes a heading node and its children to create a hierarchy of chunks.
+
+            1. creates a 'section' chunk for the heading itself.
+            2. creates 'granular' or 'code' chunks for its direct children.
+            3. finds child headings and calls itself on them to build the tree.
+            """
+
+            if heading_node.get("section_type") not in SECTION_TYPES:
                 return
-            
-            # Calculate hash of the content
-            content_hash = hashlib.sha256(section.content.encode('utf-8')).hexdigest()
 
-            if content_hash not in content_map or \
-               len(section.title) < len(content_map[content_hash].title):
-                content_map[content_hash] = section
+            section_id = str(uuid.uuid4())
+            section_text = _get_all_text(heading_node)
+            heading_text = heading_node["content"]
 
-        # First get the header-based sections
-        header_sections = self.extract_sections(text)
-        
-        # Process header sections and their corresponding fine-grained sections
-        for section in header_sections:
-            # Consider the original header section
-            add_or_update_section(section)
-            
-            # Create fine-grained sections from this section's content
-            fine_sections = self.extract_fine_grained_sections(
-                section.content,
-                title=section.title,
-                start_idx=section.start_idx,
-                end_idx=section.end_idx,
-                max_section_length=max_section_length
+            if section_text.strip():
+                all_chunks.append(
+                    {
+                        "id": section_id,
+                        "type": "section",
+                        "length": len(section_text.strip().split()),
+                        "parent": parent_id,
+                        "htext": heading_text,
+                        "phtext": parent_heading_text,
+                        "text": section_text.strip(),
+                    }
+                )
+
+            if not heading_node.get("children"):
+                return
+
+            short_node_buffer = ""
+
+            for child_node in heading_node["children"]:
+                # if a child is another heading, recurse.
+                if child_node.get("section_type") in SECTION_TYPES:
+
+                    # the current section becomes the parent for the next call.
+                    _process_heading_node(
+                        child_node,
+                        section_id,
+                        heading_text,
+                    )
+
+                # if a child is a granular type, create a granular chunk
+                else:
+
+                    if child_node.get("section_type") in CODE_TYPES:
+                        granular_text = _get_all_text(child_node)
+                        granular_type = "code"
+
+                    elif child_node.get("section_type") in TABLE_TYPES:
+                        # implement table chunking logic
+                        granular_text = "TABLE (TO BE IMPLEMENTED)"
+                        granular_type = "table"
+
+                    else:
+                        granular_text = _get_all_text(child_node)
+                        granular_type = "granular"
+
+                    if not granular_text:
+                        continue
+
+                    if granular_type in ["code", "table"]:
+                        all_chunks.append(
+                            {
+                                "id": str(uuid.uuid4()),
+                                "type": granular_type,
+                                "length": len(granular_text.split()),
+                                "parent": section_id,
+                                "phtext": heading_text,
+                                "text": granular_text,
+                            }
+                        )
+                        continue
+
+                    length = len(granular_text.split())
+
+                    if length <= min_len:
+                        short_node_buffer += " " + granular_text
+                        continue
+
+                    if short_node_buffer:
+                        granular_text = short_node_buffer + granular_text
+                        short_node_buffer = ""
+
+                    all_chunks.append(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "type": granular_type,
+                            "length": len(granular_text.split()),
+                            "parent": section_id,
+                            "phtext": heading_text,
+                            "text": granular_text.strip(),
+                        }
+                    )
+
+            if short_node_buffer.strip():
+                all_chunks.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "type": "granular",
+                        "length": len(short_node_buffer.split()),
+                        "parent": section_id,
+                        "phtext": heading_text,
+                        "text": short_node_buffer.strip(),
+                    }
+                )
+
+        SECTION_TYPES = ["heading"]
+        TABLE_TYPES = ["table"]
+        CODE_TYPES = ["codespan", "block_code"]
+        CONTAINER_TYPES = ["paragraph", "list"]
+
+        all_chunks = []
+        orphan_list = []
+
+        # --- main loop ---
+        for top_level_node in ast:
+            node_type = top_level_node.get("section_type", "")
+
+            # --- the node is a section container  ---
+            if node_type in SECTION_TYPES:
+                _process_heading_node(top_level_node, None)
+
+            # --- the node is a top level granular orphan ---
+            else:
+                orphan_list.append(top_level_node)
+
+        if orphan_list:
+            orphan_text = ""
+            for orphan in orphan_list:
+                orphan_text += " " + _get_all_text(orphan)
+
+            all_chunks.append(
+                {
+                    "type": "orphan",
+                    "length": len(orphan_text.split()),
+                    "id": str(uuid.uuid4()),
+                    "parent": None,
+                    "phtext": None,
+                    "text": orphan_text.strip(),
+                }
             )
-            
-            # Consider the fine-grained sections
-            for fine_section in fine_sections:
-                add_or_update_section(fine_section)
-            
-        # If no header sections were found, process the entire text as one block
-        if not header_sections and text.strip():
-            fine_sections = self.extract_fine_grained_sections(
-                text,
-                title="",  # No title if no headers
-                start_idx=0,
-                end_idx=len(text.split("\n")) -1,
-                max_section_length=max_section_length
-            )
-            for fine_section in fine_sections:
-                add_or_update_section(fine_section)
-        
-        # Return the unique sections stored in the map values
-        return list(content_map.values())
+
+        return all_chunks

@@ -178,9 +178,11 @@ export NGROK_AUTHTOKEN=<your-ngrok-api-key>
 Then you have two options:
 
 1. We use a docker container to run ngrok, you can run it yourself:
+You need to get a development URL from ngrok and set it in the NGROK_URL environment variable.
 ```bash
+export NGROK_URL=<your-ngrok-development-url>
 docker pull ngrok/ngrok
-docker run --net=host -it -e NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN ngrok/ngrok:latest http --url=believably-graphitic-ann.ngrok-free.dev 80
+docker run --net=host -it -e NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN ngrok/ngrok:latest http --url=$NGROK_URL 8009
 ```
 
 2. You can use the one configured in the docker-compose.yml file:
