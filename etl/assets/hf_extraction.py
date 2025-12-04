@@ -93,6 +93,7 @@ def hf_raw_models_latest(run_folder: str) -> Tuple[Optional[pd.DataFrame], str]:
         num_models=config.num_models,
         update_recent=config.update_recent,
         threads=config.threads,
+        offset=config.offset,
         output_root=output_root,
     )
     

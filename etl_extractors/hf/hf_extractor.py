@@ -51,11 +51,15 @@ class HFExtractor:
         num_models: int = 50,
         update_recent: bool = True,
         threads: int = 4,
+        offset: int = 0,
         output_root: Path | None = None,
         save_csv: bool = False,
     ) -> (pd.DataFrame, Path):
         df = self.models_client.get_model_metadata_dataset(
-            update_recent=update_recent, limit=num_models, threads=threads
+            update_recent=update_recent,
+            limit=num_models,
+            threads=threads,
+            offset=offset,
         )
         json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="hf_models")
         return df, json_path

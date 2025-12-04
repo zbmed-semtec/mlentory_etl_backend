@@ -26,7 +26,11 @@ class HFModelsClient:
         self.api = HfApi(token=api_token) if api_token else HfApi()
 
     def get_model_metadata_dataset(
-        self, update_recent: bool = True, limit: int = 5, threads: int = 4
+        self,
+        update_recent: bool = True,
+        limit: int = 5,
+        threads: int = 4,
+        offset: int = 0,
     ) -> pd.DataFrame:
         try:
             logger.info("Loading models from HuggingFace dataset")
@@ -39,13 +43,32 @@ class HFModelsClient:
 
             if update_recent:
                 latest_modification = dataset["last_modified"].max()
-                recent_models = self.get_recent_models_metadata(limit, latest_modification, threads)
+                recent_models = self.get_recent_models_metadata(
+                    limit, latest_modification, threads
+                )
                 dataset = pd.concat([dataset, recent_models], ignore_index=True)
-                dataset = dataset.drop_duplicates(subset=["modelId"], keep="last")
+                if "modelId" in dataset.columns:
+                    dataset = dataset.drop_duplicates(subset=["modelId"], keep="last")
+
+            # Always sort by last modification time when available so that
+            # pagination via ``offset`` is deterministic.
+            if "last_modified" in dataset.columns:
                 dataset = dataset.sort_values("last_modified", ascending=False)
 
             dataset = self.filter_models(dataset)
-            dataset = dataset[: min(limit, len(dataset))]
+
+            # Normalize pagination parameters
+            if offset < 0:
+                offset = 0
+            if limit < 0:
+                limit = 0
+
+            if limit == 0 or offset >= len(dataset):
+                # Return an empty dataframe with the same columns
+                return dataset.iloc[0:0]
+
+            end_index = offset + limit if limit > 0 else None
+            dataset = dataset.iloc[offset:end_index]
             return dataset
         except Exception as exc:  # noqa: BLE001
             raise Exception(
