@@ -81,7 +81,7 @@ class ElasticsearchService(FacetedSearchMixin):
         response = search[from_offset:from_offset + page_size].execute()
 
         # Convert to ModelListItem objects
-        models = []
+        models: List[ModelListItem] = []
         for hit in response:
             model = ModelListItem(
                 db_identifier=hit.db_identifier,
@@ -91,6 +91,7 @@ class ElasticsearchService(FacetedSearchMixin):
                 license=hit.license,
                 mlTask=hit.ml_tasks or [],  # Note: ES field is snake_case, but schema uses camelCase
                 keywords=hit.keywords or [],
+                datasets=getattr(hit, "datasets", None) or [],
                 platform=hit.platform or "Unknown",
             )
             models.append(model)
@@ -128,6 +129,7 @@ class ElasticsearchService(FacetedSearchMixin):
             license=hit.license,
             mlTask=hit.ml_tasks or [],  # Note: ES field is snake_case, but schema uses camelCase
             keywords=hit.keywords or [],
+            datasets=getattr(hit, "datasets", None) or [],
             platform=hit.platform or "Unknown",
         )
 
