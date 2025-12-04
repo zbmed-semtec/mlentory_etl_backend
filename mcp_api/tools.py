@@ -295,7 +295,7 @@ def get_model_detail(
         model_dict = {
             "identifier": [model.db_identifier],
             "name": model.name,
-            "description": model.description,
+            "description": _clean_description((model.description)),
             "sharedBy": model.sharedBy,
             "license": model.license,
             "mlTask": model.mlTask,
