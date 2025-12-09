@@ -135,45 +135,33 @@ lint: format typecheck ## Run all linting and formatting
 
 ##@ ETL Operations
 
-extract: ## Run extraction for a specific source (usage: make extract SOURCE=huggingface)
-	@if [ -z "$(SOURCE)" ]; then \
-		echo "$(YELLOW)Please specify SOURCE, e.g., make extract SOURCE=huggingface$(NC)"; \
-		exit 1; \
-	fi
+extract: ## Run extraction for all sources
 	@echo "$(BLUE)Running extraction for $(SOURCE)...$(NC)"
-	docker compose exec dagster-webserver dagster asset materialize --select extract_$(SOURCE)
+	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="extract"' -f ./etl/repository.py
 
-transform: ## Run transformation for a specific source (usage: make transform SOURCE=huggingface)
-	@if [ -z "$(SOURCE)" ]; then \
-		echo "$(YELLOW)Please specify SOURCE, e.g., make transform SOURCE=huggingface$(NC)"; \
-		exit 1; \
-	fi
+transform: ## Run transformation for all sources
 	@echo "$(BLUE)Running transformation for $(SOURCE)...$(NC)"
-	docker compose exec dagster-webserver dagster asset materialize --select transform_$(SOURCE)
+	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="transform"' -f ./etl/repository.py
 
-load: ## Run loading for a specific source (usage: make load SOURCE=huggingface)
-	@if [ -z "$(SOURCE)" ]; then \
-		echo "$(YELLOW)Please specify SOURCE, e.g., make load SOURCE=huggingface$(NC)"; \
-		exit 1; \
-	fi
+load: ## Run loading for all sources
 	@echo "$(BLUE)Running loading for $(SOURCE)...$(NC)"
-	docker compose exec dagster-webserver dagster asset materialize --select load_$(SOURCE)
+	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="load"' -f ./etl/repository.py
 
 etl-run: ## Run full ETL pipeline for all sources
 	@echo "$(BLUE)Running full ETL pipeline...$(NC)"
-	docker compose exec dagster-webserver dagster job execute -j etl_pipeline
+	docker exec mlentory-dagster-webserver dagster asset materialize -f ./etl/repository.py
 
-hf-etl: ## Run HuggingFace ETL pipeline (all assets tagged with pipeline:hf_etl)
+hf-etl: ## Run HuggingFace ETL pipeline (all assets tagged with "pipeline"="hf_etl")
 	@echo "$(BLUE)Running HuggingFace ETL pipeline...$(NC)"
-	docker compose exec dagster-webserver dagster asset materialize -t pipeline:hf_etl
+	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"pipeline"="hf_etl"' -f ./etl/repository.py
 
-run-by-tag: ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline:hf_etl")
+run-by-tag: ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline"="hf_etl")
 	@if [ -z "$(TAG)" ]; then \
 		echo "$(YELLOW)Please specify TAG, e.g., make run-by-tag TAG=\"pipeline:hf_etl\"$(NC)"; \
 		exit 1; \
 	fi
 	@echo "$(BLUE)Running assets with tag $(TAG)...$(NC)"
-	docker compose exec dagster-webserver dagster asset materialize -t $(TAG)
+	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:$(TAG)' -f ./etl/repository.py
 
 ##@ Setup
 
