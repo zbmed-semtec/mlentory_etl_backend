@@ -116,4 +116,47 @@ def create_elasticsearch_client(cfg: Optional[ElasticsearchConfig] = None) -> El
     return es
 
 
+def clean_index(
+    index_name: str,
+    cfg: Optional[ElasticsearchConfig] = None,
+) -> Dict[str, Any]:
+    """Remove all documents from an Elasticsearch index.
+
+    This keeps the index and its mappings/settings but deletes all
+    documents via a ``delete_by_query`` on ``match_all``.
+
+    Args:
+        index_name: Name of the index to clean.
+        cfg: Optional ElasticsearchConfig. If None, loads from env.
+
+    Returns:
+        A dictionary with basic statistics about the clean operation.
+    """
+    config = cfg or ElasticsearchConfig.from_env()
+    es = create_elasticsearch_client(config)
+
+    if not es.indices.exists(index=index_name):
+        logger.warning("Elasticsearch index %s does not exist; nothing to clean", index_name)
+        return {
+            "index": index_name,
+            "deleted": 0,
+            "result": "index_not_found",
+        }
+
+    logger.info("Cleaning Elasticsearch index: %s", index_name)
+    response = es.delete_by_query(
+        index=index_name,
+        body={"query": {"match_all": {}}},
+        refresh=True,
+        conflicts="proceed",
+    )
+
+    deleted = int(response.get("deleted", 0))
+    logger.info("Cleaned Elasticsearch index %s; deleted %s documents", index_name, deleted)
+
+    return {
+        "index": index_name,
+        "deleted": deleted,
+        "result": "ok",
+    }
 

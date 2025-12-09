@@ -28,7 +28,11 @@ from etl_loaders.hf_rdf_loader import (
     build_and_persist_languages_rdf,
     build_and_persist_defined_terms_rdf,
 )
-from etl_loaders.hf_index_loader import index_hf_models
+from etl_loaders.hf_index_loader import (
+    index_hf_models, 
+    check_elasticsearch_connection, 
+    clean_hf_models_index,
+)
 from etl_loaders.metadata_graph import (
     ensure_metadata_graph_constraints,
     cleanup_metadata_graph,
@@ -200,17 +204,59 @@ def hf_load_models_to_neo4j(
     
     return (str(rdf_report_path), normalized_folder)
 
+@asset(
+    group_name="hf_loading",
+    tags={"pipeline": "hf_etl", "stage": "index"}
+)
+def hf_elasticsearch_ready() -> Dict[str, Any]:
+    """
+    Verify Elasticsearch is configured and ready.
+    
+    Checks Elasticsearch connection and cluster health.
+    Returns connection status and cluster info that downstream assets can depend on.
+    
+    Returns:
+        Dict with connection status, cluster info, and index configuration.
+        
+    Raises:
+        ConnectionError: If Elasticsearch is not reachable.
+    """
+    logger.info("Checking Elasticsearch readiness...")
+    
+    try:
+        status = check_elasticsearch_connection()
+        
+        # clean_hf_models_index()
+        
+        logger.info(
+            "Elasticsearch ready: cluster=%s, status=%s, nodes=%s, index=%s",
+            status["cluster_name"],
+            status["cluster_status"],
+            status["number_of_nodes"],
+            status["hf_models_index"],
+        )
+        return status
+    except ConnectionError as e:
+        logger.error(f"Elasticsearch connection failed: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error checking Elasticsearch: {e}", exc_info=True)
+        raise
 
 @asset(
     group_name="hf_loading",
     ins={
         "normalized_models": AssetIn("hf_models_normalized"),
+        "translation_mapping": AssetIn("hf_create_translation_mapping"),
+        "es_ready": AssetIn("hf_elasticsearch_ready"),
     },
     tags={"pipeline": "hf_etl", "stage": "index"},
 )
 def hf_index_models_elasticsearch(
     normalized_models: Tuple[str, str],
-) -> Dict[str, Any]:
+    translation_mapping: str,
+    es_ready: Dict[str, Any],
+) -> str:
     """Index normalized HF models into Elasticsearch for search.
 
     This asset reads the normalized HF FAIR4ML models JSON (`mlmodels.json`)
@@ -222,12 +268,17 @@ def hf_index_models_elasticsearch(
 
     Args:
         normalized_models: Tuple of (mlmodels_json_path, normalized_folder)
+        translation_mapping: Path to translation mapping JSON file
+        es_ready: Elasticsearch readiness status from hf_elasticsearch_ready
 
     Returns:
         Dictionary of indexing statistics (models_indexed, errors, index, input_file).
     """
     mlmodels_json_path, normalized_folder = normalized_models
-
+    rdf_base_folder = Path(normalized_folder).parent.parent.parent / "3_rdf" / "hf"
+    rdf_run_folder = rdf_base_folder / Path(normalized_folder).name
+    translation_mapping_path = translation_mapping
+    
     logger.info(
         "Indexing normalized HF models into Elasticsearch from %s "
         "(normalized_folder=%s)",
@@ -235,10 +286,18 @@ def hf_index_models_elasticsearch(
         normalized_folder,
     )
 
-    stats = index_hf_models(json_path=mlmodels_json_path)
+    stats = index_hf_models(json_path=mlmodels_json_path, translation_mapping_path=translation_mapping_path)
     stats["normalized_folder"] = normalized_folder
-    return stats
-
+    stats["cluster_name"] = es_ready.get("cluster_name")
+    stats["rdf_run_folder"] = str(rdf_run_folder)
+    
+    elasticsearch_report_path = rdf_run_folder / "elasticsearch_report.json"
+    with open(elasticsearch_report_path, 'w', encoding='utf-8') as f:
+        json.dump(stats, f, indent=2, ensure_ascii=False)
+    logger.info(f"Elasticsearch report saved to: {elasticsearch_report_path}")
+    
+    return str(elasticsearch_report_path)
+    
 
 @asset(
     group_name="hf_loading",

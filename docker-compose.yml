@@ -3,10 +3,15 @@ version: '3.8'
 services:
   # =============================================================================
   # Core Infrastructure Services
+  # Any modification to this file has an impact on the following:
+  # - documentation (Relevant README.md),
+  # - the .env file or the .env.example file,
+  # - the Makefile, and
+  # - the other Docker files.
   # =============================================================================
   
   neo4j:
-    profiles: ["etl", "api", "complete"]
+    profiles: ["etl", "api", "complete", "mcp"]
     image: neo4j:${NEO4J_VERSION:-5.14.0}
     container_name: mlentory-neo4j
     ports:
@@ -33,7 +38,7 @@ services:
       start_period: 40s
 
   elasticsearch:
-    profiles: ["etl", "api", "complete"]
+    profiles: ["etl", "api", "complete", "mcp"]
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.2
     container_name: mlentory-elasticsearch
     ports:
@@ -147,6 +152,48 @@ services:
       - elasticsearch
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # =============================================================================
+  # MLentory MCP API
+  # =============================================================================
+
+  mcp-api:
+    profiles: ["mcp"]
+    build:
+      context: .
+      dockerfile: mcp_api/Dockerfile
+    container_name: mlentory-mcp-api
+    env_file:
+      - .env
+    volumes:
+      - ./mcp_api:/app/mcp_api
+      - ./api:/app/api
+      - ./etl_loaders:/app/etl_loaders
+      - ./etl_extractors:/app/etl_extractors
+      - ./schemas:/app/schemas
+    networks:
+      - mlentory-network
+    depends_on:
+      - neo4j
+      - elasticsearch
+    ports:
+      - "8009:8009"
+    stdin_open: true  # Keep stdin open for MCP stdio communication
+    tty: true         # Allocate a pseudo-TTY
+    command: python -m mcp_api.server
+
+  ngrok:
+    profiles: ["mcp"]
+    image: ngrok/ngrok:latest
+    container_name: mlentory-ngrok
+    # ports:
+    #   - "80:80"
+    environment:
+      - NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN
+    command: http --url=$NGROK_URL mlentory-mcp-api:8009
+    # network:
+    #   - host
+    networks:
+      - mlentory-network
 # =============================================================================
 # Networks
 # =============================================================================

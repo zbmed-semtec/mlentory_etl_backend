@@ -6,7 +6,7 @@ This module defines the Pydantic models for batch entity property retrieval.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -45,3 +45,30 @@ class EntityBatchResponse(BaseModel):
         default_factory=dict
     )
 
+
+class RelatedEntitiesResponse(BaseModel):
+    """Response model for related entities by prefix lookup."""
+
+    count: int = Field(description="Total number of related entities found")
+    related_entities: Dict[str, Dict[str, List[str]]] = Field(
+        description="Map of Entity URI -> { Property/Relationship Name -> List[Values] }",
+        default_factory=dict
+    )
+
+class EntityURIResponse(BaseModel):
+    """Response model for entity name to URI lookup."""
+    
+    uri: str = Field(description="Entity URI")
+    name: Optional[str] = Field(default=None, description="Entity name")
+    entity_types: List[str] = Field(default_factory=list, description="Entity type labels")
+
+
+class RelatedModelsResponse(BaseModel):
+    """Response model for models related to an entity."""
+    
+    entity_uri: str = Field(description="The entity URI that was queried")
+    models: List[Dict[str, Any]] = Field(
+        description="List of related models with their properties and relationship types",
+        default_factory=list
+    )
+    count: int = Field(description="Total number of related models")

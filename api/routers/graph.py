@@ -12,8 +12,9 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from api.schemas.entities import EntityBatchRequest, EntityBatchResponse
-from api.schemas.graph import GraphResponse
+from api.schemas.entities import EntityBatchRequest, EntityBatchResponse, RelatedEntitiesResponse, EntityURIResponse, RelatedModelsResponse
+
+from api.schemas.graph import GraphResponse, GroupedFacetValuesResponse
 from api.services.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,82 @@ async def get_entities_batch(request: EntityBatchRequest) -> EntityBatchResponse
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/graph/related_entities", response_model=RelatedEntitiesResponse)
+async def get_related_entities(
+    entity_ids: List[str] = Query(
+        ...,
+        description="List of entity IDs to fetch related entities for"
+    )
+) -> RelatedEntitiesResponse:
+    """
+    🔗 Fetch related entities by entity IDs.
+
+    This endpoint retrieves all properties and relationships for the given entity IDs.
+    Plus the neighboring entities for each entity.
+
+    **Parameters:**
+    - `entity_ids`: List of entity IDs (can be compact IDs or full URIs)
+
+    **Response:**
+    - `related_entities`: Map of URI -> {property/relation: [values]}
+    - `count`: Total number of entities found
+
+    **Example:**
+    ```
+    GET /api/v1/entities/related_by_prefix?entity_ids=model_123&entity_ids=model_456
+    ```
+    """
+    try:
+        logger.info(f"Fetching related entities for {len(entity_ids)} entity IDs")
+        
+        related_data = graph_service.get_related_entities(entity_ids=entity_ids)
+        
+        return RelatedEntitiesResponse(
+            count=len(related_data),
+            related_entities=related_data
+        )
+
+    except Exception as e:
+        logger.error(f"Error in related entities fetch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/graph/grouped_facet_values", response_model=GroupedFacetValuesResponse)
+async def grouped_facet_values(entity_type: List = Query(
+    ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy", "fair4ml__trainedOn", "fair4ml__testedOn", "fair4ml__validatedOn", "fair4ml__evaluatedOn"], 
+    description="Entity type to list"
+)) -> GroupedFacetValuesResponse:
+    """
+    📋 List all entities grouped by relationship type.
+
+    Retrieves a list of entities in the graph filtered by the given relationship
+    types to `fair4ml__MLModel` nodes. Entities are grouped by normalized
+    relationship keys (e.g., "keywords", "mlTask", "license", "sharedBy", "datasets").
+
+    Args:
+        entity_type: A list of relationship types to include. Defaults to
+            ["fair4ml__mlTask", "schema__keywords", "schema__license", "fair4ml__sharedBy",
+            "fair4ml__trainedOn", "fair4ml__testedOn",
+            "fair4ml__validatedOn", "fair4ml__evaluatedOn"].
+
+    Returns:
+        GroupedFacetValuesResponse: Contains facets (grouped entities by relationship type)
+        and the total count of entities returned.
+    """
+    try:
+        grouped_facet_values, total_count = graph_service.grouped_facet_values(entity_type=entity_type)
+        
+        return GroupedFacetValuesResponse(
+            facets=grouped_facet_values,
+            count=total_count
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing entities: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @router.get("/graph/{entity_id}", response_model=GraphResponse)
 async def get_entity_graph(
     entity_id: str,
@@ -91,7 +168,7 @@ async def get_entity_graph(
 
     **Example:**
     ```
-    GET /api/v1/graph/https%3A%2F%2Fw3id.org%2Fmlentory%2Fmodel%2F123?depth=2&direction=outgoing
+    GET /api/v1/graph/123abc?depth=2&direction=outgoing
     ```
     """
     try:
@@ -107,12 +184,16 @@ async def get_entity_graph(
         )
         
         graph_data = graph_service.get_entity_graph(
-            entity_uri=entity_id,
+            entity_id=entity_id,
             depth=depth,
             relationships=relationships,
             direction=direction,
             entity_label=entity_type,
         )
+        
+        logger.info("\n--------------------------------\n")
+        logger.info(f"Graph data: {graph_data}")
+        logger.info("\n--------------------------------\n")
         
         if not graph_data.nodes:
             # Check if it's just because the entity doesn't exist vs having no neighbors
@@ -129,3 +210,82 @@ async def get_entity_graph(
         logger.error(f"Error retrieving graph: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@router.get("/graph/entities/get_entity_uri", response_model=EntityURIResponse)
+async def find_entity_uri_by_name(
+    name: str = Query(..., description="Entity name to search for (exact match, case-insensitive)")
+) -> EntityURIResponse:
+    """
+    🔍 Find entity URI by name.
+    
+    Searches for an entity by its exact name (case-insensitive) and returns its URI.
+    
+    **Parameters:**
+    - `name`: The entity name to search for
+    
+    **Response:**
+    - `uri`: The entity URI
+    - `name`: The entity name
+    - `entity_types`: List of entity type labels
+    
+    **Example:**
+        """
+    try:
+        result = graph_service.find_entity_uri_by_name(entity_name=name)
+        
+        if not result:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Entity with name '{name}' not found"
+            )
+        
+        return EntityURIResponse(
+            uri=result["uri"],
+            name=result.get("name"),
+            entity_types=result.get("entity_types", [])
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finding entity URI by name: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/graph/entities/related_models", response_model=RelatedModelsResponse)
+async def get_models_by_entity_uri(
+    entity_uri: str = Query(
+        ...,
+        description="The full entity URI to find related models for "
+        "(e.g. 'https://w3id.org/mlentory/mlentory_graph/<entity-id>')",
+    )
+) -> RelatedModelsResponse:
+    """
+    📋 Get all models related to an entity.
+    
+    Retrieves all ML models that are connected to the given entity URI via any relationship.
+    
+    **Parameters:**
+    - `entity_uri`: The entity URI to find related models for
+    
+    **Response:**
+    - `entity_uri`: The queried entity URI
+    - `models`: List of related models with properties and relationship types
+    - `count`: Total number of related models
+
+    **Example:**
+    ```
+    GET /api/v1/entities/related_models?entity_uri=https://w3id.org/mlentory/mlentory_graph/fd5b71...
+    ```
+    """
+    try:
+        models = graph_service.get_models_by_entity_uri(entity_uri=entity_uri)
+        
+        return RelatedModelsResponse(
+            entity_uri=entity_uri,
+            models=models,
+            count=len(models)
+        )
+    
+    except Exception as e:
+        logger.error(f"Error getting models for entity URI: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")

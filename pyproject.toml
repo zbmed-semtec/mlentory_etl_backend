@@ -6,9 +6,9 @@ authors = ["MLentory Team"]
 readme = "README.md"
 packages = [
     { include = "etl" },
-    { include = "extractors" },
-    { include = "transformers" },
-    { include = "loaders" },
+    { include = "etl_extractors" },
+    { include = "etl_transformers" },
+    { include = "etl_loaders" },
     { include = "schemas" }
 ]
 
@@ -43,6 +43,10 @@ pycountry = "^24.5.0"
 elasticsearch-dsl = "^8.0.0"
 fastapi = "^0.104.0"
 uvicorn = {extras = ["standard"], version = "^0.24.0"}
+mistune = "^3.0.2"
+graphviz = "^0.20.3"
+html-to-markdown = "^2.9.0"
+spacy = "^3.8.0"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

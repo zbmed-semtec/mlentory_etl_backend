@@ -793,14 +793,14 @@ def create_triple(graph: Graph, subject: URIRef, predicate: URIRef, value: Any, 
     # Check if it's an IRI
     if LoadHelpers.is_iri(value_str):
         graph.add((subject, predicate, URIRef(value_str)))
-        logger.debug(f"Added IRI triple: <{subject}> <{predicate}> <{value_str}>")
+        # logger.debug(f"Added IRI triple: <{subject}> <{predicate}> <{value_str}>")
     else:
         # Add as literal
         if datatype:
             graph.add((subject, predicate, Literal(value_str, datatype=datatype)))
         else:
             graph.add((subject, predicate, Literal(value_str, datatype=XSD.string)))
-        logger.debug(f"Added literal triple: <{subject}> <{predicate}> \"{value_str}\"")
+        # logger.debug(f"Added literal triple: <{subject}> <{predicate}> \"{value_str}\"")
     
     return True
 

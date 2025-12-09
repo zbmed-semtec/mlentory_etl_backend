@@ -109,9 +109,9 @@ async def search_models_with_facets(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(50, ge=1, le=1000, description="Results per page (max 1000)"),
     facets: str = Query(
-        '["mlTask", "license", "keywords", "platform"]',
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
         description="JSON array of facet field names to aggregate",
-        examples=['["mlTask", "license", "keywords"]'],
+        examples=['["mlTask", "license", "keywords", "datasets"]'],
     ),
     facet_size: int = Query(20, ge=1, le=100, description="Maximum values per facet (max 100)"),
     facet_query: str = Query(
@@ -321,6 +321,7 @@ async def get_facet_values(
     - `mlTask` - ML tasks
     - `license` - Licenses
     - `keywords` - Keywords/tags
+    - `datasets` - Datasets the model was trained/validated on
     - `sharedBy` - Model authors/organizations
     - `platform` - Hosting platforms
     """
@@ -364,7 +365,7 @@ async def get_model_detail(
     model_id: str,
     resolve_properties: List[str] = Query(
         [],
-        description="List of properties/relationships to resolve as full entities (e.g., 'HAS_LICENSE', 'author')",
+        description="List of properties/relationships to resolve as full entities (e.g., 'schema__DefinedTerm', 'schema__author')",
         examples=["HAS_LICENSE", "author", "dataset"],
     ),
 ) -> ModelDetail:

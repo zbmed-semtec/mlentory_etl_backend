@@ -48,7 +48,7 @@ def _read_model_ids_from_file(file_path: str) -> List[str]:
     return model_ids
 
 
-@asset(group_name="hf", tags={"pipeline": "hf_etl"})
+@asset(group_name="hf", tags={"pipeline": "hf_etl", "stage": "extract"})
 def hf_run_folder() -> str:
     """
     Create a unique run folder for this materialization.
@@ -73,7 +73,7 @@ def hf_run_folder() -> str:
 @asset(
     group_name="hf",
     ins={"run_folder": AssetIn("hf_run_folder")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_raw_models_latest(run_folder: str) -> Tuple[Optional[pd.DataFrame], str]:
     """
@@ -93,6 +93,7 @@ def hf_raw_models_latest(run_folder: str) -> Tuple[Optional[pd.DataFrame], str]:
         num_models=config.num_models,
         update_recent=config.update_recent,
         threads=config.threads,
+        offset=config.offset,
         output_root=output_root,
     )
     
@@ -106,7 +107,7 @@ def hf_raw_models_latest(run_folder: str) -> Tuple[Optional[pd.DataFrame], str]:
 @asset(
     group_name="hf",
     ins={"run_folder": AssetIn("hf_run_folder")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_raw_models_from_file(run_folder: str) -> Tuple[Optional[pd.DataFrame], str]:
     """
@@ -149,7 +150,7 @@ def hf_raw_models_from_file(run_folder: str) -> Tuple[Optional[pd.DataFrame], st
         "latest_data": AssetIn("hf_raw_models_latest"),
         "file_data": AssetIn("hf_raw_models_from_file"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_raw_models(
     latest_data: Tuple[Optional[pd.DataFrame], str],
@@ -209,7 +210,7 @@ def hf_raw_models(
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_raw_models")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_add_ancestor_models(models_data: Tuple[str, str]) -> Tuple[str, str]:
     """
@@ -249,7 +250,7 @@ def hf_add_ancestor_models(models_data: Tuple[str, str]) -> Tuple[str, str]:
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_identified_datasets(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
@@ -274,7 +275,7 @@ def hf_identified_datasets(models_data: Tuple[str, str]) -> Tuple[Dict[str, List
 @asset(
     group_name="hf_enrichment",
     ins={"datasets_data": AssetIn("hf_identified_datasets")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_datasets(datasets_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
@@ -317,7 +318,7 @@ def hf_enriched_datasets(datasets_data: Tuple[Dict[str, List[str]], str]) -> str
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_identified_articles(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
@@ -342,7 +343,7 @@ def hf_identified_articles(models_data: Tuple[str, str]) -> Tuple[Dict[str, List
 @asset(
     group_name="hf_enrichment",
     ins={"articles_data": AssetIn("hf_identified_articles")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_articles(articles_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
@@ -393,7 +394,7 @@ def hf_enriched_articles(articles_data: Tuple[Dict[str, List[str]], str]) -> str
             "tasks_mapping": AssetIn("hf_identified_tasks"),
             "models_data": AssetIn("hf_add_ancestor_models")
             },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_identified_keywords(datasets_mapping: Tuple[Dict[str, List[str]], str],
                            articles_mapping: Tuple[Dict[str, List[str]], str],
@@ -441,7 +442,7 @@ def hf_identified_keywords(datasets_mapping: Tuple[Dict[str, List[str]], str],
 @asset(
     group_name="hf_enrichment",
     ins={"keywords_data": AssetIn("hf_identified_keywords")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_keywords(keywords_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
@@ -483,7 +484,7 @@ def hf_enriched_keywords(keywords_data: Tuple[Dict[str, List[str]], str]) -> str
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_identified_licenses(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
@@ -508,7 +509,7 @@ def hf_identified_licenses(models_data: Tuple[str, str]) -> Tuple[Dict[str, List
 @asset(
     group_name="hf_enrichment",
     ins={"licenses_data": AssetIn("hf_identified_licenses")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_licenses(licenses_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
@@ -548,7 +549,7 @@ def hf_enriched_licenses(licenses_data: Tuple[Dict[str, List[str]], str]) -> str
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_identified_base_models(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
@@ -574,7 +575,7 @@ def hf_identified_base_models(models_data: Tuple[str, str]) -> Tuple[Dict[str, L
         "base_models_data": AssetIn("hf_identified_base_models"),
         "ancestor_models": AssetIn("hf_add_ancestor_models"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_base_models(
     base_models_data: Tuple[Dict[str, List[str]], str],
@@ -662,7 +663,7 @@ def hf_enriched_base_models(
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_identified_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
@@ -686,7 +687,7 @@ def hf_identified_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, Lis
 @asset(
     group_name="hf_enrichment",
     ins={"languages_data": AssetIn("hf_identified_languages")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> str:
     """
@@ -728,7 +729,7 @@ def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> s
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_identified_tasks(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
@@ -753,7 +754,7 @@ def hf_identified_tasks(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[st
 @asset(
     group_name="hf_enrichment",
     ins={"tasks_data": AssetIn("hf_identified_tasks")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_tasks(tasks_data: Tuple[Dict[str, List[str]], str]) -> str:
     """

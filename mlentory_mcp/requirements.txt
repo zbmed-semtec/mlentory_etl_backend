@@ -1,0 +1,8 @@
+fastmcp==2.11.3
+mcp==1.22.0
+httpx==0.28.1
+anyio
+fastapi
+uvicorn
+cyclopts>=5.0.0a1
+spacy==3.5.3
