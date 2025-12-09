@@ -1,7 +1,7 @@
 site_name: MLentory Documentation
 site_description: Comprehensive documentation for MLentory ETL pipeline and Backend API
 site_author: MLentory Team
-site_url: https://mlentory.github.io/docs
+site_url: https://zbmed-semtec.github.io/mlentory_etl_backend/
 
 repo_name: mlentory/etl-backend
 repo_url: https://github.com/zbmed-semtec/mlentory_etl_backend/
