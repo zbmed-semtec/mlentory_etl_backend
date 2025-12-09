@@ -140,7 +140,7 @@ def _write_normalization_results(
 @asset(
     group_name="hf_transformation",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_normalized_run_folder(models_data: Tuple[str, str]) -> Tuple[str, str]:
     """
@@ -173,7 +173,7 @@ def hf_normalized_run_folder(models_data: Tuple[str, str]) -> Tuple[str, str]:
     ins={
         "models_data": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_extract_basic_properties(
     models_data: Tuple[str, str],
@@ -257,7 +257,7 @@ def hf_extract_basic_properties(
         "tasks_mapping": AssetIn("hf_identified_tasks"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_entity_linking(
     datasets_mapping: Tuple[Dict[str, List[str]], str],
@@ -335,7 +335,7 @@ def hf_entity_linking(
         "tasks_json": AssetIn("hf_tasks_normalized"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_create_translation_mapping(
     datasets_json: str,
@@ -462,7 +462,7 @@ def hf_create_translation_mapping(
         "basic_properties": AssetIn("hf_extract_basic_properties"),
         "entity_linking": AssetIn("hf_entity_linking"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_models_normalized(
     models_data: Tuple[str, str],
@@ -647,7 +647,7 @@ def validate_model_schemas(merged_schemas: List[Dict[str, Any]]) -> Tuple[List[D
         "articles_json": AssetIn("hf_enriched_articles"),
         "run_folder": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_articles_normalized(
     articles_json: str,
@@ -836,7 +836,7 @@ def hf_articles_normalized(
         "licenses_json": AssetIn("hf_enriched_licenses"),
         "run_folder": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_licenses_normalized(
     licenses_json: str,
@@ -980,7 +980,7 @@ def hf_licenses_normalized(
         "datasets_json": AssetIn("hf_enriched_datasets"),
         "run_folder": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_datasets_normalized(
     datasets_json: str,
@@ -1145,7 +1145,7 @@ def hf_datasets_normalized(
         "tasks_json": AssetIn("hf_enriched_tasks"),
         "run_folder": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_tasks_normalized(
     tasks_json: str,
@@ -1279,7 +1279,7 @@ def hf_tasks_normalized(
         "languages_json": AssetIn("hf_enriched_languages"),
         "run_folder": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_languages_normalized(
     languages_json: str,
@@ -1392,7 +1392,7 @@ def hf_languages_normalized(
         "keywords_json": AssetIn("hf_enriched_keywords"),
         "run_folder": AssetIn("hf_normalized_run_folder"),
     },
-    tags={"pipeline": "hf_etl"}
+    tags={"pipeline": "hf_etl", "stage": "transform"}
 )
 def hf_keywords_normalized(
     keywords_json: str,
