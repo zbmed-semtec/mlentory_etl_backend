@@ -47,7 +47,7 @@ TRIVIAL_TOKENS = {"model", "models", "task", "tasks", "dataset", "datasets", "ex
 VALID_POS = {"NOUN", "PROPN", "ADJ"}
 
 
-def _clean_description(description: Optional[str], max_section_length: int = 300) -> Optional[str]:
+def _clean_description(description: Optional[str], max_section_length: int = 300, min_section_words: int = 20) -> Optional[str]:
     """
     Clean and format model description by removing tables/lists and truncating long sections.
     
@@ -189,7 +189,7 @@ def search_models(
             {
                 "db_identifier": model.db_identifier,
                 "name": model.name,
-                "description": _clean_description(model.description),
+                "description": _clean_description(model.description, min_section_words=5),
                 "sharedBy": model.sharedBy,
                 "license": model.license,
                 "mlTask": model.mlTask,
@@ -295,7 +295,7 @@ def get_model_detail(
         model_dict = {
             "identifier": [model.db_identifier],
             "name": model.name,
-            "description": _clean_description((model.description)),
+            "description": _clean_description((model.description), min_section_words=5),
             "sharedBy": model.sharedBy,
             "license": model.license,
             "mlTask": model.mlTask,
@@ -379,8 +379,15 @@ def get_schema_name_definitions(properties: Optional[List[str]] = None) -> Dict[
     all_schema_properties = MLModel.model_fields.keys()
     try:
         
-        if not properties:
-            return all_schema_properties
+        if not properties or len(properties) == 0:
+            for property in all_schema_properties:
+                alias = MLModel.model_fields[property].alias
+                description = MLModel.model_fields[property].description
+                result[property] = {
+                    "alias": alias or "",
+                    "description": description or "",
+                }
+            return result
         
         for property in properties:
             if property in all_schema_properties:
