@@ -18,6 +18,8 @@ import pandas as pd
 from .clients import (
     OpenMLRunsClient,
     OpenMLDatasetsClient,
+    OpenMLFlowsClient,
+    OpenMLTasksClient,
 )
 from .scrapers import OpenMLWebScraper
 
@@ -36,6 +38,8 @@ class OpenMLExtractor:
         self,
         runs_client: Optional[OpenMLRunsClient] = None,
         datasets_client: Optional[OpenMLDatasetsClient] = None,
+        flows_client: Optional[OpenMLFlowsClient] = None,
+        tasks_client: Optional[OpenMLTasksClient] = None,
         enable_scraping: bool = False,
     ) -> None:
         """
@@ -63,6 +67,8 @@ class OpenMLExtractor:
         self.datasets_client = datasets_client or OpenMLDatasetsClient(
             scraper=self.scraper
         )
+        self.flows_client = flows_client or OpenMLFlowsClient()
+        self.tasks_client = tasks_client or OpenMLTasksClient()
 
     def extract_runs(
         self,
@@ -120,7 +126,41 @@ class OpenMLExtractor:
         )
         return df, json_path
 
-    # Flows and tasks are not extracted as separate enrichment entities anymore
+    def extract_specific_flows(
+        self,
+        flow_ids: List[int],
+        threads: int = 4,
+        output_root: Path | None = None,
+        save_csv: bool = False,
+    ) -> tuple[pd.DataFrame, Path]:
+        """
+        Extract metadata for specific flows.
+        """
+        df = self.flows_client.get_specific_flows_metadata(
+            flow_ids=flow_ids, threads=threads
+        )
+        json_path = self.save_dataframe_to_json(
+            df, output_root=output_root, save_csv=save_csv, suffix="openml_flows"
+        )
+        return df, json_path
+
+    def extract_specific_tasks(
+        self,
+        task_ids: List[int],
+        threads: int = 4,
+        output_root: Path | None = None,
+        save_csv: bool = False,
+    ) -> tuple[pd.DataFrame, Path]:
+        """
+        Extract metadata for specific tasks.
+        """
+        df = self.tasks_client.get_specific_tasks_metadata(
+            task_ids=task_ids, threads=threads
+        )
+        json_path = self.save_dataframe_to_json(
+            df, output_root=output_root, save_csv=save_csv, suffix="openml_tasks"
+        )
+        return df, json_path
 
     def save_dataframe_to_json(
         self,
