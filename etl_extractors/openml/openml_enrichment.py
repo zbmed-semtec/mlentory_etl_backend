@@ -16,6 +16,8 @@ from .openml_extractor import OpenMLExtractor
 from .entity_identifiers import (
     EntityIdentifier,
     DatasetIdentifier,
+    FlowIdentifier,
+    TaskIdentifier,
 )
 
 
@@ -39,9 +41,11 @@ class OpenMLEnrichment:
     ) -> None:
         self.extractor = extractor or OpenMLExtractor()
         
-        # Register entity identifiers (only datasets)
+        # Register entity identifiers (datasets, flows, tasks)
         self.identifiers: Dict[str, EntityIdentifier] = {
             "datasets": DatasetIdentifier(),
+            "flows": FlowIdentifier(),
+            "tasks": TaskIdentifier(),
         }
 
     def identify_related_entities(
@@ -102,6 +106,20 @@ class OpenMLEnrichment:
                 if entity_type == "datasets":
                     _, json_path = self.extractor.extract_specific_datasets(
                         dataset_ids=list(entity_ids),
+                        threads=threads,
+                        output_root=output_root,
+                    )
+                    output_paths[entity_type] = Path(json_path)
+                elif entity_type == "flows":
+                    _, json_path = self.extractor.extract_specific_flows(
+                        flow_ids=list(entity_ids),
+                        threads=threads,
+                        output_root=output_root,
+                    )
+                    output_paths[entity_type] = Path(json_path)
+                elif entity_type == "tasks":
+                    _, json_path = self.extractor.extract_specific_tasks(
+                        task_ids=list(entity_ids),
                         threads=threads,
                         output_root=output_root,
                     )
