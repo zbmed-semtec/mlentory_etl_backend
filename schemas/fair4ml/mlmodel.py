@@ -65,7 +65,8 @@ class MLModel(BaseModel):
         description="Human-readable name of the model", 
         alias="https://schema.org/name"
     )
-    url: str = Field(
+    url: Optional[str] = Field(
+        default=None,
         description="Primary URL where the model can be accessed",
         alias="https://schema.org/url"
     )
