@@ -5,13 +5,12 @@ Contains commonly used functions shared across HF extractors, enrichment, and as
 """
 
 from __future__ import annotations
-import hashlib
-import json
 from pathlib import Path
 import logging
 
 import pandas as pd
 
+from etl.utils import generate_mlentory_entity_hash_id
 
 logger = logging.getLogger(__name__)
 
@@ -143,22 +142,5 @@ class HFHelper:
 
         Returns:
             str: A SHA-256 hash of the concatenated properties (mlentory_id)
-
-        Example:
-            >>> hash_value = HFHelper.generate_mlentory_entity_hash_id('Dataset', 'squad')
-            >>> print(hash_value)
-            '8a1c0c50e3e4f0b8a9d5c9e8b7a6f5d4c3b2a1'
         """
-        # Create a sorted dictionary of properties to ensure consistent hashing
-        properties = {
-            "platform": platform,
-            "type": entity_type,
-            "id": entity_id
-        }
-
-        # Convert to JSON string to ensure consistent serialization
-        properties_str = json.dumps(properties, sort_keys=True)
-
-        # Generate SHA-256 hash
-        hash_obj = hashlib.sha256(properties_str.encode())
-        return "https://w3id.org/mlentory/mlentory_graph/"+hash_obj.hexdigest()
+        return generate_mlentory_entity_hash_id(entity_type=entity_type, entity_id=entity_id, platform=platform)
