@@ -4,7 +4,7 @@ Dagster assets for OpenML data extraction.
 This module defines a complete extraction pipeline for OpenML:
 1. Create a unique run folder
 2. Extract runs metadata
-3. Identify and extract related entities (datasets only)
+3. Identify and extract related entities (datasets, flows, tasks)
 
 All outputs are saved to /data/raw/openml/<timestamp_uuid>/ for traceability.
 """
@@ -168,6 +168,119 @@ def openml_enriched_datasets(datasets_data: Tuple[Set[int], str]) -> str:
         extractor.close()
 
 
-## Flows and tasks enrichment removed — only datasets are enriched.
+# ========== Flow Enrichment Assets ==========
 
 
+@asset(
+    group_name="openml_enrichment",
+    tags={"pipeline": "openml_etl"},
+    ins={"runs_data": AssetIn("openml_raw_runs")},
+)
+def openml_identified_flows(runs_data: Tuple[str, str]) -> Tuple[Set[int], str]:
+    """
+    Identify flow (model) references from raw OpenML runs.
+    """
+    runs_json_path, run_folder = runs_data
+    enrichment = OpenMLEnrichment()
+    runs_df = enrichment._load_runs_dataframe(runs_json_path)
+
+    flows = enrichment.identifiers["flows"].identify(runs_df)
+    logger.info("Identified %d unique flows", len(flows))
+
+    return (flows, run_folder)
+
+
+@asset(
+    group_name="openml_enrichment",
+    tags={"pipeline": "openml_etl"},
+    ins={"flows_data": AssetIn("openml_identified_flows")},
+)
+def openml_enriched_flows(flows_data: Tuple[Set[int], str]) -> str:
+    """
+    Extract metadata for identified flows (models) from OpenML.
+    """
+    flow_ids, run_folder = flows_data
+    config = get_openml_config()
+
+    extractor = OpenMLExtractor(enable_scraping=config.enable_scraping)
+
+    try:
+        if not flow_ids:
+            logger.info("No flows to extract")
+            return ""
+
+        logger.info("Extracting %d flows", len(flow_ids))
+        output_root = Path(run_folder).parent.parent  # Go up to /data
+        _, json_path = extractor.extract_specific_flows(
+            flow_ids=list(flow_ids),
+            threads=config.enrichment_threads,
+            output_root=output_root,
+        )
+
+        final_path = Path(run_folder) / "flows.json"
+        Path(json_path).rename(final_path)
+
+        logger.info("Flows saved to %s", final_path)
+        return str(final_path)
+
+    finally:
+        extractor.close()
+
+
+# ========== Task Enrichment Assets ==========
+
+
+@asset(
+    group_name="openml_enrichment",
+    tags={"pipeline": "openml_etl"},
+    ins={"runs_data": AssetIn("openml_raw_runs")},
+)
+def openml_identified_tasks(runs_data: Tuple[str, str]) -> Tuple[Set[int], str]:
+    """
+    Identify task references from raw OpenML runs.
+    """
+    runs_json_path, run_folder = runs_data
+    enrichment = OpenMLEnrichment()
+    runs_df = enrichment._load_runs_dataframe(runs_json_path)
+
+    tasks = enrichment.identifiers["tasks"].identify(runs_df)
+    logger.info("Identified %d unique tasks", len(tasks))
+
+    return (tasks, run_folder)
+
+
+@asset(
+    group_name="openml_enrichment",
+    tags={"pipeline": "openml_etl"},
+    ins={"tasks_data": AssetIn("openml_identified_tasks")},
+)
+def openml_enriched_tasks(tasks_data: Tuple[Set[int], str]) -> str:
+    """
+    Extract metadata for identified tasks from OpenML.
+    """
+    task_ids, run_folder = tasks_data
+    config = get_openml_config()
+
+    extractor = OpenMLExtractor(enable_scraping=config.enable_scraping)
+
+    try:
+        if not task_ids:
+            logger.info("No tasks to extract")
+            return ""
+
+        logger.info("Extracting %d tasks", len(task_ids))
+        output_root = Path(run_folder).parent.parent  # Go up to /data
+        _, json_path = extractor.extract_specific_tasks(
+            task_ids=list(task_ids),
+            threads=config.enrichment_threads,
+            output_root=output_root,
+        )
+
+        final_path = Path(run_folder) / "tasks.json"
+        Path(json_path).rename(final_path)
+
+        logger.info("Tasks saved to %s", final_path)
+        return str(final_path)
+
+    finally:
+        extractor.close()
