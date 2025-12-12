@@ -191,9 +191,9 @@ async def get_entity_graph(
             entity_label=entity_type,
         )
         
-        logger.info("\n--------------------------------\n")
-        logger.info(f"Graph data: {graph_data}")
-        logger.info("\n--------------------------------\n")
+        # logger.info("\n--------------------------------\n")
+        # logger.info(f"Graph data: {graph_data}")
+        # logger.info("\n--------------------------------\n")
         
         if not graph_data.nodes:
             # Check if it's just because the entity doesn't exist vs having no neighbors

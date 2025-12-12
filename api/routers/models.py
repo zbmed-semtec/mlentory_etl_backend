@@ -366,7 +366,7 @@ async def get_model_detail(
     resolve_properties: List[str] = Query(
         [],
         description="List of properties/relationships to resolve as full entities (e.g., 'schema__DefinedTerm', 'schema__author')",
-        examples=["HAS_LICENSE", "author", "dataset"],
+        examples=["schema__license", "schema__author", "fair4ml__trainedOn"],
     ),
 ) -> ModelDetail:
     """
@@ -375,16 +375,21 @@ async def get_model_detail(
     Returns basic model info from Elasticsearch plus optional related entities from Neo4j.
     The model_id can be the full URI or the alphanumeric ID.
     
-    To include related entities, specify the relationship types in `resolve_properties`.
+    To include related entities, specify the relationship types in `resolve_properties` or leave it empty to get all the information.
     """
     try:
         # First get basic model info from Elasticsearch
+        
+        if not model_id.startswith("https://"):
+            model_id = f"https://w3id.org/mlentory/mlentory_graph/{model_id}"
+        
         model = elasticsearch_service.get_model_by_id(model_id)
+        
         if not model:
             raise HTTPException(status_code=404, detail="Model not found")
         
         model_response = ModelDetail(
-            identifier=[model.db_identifier],
+            identifier=model.db_identifier,
             name=model.name,
             description=model.description,
             sharedBy=model.sharedBy,
@@ -394,17 +399,12 @@ async def get_model_detail(
             platform=model.platform,
             related_entities={}
         )
-        
-
-        # If no entities requested, return just the basic model info
-        if not resolve_properties:
-            return model_response
 
         # Get related entities from Neo4j using GraphService
         # We traverse outgoing relationships matching the requested types
         graph_data = graph_service.get_entity_graph(
             entity_id=model_id,
-            depth=1,
+            depth=2,
             relationships=resolve_properties,
             direction="outgoing",
             entity_label="MLModel",
@@ -415,6 +415,12 @@ async def get_model_detail(
         # Map nodes by ID for easy lookup
         nodes_map = {n.id: n for n in graph_data.nodes}
         start_uri = graph_data.metadata.get("start_uri")
+        
+        # Add default properties to the model response
+        logger.info("node_map: %s", nodes_map)
+        logger.info("start_uri: %s", start_uri)
+        logger.info(graph_data.nodes[0].properties)
+        logger.info("\n--------------------------------\n")
 
         # Group neighbor nodes by relationship type
         for edge in graph_data.edges:
@@ -431,9 +437,19 @@ async def get_model_detail(
                     entity_dict = target_node.properties.copy()
                     entity_dict["uri"] = target_node.id
                     
+                    # Linking the entities to the corresponding model response property
+                    property_name = (rel_type.split("__")[1])
+                    
+                    if type(model_response.__getattribute__(property_name)) == list:
+                        if target_node.id not in model_response.__getattribute__(property_name):
+                            model_response.__setattr__(property_name, [*model_response.__getattribute__(property_name), target_node.id])
+                    else:
+                        model_response.__setattr__(property_name, target_node.id)
+                    
                     related_entities[rel_type].append(entity_dict)
 
         model_response.related_entities = related_entities
+        
         
         return model_response
 
