@@ -245,21 +245,24 @@ def openml_runs_normalized(
     group_name="openml_transformation",
     ins={
         "runs_normalized": AssetIn("openml_runs_normalized"),
-        "flows_json": AssetIn("openml_enriched_flows"),
         "normalized_folder_data": AssetIn("openml_normalized_run_folder"),
     },
     tags={"pipeline": "openml_etl", "stage": "transform"},
 )
 def openml_entity_linking(
     runs_normalized: str,
-    flows_json: str,
     normalized_folder_data: Tuple[str, str],
 ) -> str:
     _, normalized_folder = normalized_folder_data
     runs = _load_json(runs_normalized) or []
-    flows = _load_json(flows_json) or []
+    # Build links directly from runs (covers flows referenced by runs)
+    flow_uri_map = {}
+    for run in runs:
+        flow_uri = run.get("flow")
+        flow_id = run.get("extraction_metadata", {}).get("flow_id")
+        if flow_uri and flow_id is not None:
+            flow_uri_map[flow_id] = flow_uri
 
-    flow_uri_map = {f.get("flow_id"): hash_uri("Flow", f.get("flow_id")) for f in flows}
     flow_links = build_entity_links(runs, flow_uri_map)
 
     output_path = Path(normalized_folder) / "entity_linking.json"
