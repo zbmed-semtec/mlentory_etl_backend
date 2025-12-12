@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class HFModelDocument(Document):
     """Minimal HF model document for search indexing."""
 
-    db_identifier = Keyword()
+    db_identifier = Keyword(multi=True)
     name = Text(fields={"raw": Keyword()})
     description = Text()
     shared_by = Keyword()
@@ -110,7 +110,7 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
     license_value = translation_mapping.get(license_value, license_value)
 
     doc = HFModelDocument(
-        db_identifier=str(identifier),
+        db_identifier=[str(id) for id in identifier],
         name=str(name) if name is not None else "",
         description=str(description) if description is not None else "",
         shared_by=str(shared_by) if shared_by is not None else "Unknown",
@@ -119,7 +119,7 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
         keywords=_extract_list(keywords),
         datasets=_extract_list(datasets),
         platform="Hugging Face",
-        meta={"id": str(identifier)},
+        meta={"id": [str(id) for id in identifier]},
     )
 
     # Ensure index name is bound correctly
