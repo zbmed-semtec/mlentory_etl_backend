@@ -272,6 +272,82 @@ def openml_entity_linking(
     return str(output_path)
 
 
+# ---------- translation mapping ----------
+
+
+def _get_primary_identifier(record: Dict[str, Any]) -> Optional[str]:
+    identifiers = record.get("https://schema.org/identifier") or record.get("identifier") or []
+    if not isinstance(identifiers, list):
+        return None
+    for ident in identifiers:
+        if ident:
+            return ident
+    return None
+
+
+def _get_display_name(record: Dict[str, Any]) -> Optional[str]:
+    for key in [
+        "https://schema.org/name",
+        "https://schema.org/title",
+        "https://schema.org/termCode",
+        "name",
+        "title",
+        "termCode",
+    ]:
+        if key in record and record[key]:
+            return record[key]
+    return None
+
+
+@asset(
+    group_name="openml_transformation",
+    ins={
+        "datasets_json": AssetIn("openml_datasets_normalized"),
+        "tasks_json": AssetIn("openml_tasks_normalized"),
+        "keywords_json": AssetIn("openml_keywords_normalized"),
+        "models_json": AssetIn("openml_models_normalized"),
+        "normalized_folder_data": AssetIn("openml_normalized_run_folder"),
+    },
+    tags={"pipeline": "openml_etl", "stage": "transform"},
+)
+def openml_create_translation_mapping(
+    datasets_json: str,
+    tasks_json: str,
+    keywords_json: str,
+    models_json: Tuple[str, str],
+    normalized_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Build URI → display-name mapping for OpenML normalized entities.
+    """
+    _, normalized_folder = normalized_folder_data
+    translation_mapping: Dict[str, str] = {}
+
+    inputs = [datasets_json, tasks_json, keywords_json]
+    for path in inputs:
+        records = _load_json(path) or []
+        for rec in records:
+            uri = _get_primary_identifier(rec)
+            name = _get_display_name(rec)
+            if uri and name:
+                translation_mapping[uri] = name
+
+    # models_json is a tuple (path, folder)
+    models_path, _ = models_json
+    model_records = _load_json(models_path) or []
+    for rec in model_records:
+        uri = _get_primary_identifier(rec)
+        name = _get_display_name(rec)
+        if uri and name:
+            translation_mapping[uri] = name
+
+    output_path = Path(normalized_folder) / "translation_mapping.json"
+    with open(output_path, "w", encoding="utf-8") as file_handle:
+        json.dump(translation_mapping, file_handle, indent=2, ensure_ascii=False, default=_json_default)
+    logger.info("Wrote translation mapping with %s entries to %s", len(translation_mapping), output_path)
+    return str(output_path)
+
+
 # ---------- models ----------
 
 
