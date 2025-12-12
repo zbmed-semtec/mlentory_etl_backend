@@ -49,7 +49,8 @@ class PaginatedResponse(BaseModel, Generic[T]):
 class ModelListItem(BaseModel):
     """Basic model information from Elasticsearch for list views."""
 
-    db_identifier: str = Field(description="Unique identifier/URI for the model")
+    db_identifier: List[str] = Field(description="Unique identifier/URI for the model")
+    mlentory_id: str = Field(description="MLentory ID for the model")
     name: str = Field(description="Model name")
     description: Optional[str] = Field(description="Model description", default=None)
     sharedBy: Optional[str] = Field(description="Entity that shared the model", default=None)
