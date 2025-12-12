@@ -30,6 +30,7 @@ from api.config import get_es_client, get_es_config
 from api.schemas.responses import ModelListItem, FacetValue, FacetConfig
 from api.services.faceted_search import FacetedSearchMixin
 from etl_loaders.hf_index_loader import HFModelDocument
+from etl_loaders.elasticsearch_store import search
 
 logger = logging.getLogger(__name__)
 
@@ -66,25 +67,29 @@ class ElasticsearchService(FacetedSearchMixin):
         from_offset = (page - 1) * page_size
 
         # Create search object
-        search = HFModelDocument.search(using=self.client, index=self.config.hf_models_index)
+        # search = self.client.search(index=self.config.hf_models_index, body=search_query)
+        search = None
 
         # Add search query if provided
         if search_query:
-            search = search.query(
-                Q("multi_match", query=search_query, fields=["name", "description", "keywords"])
-            )
-
-        # Add sorting (by name for consistency)
-        search = search.sort("name.raw")
+            search = self.client.search(index=self.config.hf_models_index, body=Q("multi_match", query=search_query, fields=["name", "description", "keywords"]))
 
         # Execute search with pagination
-        response = search[from_offset:from_offset + page_size].execute()
+        response = search.execute()[from_offset:from_offset + page_size]
 
         # Convert to ModelListItem objects
         models: List[ModelListItem] = []
         for hit in response:
+            mlentory_id = -1
+            
+            mlentory_id = next(
+                (id for id in hit.db_identifier if id.startswith("https://w3id.org/mlentory/mlentory_graph/")),
+                -1
+            )
+                
             model = ModelListItem(
                 db_identifier=hit.db_identifier,
+                mlentory_id=mlentory_id,
                 name=hit.name or "",
                 description=hit.description,
                 sharedBy=hit.shared_by,  # Note: ES field is snake_case, but schema uses camelCase
@@ -112,25 +117,41 @@ class ElasticsearchService(FacetedSearchMixin):
         Returns:
             ModelListItem if found, None otherwise
         """
-        search = HFModelDocument.search(using=self.client, index=self.config.hf_models_index)
-        search = search.query(Q("term", db_identifier=model_id))
+        # Search for model_id as an element of db_identifier (assuming db_identifier is a list in the ES document)
+        # search = HFModelDocument.search(using=self.client, index=self.config.hf_models_index)
+        
+        search_query = {
+                "size": 1,
+                "query": {
+                    "match": {
+                        "db_identifier": model_id
+                    }
+                }
+            }
+        response = self.client.search(index=self.config.hf_models_index, body=search_query)
+        
 
-        response = search.execute()
-
-        if response.hits.total.value == 0:
+        if response["hits"]["total"]["value"] == 0:
             return None
 
-        hit = response[0]
+        hit = response["hits"]["hits"][0]["_source"]
+        
+        mlentory_id = next(
+            (id for id in hit["db_identifier"] if id.startswith("https://w3id.org/mlentory/mlentory_graph/")),
+            -1
+        )
+        
         return ModelListItem(
-            db_identifier=hit.db_identifier,
-            name=hit.name or "",
-            description=hit.description,
-            sharedBy=hit.shared_by,  # Note: ES field is snake_case, but schema uses camelCase
-            license=hit.license,
-            mlTask=hit.ml_tasks or [],  # Note: ES field is snake_case, but schema uses camelCase
-            keywords=hit.keywords or [],
-            datasets=getattr(hit, "datasets", None) or [],
-            platform=hit.platform or "Unknown",
+            db_identifier=hit["db_identifier"],
+            mlentory_id=mlentory_id,
+            name=hit["name"] or "",
+            description=hit["description"],
+            sharedBy=hit["shared_by"],  # Note: ES field is snake_case, but schema uses camelCase
+            license=hit["license"],
+            mlTask=hit["ml_tasks"] or [],  # Note: ES field is snake_case, but schema uses camelCase
+            keywords=hit["keywords"] or [],
+            datasets=hit.get("datasets", []) or [],
+            platform=hit.get("platform", "Unknown"),
         )
 
 

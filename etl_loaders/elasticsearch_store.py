@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from elasticsearch import Elasticsearch
 
 logger = logging.getLogger(__name__)
+
+_ES_CLIENT_CACHE: Dict[str, Elasticsearch] = {}
 
 
 @dataclass
@@ -85,6 +88,21 @@ class ElasticsearchConfig:
         )
 
 
+def _config_cache_key(config: ElasticsearchConfig) -> str:
+    """Create a stable cache key for a given Elasticsearch config."""
+    materialized = "|".join(
+        [
+            config.scheme,
+            config.host,
+            str(config.port),
+            config.username or "",
+            config.password or "",
+            config.hf_models_index,
+        ]
+    )
+    return hashlib.sha256(materialized.encode("utf-8")).hexdigest()
+
+
 def create_elasticsearch_client(cfg: Optional[ElasticsearchConfig] = None) -> Elasticsearch:
     """Create an Elasticsearch client from configuration.
 
@@ -95,26 +113,42 @@ def create_elasticsearch_client(cfg: Optional[ElasticsearchConfig] = None) -> El
         Configured Elasticsearch client instance.
     """
     config = cfg or ElasticsearchConfig.from_env()
+    cache_key = _config_cache_key(config)
+
+    if cache_key in _ES_CLIENT_CACHE:
+        logger.debug("Reusing cached Elasticsearch client (key=%s)", cache_key[:8])
+        return _ES_CLIENT_CACHE[cache_key]
 
     es = Elasticsearch(
         [
-        {
-            "host": config.host,
-            "port": config.port,
-            "scheme": config.scheme,
-        }
-    ],
+            {
+                "host": config.host,
+                "port": config.port,
+                "scheme": config.scheme,
+            }
+        ],
         basic_auth=(config.username, config.password),
     )
-    
+
     logger.info(
-        "Created Elasticsearch client for %s://%s:%s",
+        "Created Elasticsearch client for %s://%s:%s (key=%s)",
         config.scheme,
         config.host,
         config.port,
+        cache_key[:8],
     )
+    _ES_CLIENT_CACHE[cache_key] = es
     return es
 
+
+def search(cfg: Optional[ElasticsearchConfig], index_name: str, query: dict) -> List[dict]:
+    try:
+        es_client = create_elasticsearch_client(cfg)
+        result = es_client.search(index=index_name, body=query)
+        return result["hits"]["hits"]
+    except Exception as e:
+        print(f"Error searching index: {str(e)}")
+        return []
 
 def clean_index(
     index_name: str,

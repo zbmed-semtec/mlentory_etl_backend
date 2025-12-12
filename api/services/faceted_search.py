@@ -359,8 +359,15 @@ class FacetedSearchMixin:
             models: List[ModelListItem] = []
             for hit in hits_data.get("hits", []):
                 source = hit.get("_source", {})
+                
+                mlentory_id = next(
+                    (id for id in source.get("db_identifier", []) if id.startswith("https://w3id.org/mlentory/mlentory_graph/")),
+                    -1
+                )
+                
                 model = ModelListItem(
                     db_identifier=source.get("db_identifier", ""),
+                    mlentory_id=mlentory_id,
                     name=source.get("name", ""),
                     description=source.get("description"),
                     sharedBy=source.get("shared_by"),
