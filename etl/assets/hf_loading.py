@@ -19,6 +19,8 @@ from typing import Any, Dict, Tuple
 
 from dagster import AssetIn, asset
 
+from etl.config import get_general_config
+
 from etl_loaders.hf_rdf_loader import (
     build_and_persist_models_rdf,
     build_and_persist_articles_rdf,
@@ -84,7 +86,11 @@ def hf_rdf_store_ready() -> Dict[str, Any]:
         reset_flag = os.getenv("N10S_RESET_ON_CONFIG_CHANGE", "false").lower() == "true"
         desired_cfg = {"keepCustomDataTypes": True, "handleVocabUris": "SHORTEN"}
 
-        # reset_database(drop_config=False)
+        if get_general_config().clean_neo4j_database:
+            logger.warning("Cleaning Neo4j database according to general configuration...")
+            reset_database(drop_config=False)
+        else:
+            logger.info("Keeping Neo4j database according to general configuration...")
         
         
         if reset_flag:
@@ -226,7 +232,9 @@ def hf_elasticsearch_ready() -> Dict[str, Any]:
     try:
         status = check_elasticsearch_connection()
         
-        # clean_hf_models_index()
+        if get_general_config().clean_elasticsearch_index:
+            logger.warning("Cleaning Elasticsearch index according to general configuration...")
+            clean_hf_models_index()
         
         logger.info(
             "Elasticsearch ready: cluster=%s, status=%s, nodes=%s, index=%s",

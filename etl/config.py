@@ -25,6 +25,8 @@ class GeneralConfig(BaseModel):
 
     default_threads: int = Field(default=4, ge=1)
     data_root: str = Field(default="/data")
+    clean_elasticsearch_index: bool = Field(default=False)
+    clean_neo4j_database: bool = Field(default=False)
 
 
 class HuggingFaceConfig(BaseModel):
