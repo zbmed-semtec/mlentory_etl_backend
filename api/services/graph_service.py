@@ -94,6 +94,14 @@ class GraphService:
         # If no relationships provided, choose sensible defaults per entity type
         if not relationships and entity_label:
             relationships = self.default_relationships.get(entity_label, [])
+            
+        logger.info("\n--------------------------------\n")
+        logger.info(f"Relationships: {relationships}")
+        logger.info(f"Entity URI: {entity_uri}")
+        logger.info(f"Entity Label: {entity_label}")
+        logger.info(f"Depth: {depth}")
+        logger.info(f"Direction: {direction}")
+        logger.info("\n--------------------------------\n")
 
         try:
             # --- STEP 1: Main Entity ---
@@ -353,9 +361,9 @@ class GraphService:
                 uri = record.get("uri")
                 props_raw = record.get("props", {})
                 relationships_raw = record.get("relationships", {})
-                logger.info("\n--------------------------------\n")
-                logger.info(f"Record: {record}")
-                logger.info("\n--------------------------------\n")
+                # logger.info("\n--------------------------------\n")
+                # logger.info(f"Record: {record}")
+                # logger.info("\n--------------------------------\n")
                 targets_uri = record.get("targets_uri", {})
                 
                 if not uri:
