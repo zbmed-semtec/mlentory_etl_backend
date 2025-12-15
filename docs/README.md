@@ -23,6 +23,20 @@ The documentation is organized into the following sections:
 
 To build and serve the documentation locally, you can use any of the following methods:
 
+### Option 0: Using Makefile (Easiest)
+
+If you have the project dependencies installed:
+
+```bash
+# Serve the documentation (with auto-reload)
+make docs
+
+# Build static site
+make docs-build
+```
+
+The documentation will be available at `http://127.0.0.1:8000` when running `make docs`.
+
 ### Option 1: Using pip
 
 ```bash
