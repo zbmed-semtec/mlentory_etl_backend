@@ -9,15 +9,15 @@ general:
   # Base data directory for extraction outputs
   data_root: "/data"
 
-  clean_elasticsearch_index: true
-  clean_neo4j_database: true
+  clean_elasticsearch_index: false
+  clean_neo4j_database: false
 
 # Platform-Specific Configurations
 platforms:
   # HuggingFace Configuration
   huggingface:
     # Number of latest models to extract
-    num_models: 0
+    num_models: 50
     # Whether to prioritize recently updated models
     update_recent: true
     # Number of parallel threads for extraction
