@@ -417,10 +417,12 @@ async def get_model_detail(
         start_uri = graph_data.metadata.get("start_uri")
         
         # Add default properties to the model response
-        logger.info("node_map: %s", nodes_map)
-        logger.info("start_uri: %s", start_uri)
-        logger.info(graph_data.nodes[0].properties)
-        logger.info("\n--------------------------------\n")
+        model_node = nodes_map.get(start_uri)
+        for key, value in model_node.properties.items():
+            key = key.split("__")[-1]
+            if key in model_response.__dict__:
+                logger.info(f"Adding default property: {key} = {value}")
+                model_response.__setattr__(key, value)
 
         # Group neighbor nodes by relationship type
         for edge in graph_data.edges:
@@ -437,8 +439,12 @@ async def get_model_detail(
                     entity_dict = target_node.properties.copy()
                     entity_dict["uri"] = target_node.id
                     
+                    
                     # Linking the entities to the corresponding model response property
                     property_name = (rel_type.split("__")[1])
+                    
+                    if target_node.id == start_uri:
+                        continue
                     
                     if type(model_response.__getattribute__(property_name)) == list:
                         if target_node.id not in model_response.__getattribute__(property_name):
