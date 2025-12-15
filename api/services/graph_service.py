@@ -71,6 +71,7 @@ class GraphService:
     ) -> GraphResponse:
         """
         Fetch a subgraph starting from a specific entity.
+        We ignore the adjacent metadata nodes for now.
 
         Refactored to a 2-step approach using a helper for single-entity retrieval:
         1. Fetch the main entity (properties + allowed relations).
@@ -94,14 +95,6 @@ class GraphService:
         # If no relationships provided, choose sensible defaults per entity type
         if not relationships and entity_label:
             relationships = self.default_relationships.get(entity_label, [])
-            
-        logger.info("\n--------------------------------\n")
-        logger.info(f"Relationships: {relationships}")
-        logger.info(f"Entity URI: {entity_uri}")
-        logger.info(f"Entity Label: {entity_label}")
-        logger.info(f"Depth: {depth}")
-        logger.info(f"Direction: {direction}")
-        logger.info("\n--------------------------------\n")
 
         try:
             # --- STEP 1: Main Entity ---
@@ -141,6 +134,10 @@ class GraphService:
             for neighbor_uri in neighbor_uris:
                 # Fetch details for neighbor, NO restrictions on relationships
                 neighbor_data = self._get_entity_data(neighbor_uri, allowed_relationships=None)
+                
+                
+                if neighbor_uri == entity_uri:
+                    continue
                 
                 if not neighbor_data:
                     continue
@@ -182,6 +179,7 @@ class GraphService:
     def _get_entity_data(
         self,
         uri: str,
+        ignore_metadata: bool = True,
         allowed_relationships: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """
@@ -194,6 +192,7 @@ class GraphService:
             allowed_relationships: If provided, only these relationship types are fetched.
                                    If None, all outgoing relationships are fetched.
                                    
+            ignore_metadata: If True, ignore metadata nodes.
         Returns:
             Dict containing:
               - id: Node ID (URI or elementId)
@@ -219,11 +218,17 @@ class GraphService:
             
         node_record = props_res[0]
         node_id = node_record.get("id")
-        labels = node_record.get("labels", [])
-        raw_props = node_record.get("props", {})
+        labels = []
+        raw_props = {}
+        
+        for record in props_res:
+            if ignore_metadata and "Resource" not in record.get("labels", []):
+                continue
+            labels.extend(record.get("labels", []))
+            raw_props.update(record.get("props", {}))
         
         # Normalize properties to List[str] or strict types
-        # User requested "internal properties... treated as 'properties'"
+        # Internal properties are treated as 'properties'
         normalized_props = {}
         for k, v in raw_props.items():
             if v is None:
@@ -232,7 +237,15 @@ class GraphService:
                 normalized_props[k] = [str(x) for x in v if x is not None]
             else:
                 normalized_props[k] = [str(v)]
-                
+
+        if labels:
+            normalized_props["type"] = []
+            for label in labels:
+                # Identify custom types like "fair4ml__MLModel" or "schema__Dataset"
+                if "__" in label:
+                    normalized_props["type"].append(label)
+            if len(labels) == 1 and labels[0] == "Resource":
+                normalized_props["type"].append("schema__url")
         # 2. Get Relations (treated as properties + explicit edges)
         # If allowed_relationships is set, we filter.
         
