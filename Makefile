@@ -62,7 +62,7 @@ logs-elasticsearch: ## View Elasticsearch logs
 
 build: ## Build Docker images
 	@echo "$(BLUE)Building Docker images...$(NC)"
-	docker compose build
+	sudo docker compose --profile=complete build
 	@echo "$(GREEN)Build complete!$(NC)"
 
 rebuild: ## Rebuild Docker images without cache
