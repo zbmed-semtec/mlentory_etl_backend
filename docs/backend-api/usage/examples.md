@@ -237,7 +237,7 @@ if data:
 
 ## Next Steps
 
-- **[Quick Start Guide](../getting-started/quickstart.md)** → Set up the API
+- **[Quick Start Guide](../../getting-started/quickstart.md)** → Set up the API
 - **[API Usage Guide](quickstart.md)** → Basic usage guide
 - **[API Endpoints](../endpoints/models.md)** → Complete endpoint reference
 - **[API Reference](../reference/schemas.md)** → Response schemas
