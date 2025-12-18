@@ -63,6 +63,27 @@ plugins:
             docstring_style: google
             show_source: true
 
+exclude_docs:
+  - README.md
+  - EXTRACTION_MODES.md
+  - architecture.md
+  - etl_process_diagram.md
+  - fair4ml.md
+  - hf_enrichment_assets.md
+  - hf_rdf_loader.md
+  - hf_search_indexing.md
+  - hf_transformation_architecture.md
+  - hf_transformation_implementation.md
+  - running_pipelines.md
+  - api/extractors.md
+  - api/loaders.md
+  - api/schemas.md
+  - api/transformers.md
+  - concepts/dagster-basics.md
+  - concepts/etl-overview.md
+  - concepts/fair4ml-schema.md
+  - concepts/graph-databases.md
+
 nav:
   - Home: index.md
   - Getting Started:

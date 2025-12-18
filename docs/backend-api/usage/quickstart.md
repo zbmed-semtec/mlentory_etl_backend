@@ -2,13 +2,13 @@
 
 Get started using the MLentory API! This guide shows you how to use the API once it's running.
 
-> **Setting up the API?** See the [Quick Start Guide](../getting-started/quickstart.md) for installation and configuration instructions.
+> **Setting up the API?** See the [Quick Start Guide](../../getting-started/quickstart.md) for installation and configuration instructions.
 
 ---
 
 ## Prerequisites
 
-- MLentory API running (see [Getting Started](../getting-started/quickstart.md))
+- MLentory API running (see [Getting Started](../../getting-started/quickstart.md))
 - API accessible at `http://localhost:8000` (or your configured host/port)
 
 ---
