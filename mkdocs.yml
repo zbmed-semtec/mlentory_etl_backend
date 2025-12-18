@@ -68,7 +68,6 @@ exclude_docs: |
   EXTRACTION_MODES.md
   architecture.md
   etl_process_diagram.md
-  fair4ml.md
   hf_enrichment_assets.md
   hf_rdf_loader.md
   hf_search_indexing.md
