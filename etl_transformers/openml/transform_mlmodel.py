@@ -10,11 +10,199 @@ from typing import Any, Dict, List, Optional, Set
 
 from etl.utils import generate_mlentory_entity_hash_id
 from schemas.croissant import CroissantDataset
-from schemas.fair4ml import MLModel
+from schemas.fair4ml import MLModel, ExtractionMetadata
 from schemas.schemaorg import DefinedTerm
 
 
 logger = logging.getLogger(__name__)
+
+
+def _create_extraction_metadata(
+    method: str,
+    confidence: float = 1.0,
+    source_field: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> ExtractionMetadata:
+    return ExtractionMetadata(
+        extraction_method=method,
+        confidence=confidence,
+        source_field=source_field,
+        notes=notes,
+    )
+
+
+def _build_extraction_metadata(flow_id: Any) -> Dict[str, ExtractionMetadata]:
+    """
+    Build field-level extraction metadata for OpenML models.
+    Uses more specific provenance per property instead of one blanket source.
+    """
+    flow_note = f"OpenML flow {flow_id}"
+    not_provided = _create_extraction_metadata(
+        method="OpenML_not_provided",
+        confidence=0.0,
+        source_field=None,
+        notes="Not provided by OpenML; left empty",
+    )
+
+    return {
+        # Flow-sourced fields
+        "identifier": _create_extraction_metadata("OpenML_flow", 1.0, "flow_id", flow_note),
+        "name": _create_extraction_metadata("OpenML_flow", 1.0, "flow_id", flow_note),
+        "url": _create_extraction_metadata("OpenML_flow", 1.0, "flow_id", flow_note),
+        "author": _create_extraction_metadata(
+            method="OpenML_runs_or_flow",
+            confidence=1.0,
+            source_field="runs.uploader_name|flow.uploader",
+            notes="Aggregated from run uploaders; falls back to flow uploader",
+        ),
+        "sharedBy": _create_extraction_metadata(
+            method="OpenML_runs_or_flow",
+            confidence=1.0,
+            source_field="runs.uploader_name|flow.uploader",
+            notes="Aggregated from run uploaders; falls back to flow uploader",
+        ),
+        "dateCreated": _create_extraction_metadata("OpenML_flow", 1.0, "upload_date", flow_note),
+        "dateModified": _create_extraction_metadata("OpenML_flow", 1.0, "upload_date", flow_note),
+        "datePublished": _create_extraction_metadata("OpenML_flow", 1.0, "upload_date", flow_note),
+        "description": _create_extraction_metadata("OpenML_flow", 1.0, "description", flow_note),
+        "inLanguage": _create_extraction_metadata("OpenML_flow", 1.0, "language", flow_note),
+
+        # Derived from runs/flows
+        "keywords": _create_extraction_metadata(
+            method="OpenML_runs_and_flows",
+            confidence=1.0,
+            source_field="tags",
+            notes="Aggregated from flow tags and run tags/keywords",
+        ),
+        "mlTask": _create_extraction_metadata(
+            method="OpenML_runs",
+            confidence=1.0,
+            source_field="task_id",
+            notes="Aggregated from tasks referenced by runs",
+        ),
+        "trainedOn": _create_extraction_metadata(
+            method="OpenML_runs",
+            confidence=1.0,
+            source_field="dataset_id",
+            notes="Datasets referenced by runs",
+        ),
+        "testedOn": _create_extraction_metadata(
+            method="OpenML_runs",
+            confidence=1.0,
+            source_field="dataset_id",
+            notes="Datasets referenced by runs",
+        ),
+        "validatedOn": _create_extraction_metadata(
+            method="OpenML_runs",
+            confidence=1.0,
+            source_field="dataset_id",
+            notes="Datasets referenced by runs",
+        ),
+        "evaluatedOn": _create_extraction_metadata(
+            method="OpenML_runs",
+            confidence=1.0,
+            source_field="dataset_id",
+            notes="Datasets referenced by runs",
+        ),
+        "hasEvaluation": _create_extraction_metadata(
+            method="OpenML_runs",
+            confidence=1.0,
+            source_field="run_id",
+            notes="W3IDs for runs associated with this flow",
+        ),
+
+        # # Not currently provided by OpenML flow/run data
+        # "license": not_provided,
+        # "referencePublication": not_provided,
+        # "modelCategory": not_provided,
+        # "fineTunedFrom": not_provided,
+        # "intendedUse": not_provided,
+        # "usageInstructions": not_provided,
+        # "codeSampleSnippet": not_provided,
+        # "modelRisksBiasLimitations": not_provided,
+        # "ethicalSocial": not_provided,
+        # "legal": not_provided,
+        # "evaluationMetrics": not_provided,
+        # "discussionUrl": not_provided,
+        # "archivedAt": not_provided,
+        # "readme": not_provided,
+        # "issueTracker": not_provided,
+        # "memoryRequirements": not_provided,
+        # "hasCO2eEmissions": not_provided,
+        # "metrics": not_provided,
+    }
+
+
+def map_basic_properties(
+    flow: Dict[str, Any],
+    flow_runs: List[Dict[str, Any]],
+    keyword_map: Dict[str, str],
+) -> Dict[str, Any]:
+    """
+    Map basic identification, temporal, authorship, and descriptive fields for an OpenML flow.
+    Mirrors HF map_basic_properties behavior and returns extraction metadata.
+    """
+    flow_id = flow.get("flow_id")
+    flow_uri = hash_uri("Flow", flow_id)
+    flow_url = flow.get("url") or f"https://www.openml.org/f/{flow_id}"
+
+    # Authors aggregated from runs; fallback to flow uploader
+    authors: Set[str] = set()
+    for run in flow_runs:
+        if run.get("uploader_name"):
+            authors.add(run["uploader_name"])
+        elif run.get("author"):
+            authors.add(run["author"])
+    author_value: Any = list(authors) if authors else flow.get("uploader")
+
+    # Keywords from flow tags + run tags/keywords, hashed to URIs
+    keyword_strings: List[str] = flow.get("tags") or []
+    for run in flow_runs:
+        keyword_strings.extend(run.get("tags") or [])
+        keyword_strings.extend(run.get("flow_tags") or [])
+        keyword_strings.extend(run.get("keywords") or [])
+    keyword_uris: List[str] = []
+    for kw in split_keywords(keyword_strings):
+        kw_uri = keyword_map.get(kw) or hash_uri("Keyword", kw)
+        if kw_uri not in keyword_uris:
+            keyword_uris.append(kw_uri)
+
+    # Build basic fields (keep scope similar to HF map_basic_properties, plus keywords/language for utility)
+    result: Dict[str, Any] = {
+        "identifier": [flow_url, flow_uri],
+        "name": flow.get("name", f"flow-{flow_id}"),
+        "url": flow_url,
+        "author": author_value,
+        "sharedBy": author_value,
+        "dateCreated": flow.get("upload_date"),
+        "dateModified": flow.get("upload_date"),
+        "datePublished": flow.get("upload_date"),
+        "description": flow.get("description"),
+        "keywords": keyword_uris,
+        "inLanguage": [flow.get("language")] if flow.get("language") else [],
+        "license": None,
+        "referencePublication": [],
+        "modelCategory": [],
+        "fineTunedFrom": [],
+        "intendedUse": None,
+        "usageInstructions": None,
+        "codeSampleSnippet": None,
+        "modelRisksBiasLimitations": None,
+        "ethicalSocial": None,
+        "legal": None,
+        "discussionUrl": None,
+        "archivedAt": None,
+        "readme": None,
+        "issueTracker": None,
+        "memoryRequirements": None,
+        "hasCO2eEmissions": None,
+        "metrics": {},
+    }
+
+    # Attach extraction metadata for the fields we set
+    full_metadata = _build_extraction_metadata(flow_id)
+    result["extraction_metadata"] = {k: v for k, v in full_metadata.items() if k in result}
+    return result
 
 
 def hash_uri(entity_type: str, entity_id: Any) -> str:
@@ -235,78 +423,44 @@ def normalize_models(
         flow_url = flow.get("url") or f"https://www.openml.org/f/{flow_id}"
         flow_runs = runs_by_flow.get(flow_uri, [])
 
-        authors: Set[str] = set()
+        # Aggregate context from runs
         datasets_set: Set[str] = set()
         tasks_set: Set[str] = set()
-        keyword_strings: List[str] = flow.get("tags") or []
-
         has_evals: List[str] = []
         for run in flow_runs:
-            if run.get("author"):
-                authors.add(run["author"])
             if run.get("dataset"):
                 datasets_set.add(run["dataset"])
             if run.get("task"):
                 tasks_set.add(run["task"])
-            for kw in run.get("keywords") or []:
-                if kw not in keyword_strings:
-                    keyword_strings.append(kw)
             identifiers = run.get("identifier") or []
             run_w3id = identifiers[1] if len(identifiers) > 1 else (identifiers[0] if identifiers else None)
             if run_w3id:
                 has_evals.append(run_w3id)
 
-        keyword_uris = []
-        for kw in split_keywords(keyword_strings):
-            kw_uri = keyword_map.get(kw) or hash_uri("Keyword", kw)
-            if kw_uri not in keyword_uris:
-                keyword_uris.append(kw_uri)
+        # Basic properties (with per-field metadata)
+        payload = map_basic_properties(flow, flow_runs, keyword_map)
 
-        payload = {
-            "identifier": [flow_url, flow_uri],
-            "name": flow.get("name", f"flow-{flow_id}"),
-            "url": flow_url,
-            "author": list(authors) if authors else flow.get("uploader"),
-            "sharedBy": list(authors) if authors else flow.get("uploader"),
-            "dateCreated": flow.get("upload_date"),
-            "dateModified": flow.get("upload_date"),
-            "datePublished": flow.get("upload_date"),
-            "description": flow.get("description"),
-            "keywords": keyword_uris,
-            "inLanguage": [flow.get("language")] if flow.get("language") else [],
-            "license": None,
-            "referencePublication": [],
-            "mlTask": list(tasks_set),
-            "modelCategory": [],
-            "fineTunedFrom": [],
-            "intendedUse": None,
-            "usageInstructions": None,
-            "codeSampleSnippet": None,
-            "modelRisksBiasLimitations": None,
-            "ethicalSocial": None,
-            "legal": None,
-            "trainedOn": list(datasets_set),
-            "testedOn": list(datasets_set),
-            "validatedOn": list(datasets_set),
-            "evaluatedOn": list(datasets_set),
-            "evaluationMetrics": [],
-            "discussionUrl": None,
-            "archivedAt": None,
-            "readme": None,
-            "issueTracker": None,
-            "memoryRequirements": None,
-            "hasCO2eEmissions": None,
-            "metrics": {},
-            "hasEvaluation": has_evals,
-            "extraction_metadata": {
-                "source": {
-                    "extraction_method": "OpenML_flow",
-                    "confidence": 1.0,
-                    "source_field": "flow_id",
-                    "notes": f"OpenML flow {flow_id}",
-                }
-            },
-        }
+        # Extend with relational fields
+        payload.update(
+            {
+                "mlTask": list(tasks_set),
+                "modelCategory": [],
+                "fineTunedFrom": [],
+                "trainedOn": list(datasets_set),
+                "testedOn": list(datasets_set),
+                "validatedOn": list(datasets_set),
+                "evaluatedOn": list(datasets_set),
+                "evaluationMetrics": [],
+                "hasEvaluation": has_evals,
+            }
+        )
+
+        # Refresh extraction metadata to cover new fields, preserving existing
+        meta_full = _build_extraction_metadata(flow_id)
+        if "extraction_metadata" in payload:
+            payload["extraction_metadata"] = {**meta_full, **payload["extraction_metadata"]}
+        else:
+            payload["extraction_metadata"] = meta_full
 
         try:
             normalized_models.append(MLModel(**payload).model_dump(mode="json", by_alias=True))

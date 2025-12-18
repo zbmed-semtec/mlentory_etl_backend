@@ -31,6 +31,7 @@ from etl_transformers.openml import (
     normalize_runs,
     build_entity_links,
     normalize_models,
+    map_basic_properties,
 )
 
 
@@ -392,4 +393,67 @@ def openml_models_normalized(
     logger.info("Wrote %s models to %s", len(normalized_models), output_path)
 
     return (str(output_path), str(normalized_folder))
+
+
+@asset(
+    group_name="openml_transformation",
+    ins={
+        "flows_json": AssetIn("openml_enriched_flows"),
+        "runs_data": AssetIn("openml_raw_runs"),
+        "normalized_folder_data": AssetIn("openml_normalized_run_folder"),
+    },
+    tags={"pipeline": "openml_etl", "stage": "transform"},
+)
+def openml_partial_basic_properties(
+    flows_json: str,
+    runs_data: Tuple[str, str],
+    normalized_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Save a partial basic properties view for OpenML models (flows).
+    using map_basic_properties before full normalization.
+    """
+    runs_json_path, _ = runs_data
+    _, normalized_folder = normalized_folder_data
+
+    flows = _load_json(flows_json) or []
+    raw_runs = _load_json(runs_json_path) or []
+
+    # Build keyword map from raw runs + flows (consistent with normalize_models)
+    keyword_map = collect_keyword_map(raw_runs, flows)
+
+    # Group runs by flow URI
+    runs_by_flow: Dict[str, List[Dict[str, Any]]] = {}
+    for run in raw_runs:
+        flow_id = run.get("flow_id")
+        if flow_id is None:
+            continue
+        flow_uri = hash_uri("Flow", flow_id)
+        runs_by_flow.setdefault(flow_uri, []).append(run)
+
+    partial: List[Dict[str, Any]] = []
+    for idx, flow in enumerate(flows):
+        flow_id = flow.get("flow_id")
+        flow_uri = hash_uri("Flow", flow_id)
+        flow_runs = runs_by_flow.get(flow_uri, [])
+        record = map_basic_properties(flow, flow_runs, keyword_map)
+        # Make extraction metadata JSON-serializable
+        if isinstance(record, dict) and "extraction_metadata" in record:
+            meta = record["extraction_metadata"] or {}
+            serialized_meta: Dict[str, Any] = {}
+            for key, val in meta.items():
+                if hasattr(val, "model_dump"):
+                    serialized_meta[key] = val.model_dump(mode="json", by_alias=True)
+                else:
+                    serialized_meta[key] = val
+            record["extraction_metadata"] = serialized_meta
+        record["_flow_id"] = flow_id
+        record["_index"] = idx
+        partial.append(record)
+
+    output_path = Path(normalized_folder) / "partial_basic_properties.json"
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(partial, handle, indent=2, ensure_ascii=False, default=_json_default)
+    logger.info("Wrote %s partial basic properties to %s", len(partial), output_path)
+    return str(output_path)
 

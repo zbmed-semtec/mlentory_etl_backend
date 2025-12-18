@@ -17,6 +17,7 @@ from .transform_mlmodel import (
     normalize_runs,
     build_entity_links,
     normalize_models,
+    map_basic_properties,
 )
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "normalize_runs",
     "build_entity_links",
     "normalize_models",
+    "map_basic_properties",
 ]
 
