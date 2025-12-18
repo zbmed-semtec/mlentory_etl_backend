@@ -339,6 +339,10 @@ def hf_export_metadata_json(
 
     logger.info(f"Exporting metadata JSON from models loaded in: {models_report_path}")
     logger.info(f"Neo4j store status: {store_ready['status']}")
+    
+    if not get_general_config().save_loaded_extraction_metadata_file:
+        logger.info("Skipping metadata export according to general configuration...")
+        return ""
 
     # Create RDF output directory parallel to normalized
     normalized_path = Path(normalized_folder)

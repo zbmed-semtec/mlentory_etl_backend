@@ -11,6 +11,8 @@ general:
 
   clean_elasticsearch_index: false
   clean_neo4j_database: false
+  # Whether to save the file with the metadata extraction after the loading stage
+  save_extraction_metadata_file: false
 
 # Platform-Specific Configurations
 platforms:
@@ -29,7 +31,7 @@ platforms:
     # Number of threads for enrichment operations (datasets, articles, etc.)
     enrichment_threads: 4
     # Offset for pagination (if applicable)
-    offset: 9000
+    offset: 100
 
   # OpenML Configuration
   openml:
