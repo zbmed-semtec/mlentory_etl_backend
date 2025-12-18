@@ -191,7 +191,7 @@ The Dagster UI is a web interface (usually at `http://localhost:3000`) where you
 - **Colors mean:**
   - 🟢 **Green** = Success! This asset ran successfully
   - 🔴 **Red** = Failed! Something went wrong
-  - 🟡 **Yellow** = Running right now
+  - 🔵 **Blue** = Running right now
   - ⚪ **Gray** = Not run yet
 - **What you can do:** Click any asset to see details, materialize it, view logs
 
@@ -256,7 +256,7 @@ Let's walk through what you'll actually do in the Dagster UI.
 4. Click it!
 
 **What happens:**
-- The asset status changes to yellow (running)
+- The asset status changes to blue (running)
 - You'll see logs appearing in real-time
 - When done, it turns green (success) or red (failed)
 
@@ -478,7 +478,7 @@ Here are real situations you'll encounter and how to handle them.
 2. Look at the colors:
    - 🟢 **Green** = Up to date and successful
    - 🔴 **Red** = Failed (needs attention)
-   - 🟡 **Yellow** = Currently running
+   - 🔵 **Blue** = Currently running
    - ⚪ **Gray** = Not materialized yet
 
 **What this tells you:**
@@ -559,13 +559,13 @@ Keep this handy when you're using Dagster!
 | **Dependency** | An asset that must run before another | Shown as arrows in the graph |
 | **Job** | Collection of assets that run together | View in Jobs tab, run entire job at once |
 | **Run** | One execution of assets | View in Runs tab, see history and logs |
-| **Status** | Current state of an asset | 🟢 Green = success, 🔴 Red = failed, 🟡 Yellow = running, ⚪ Gray = not run |
+| **Status** | Current state of an asset | 🟢 Green = success, 🔴 Red = failed, 🔵 Blue = running, ⚪ Gray = not run |
 
 **Color Guide:**
 
 - 🟢 **Green** = Success! Everything worked.
 - 🔴 **Red** = Failed! Something went wrong, check logs.
-- 🟡 **Yellow** = Running! Wait for it to finish.
+- 🔵 **Blue** = Running! Wait for it to finish.
 - ⚪ **Gray** = Not run yet. This is normal if you haven't materialized it.
 
 ---
