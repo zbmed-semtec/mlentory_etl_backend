@@ -4,7 +4,7 @@ Dagster assets for OpenML data extraction.
 This module defines a complete extraction pipeline for OpenML:
 1. Create a unique run folder
 2. Extract runs metadata
-3. Identify and extract related entities (datasets, flows, tasks)
+3. Identify and extract related entities (datasets, flows, tasks, keywords)
 
 All outputs are saved to /data/raw/openml/<timestamp_uuid>/ for traceability.
 """
@@ -280,6 +280,64 @@ def openml_enriched_tasks(tasks_data: Tuple[Set[int], str]) -> str:
         Path(json_path).rename(final_path)
 
         logger.info("Tasks saved to %s", final_path)
+        return str(final_path)
+
+    finally:
+        extractor.close()
+
+
+# ========== Keyword Enrichment Assets ==========
+
+
+@asset(
+    group_name="openml_enrichment",
+    tags={"pipeline": "openml_etl"},
+    ins={"runs_data": AssetIn("openml_raw_runs")},
+)
+def openml_identified_keywords(runs_data: Tuple[str, str]) -> Tuple[Set[str], str]:
+    """
+    Identify keyword (tag) references from raw OpenML runs.
+    """
+    runs_json_path, run_folder = runs_data
+    enrichment = OpenMLEnrichment()
+    runs_df = enrichment._load_runs_dataframe(runs_json_path)
+
+    keywords = enrichment.identifiers["keywords"].identify(runs_df)
+    logger.info("Identified %d unique keywords", len(keywords))
+
+    return (keywords, run_folder)
+
+
+@asset(
+    group_name="openml_enrichment",
+    tags={"pipeline": "openml_etl"},
+    ins={"keywords_data": AssetIn("openml_identified_keywords")},
+)
+def openml_enriched_keywords(keywords_data: Tuple[Set[str], str]) -> str:
+    """
+    Extract metadata for identified keywords from OpenML (via Wikipedia/Wikidata).
+    """
+    keywords, run_folder = keywords_data
+    config = get_openml_config()
+
+    extractor = OpenMLExtractor(enable_scraping=config.enable_scraping)
+
+    try:
+        if not keywords:
+            logger.info("No keywords to extract")
+            return ""
+
+        logger.info("Extracting %d keywords", len(keywords))
+        output_root = Path(run_folder).parent.parent  # Go up to /data
+        _, json_path = extractor.extract_specific_keywords(
+            keywords=list(keywords),
+            output_root=output_root,
+        )
+
+        final_path = Path(run_folder) / "keywords.json"
+        Path(json_path).rename(final_path)
+
+        logger.info("Keywords saved to %s", final_path)
         return str(final_path)
 
     finally:

@@ -27,6 +27,7 @@ from etl_transformers.openml import (
     collect_keyword_map,
     normalize_dataset_record,
     normalize_task_record,
+    normalize_keyword_record,
     build_keyword_terms,
     normalize_runs,
     build_entity_links,
@@ -166,6 +167,7 @@ def openml_tasks_normalized(
     ins={
         "runs_data": AssetIn("openml_raw_runs"),
         "flows_json": AssetIn("openml_enriched_flows"),
+        "keywords_json": AssetIn("openml_enriched_keywords"),
         "normalized_folder_data": AssetIn("openml_normalized_run_folder"),
     },
     tags={"pipeline": "openml_etl", "stage": "transform"},
@@ -173,6 +175,7 @@ def openml_tasks_normalized(
 def openml_keywords_normalized(
     runs_data: Tuple[str, str],
     flows_json: str,
+    keywords_json: str,
     normalized_folder_data: Tuple[str, str],
 ) -> str:
     runs_json_path, _ = runs_data
@@ -180,9 +183,32 @@ def openml_keywords_normalized(
 
     runs = _load_json(runs_json_path) or []
     flows = _load_json(flows_json) or []
-
+    
+    # 1. Collect all keywords referenced in runs and flows
     keyword_map = collect_keyword_map(runs, flows)
-    normalized = build_keyword_terms(keyword_map)
+    
+    # 2. Load enriched definitions
+    enriched_keywords = _load_json(keywords_json) or []
+    enriched_dict = {
+        item.get("keyword"): item 
+        for item in enriched_keywords 
+        if item.get("keyword")
+    }
+
+    normalized: List[Dict[str, Any]] = []
+    
+    # 3. Normalize keywords
+    for keyword, uri in keyword_map.items():
+        if keyword in enriched_dict:
+            try:
+                term = normalize_keyword_record(enriched_dict[keyword])
+                normalized.append(term)
+            except Exception as exc:
+                logger.warning("Error normalizing enriched keyword %s: %s", keyword, exc)
+                normalized.extend(build_keyword_terms({keyword: uri}))
+        else:
+            normalized.extend(build_keyword_terms({keyword: uri}))
+
     output_path = Path(normalized_folder) / "keywords.json"
     with open(output_path, "w", encoding="utf-8") as handle:
         json.dump(normalized, handle, indent=2, ensure_ascii=False, default=_json_default)
@@ -323,12 +349,21 @@ def openml_create_translation_mapping(
     """
     _, normalized_folder = normalized_folder_data
     translation_mapping: Dict[str, str] = {}
+    uri_prefix = "https://w3id.org/mlentory/mlentory_graph/"
 
     inputs = [datasets_json, tasks_json, keywords_json]
     for path in inputs:
         records = _load_json(path) or []
         for rec in records:
-            uri = _get_primary_identifier(rec)
+            identifiers = rec.get("https://schema.org/identifier") or rec.get("identifier") or []
+            if not isinstance(identifiers, list):
+                continue
+
+            uri = None
+            for ident in identifiers:
+                if isinstance(ident, str) and ident.startswith(uri_prefix):
+                    uri = ident.strip()
+                    break
             name = _get_display_name(rec)
             if uri and name:
                 translation_mapping[uri] = name
@@ -337,7 +372,15 @@ def openml_create_translation_mapping(
     models_path, _ = models_json
     model_records = _load_json(models_path) or []
     for rec in model_records:
-        uri = _get_primary_identifier(rec)
+        identifiers = rec.get("https://schema.org/identifier") or rec.get("identifier") or []
+        if not isinstance(identifiers, list):
+            continue
+
+        uri = None
+        for ident in identifiers:
+            if isinstance(ident, str) and ident.startswith(uri_prefix):
+                uri = ident.strip()
+                break
         name = _get_display_name(rec)
         if uri and name:
             translation_mapping[uri] = name
@@ -456,4 +499,3 @@ def openml_partial_basic_properties(
         json.dump(partial, handle, indent=2, ensure_ascii=False, default=_json_default)
     logger.info("Wrote %s partial basic properties to %s", len(partial), output_path)
     return str(output_path)
-
