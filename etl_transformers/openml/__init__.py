@@ -13,6 +13,7 @@ from .transform_mlmodel import (
     collect_keyword_map,
     normalize_dataset_record,
     normalize_task_record,
+    normalize_keyword_record,
     build_keyword_terms,
     normalize_runs,
     build_entity_links,
@@ -27,10 +28,10 @@ __all__ = [
     "collect_keyword_map",
     "normalize_dataset_record",
     "normalize_task_record",
+    "normalize_keyword_record",
     "build_keyword_terms",
     "normalize_runs",
     "build_entity_links",
     "normalize_models",
     "map_basic_properties",
 ]
-

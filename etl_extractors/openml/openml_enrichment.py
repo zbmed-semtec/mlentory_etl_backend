@@ -18,6 +18,7 @@ from .entity_identifiers import (
     DatasetIdentifier,
     FlowIdentifier,
     TaskIdentifier,
+    KeywordIdentifier,
 )
 
 
@@ -30,7 +31,7 @@ class OpenMLEnrichment:
     
     Workflow:
     1. Load raw OpenML runs JSON
-    2. Identify related entities (datasets, flows, tasks)
+    2. Identify related entities (datasets, flows, tasks, keywords)
     3. Download metadata for each entity type
     4. Persist enriched data to /data/raw/openml/<entity_type>/
     """
@@ -41,16 +42,17 @@ class OpenMLEnrichment:
     ) -> None:
         self.extractor = extractor or OpenMLExtractor()
         
-        # Register entity identifiers (datasets, flows, tasks)
+        # Register entity identifiers (datasets, flows, tasks, keywords)
         self.identifiers: Dict[str, EntityIdentifier] = {
             "datasets": DatasetIdentifier(),
             "flows": FlowIdentifier(),
             "tasks": TaskIdentifier(),
+            "keywords": KeywordIdentifier(),
         }
 
     def identify_related_entities(
         self, runs_df: pd.DataFrame, entity_types: List[str] | None = None
-    ) -> Dict[str, Set[int]]:
+    ) -> Dict[str, Set[int] | Set[str]]:
         """
         Identify all related entities from the runs DataFrame.
         
@@ -59,12 +61,12 @@ class OpenMLEnrichment:
             entity_types: List of entity types to identify, or None for all
             
         Returns:
-            Dict mapping entity type to set of entity IDs
+            Dict mapping entity type to set of entity IDs (int for IDs, str for keywords)
         """
         if entity_types is None:
             entity_types = list(self.identifiers.keys())
         
-        related_entities: Dict[str, Set[int]] = {}
+        related_entities: Dict[str, Set[int] | Set[str]] = {}
         
         for entity_type in entity_types:
             if entity_type in self.identifiers:
@@ -77,7 +79,7 @@ class OpenMLEnrichment:
 
     def extract_related_entities(
         self,
-        related_entities: Dict[str, Set[int]],
+        related_entities: Dict[str, Set[int] | Set[str]],
         *,
         threads: int = 4,
         output_root: Path | None = None,
@@ -104,6 +106,7 @@ class OpenMLEnrichment:
             
             try:
                 if entity_type == "datasets":
+                    # dataset IDs are ints
                     _, json_path = self.extractor.extract_specific_datasets(
                         dataset_ids=list(entity_ids),
                         threads=threads,
@@ -111,6 +114,7 @@ class OpenMLEnrichment:
                     )
                     output_paths[entity_type] = Path(json_path)
                 elif entity_type == "flows":
+                    # flow IDs are ints
                     _, json_path = self.extractor.extract_specific_flows(
                         flow_ids=list(entity_ids),
                         threads=threads,
@@ -118,9 +122,17 @@ class OpenMLEnrichment:
                     )
                     output_paths[entity_type] = Path(json_path)
                 elif entity_type == "tasks":
+                    # task IDs are ints
                     _, json_path = self.extractor.extract_specific_tasks(
                         task_ids=list(entity_ids),
                         threads=threads,
+                        output_root=output_root,
+                    )
+                    output_paths[entity_type] = Path(json_path)
+                elif entity_type == "keywords":
+                    # keywords are strings
+                    _, json_path = self.extractor.extract_specific_keywords(
+                        keywords=list(entity_ids),
                         output_root=output_root,
                     )
                     output_paths[entity_type] = Path(json_path)
@@ -205,5 +217,3 @@ class OpenMLEnrichment:
         )
         
         return output_paths
-
-

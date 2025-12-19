@@ -110,26 +110,6 @@ def _build_extraction_metadata(flow_id: Any) -> Dict[str, ExtractionMetadata]:
             source_field="run_id",
             notes="W3IDs for runs associated with this flow",
         ),
-
-        # # Not currently provided by OpenML flow/run data
-        # "license": not_provided,
-        # "referencePublication": not_provided,
-        # "modelCategory": not_provided,
-        # "fineTunedFrom": not_provided,
-        # "intendedUse": not_provided,
-        # "usageInstructions": not_provided,
-        # "codeSampleSnippet": not_provided,
-        # "modelRisksBiasLimitations": not_provided,
-        # "ethicalSocial": not_provided,
-        # "legal": not_provided,
-        # "evaluationMetrics": not_provided,
-        # "discussionUrl": not_provided,
-        # "archivedAt": not_provided,
-        # "readme": not_provided,
-        # "issueTracker": not_provided,
-        # "memoryRequirements": not_provided,
-        # "hasCO2eEmissions": not_provided,
-        # "metrics": not_provided,
     }
 
 
@@ -297,6 +277,43 @@ def normalize_task_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "alternateName": [],
         "extraction_metadata": {"source": "OpenML_task", "task_id": task_id},
     }
+    return DefinedTerm(**payload).model_dump(mode="json", by_alias=True)
+
+
+def normalize_keyword_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize an enriched keyword record into a DefinedTerm.
+    Mirrors HF normalization behavior.
+    """
+    keyword = record.get("keyword")
+    
+    # Identifier logic: prefer Wikidata QID, then URL, then hash
+    uri = None
+    if record.get("wikidata_qid"):
+        uri = f"https://www.wikidata.org/wiki/{record['wikidata_qid']}"
+    elif record.get("url"):
+        uri = record["url"]
+    else:
+        uri = hash_uri("Keyword", keyword)
+        
+    identifiers = [uri]
+    if record.get("wikidata_qid"):
+         identifiers.append(f"https://www.wikidata.org/wiki/{record['wikidata_qid']}")
+    if record.get("url") and record.get("url") not in identifiers:
+        identifiers.append(record["url"])
+        
+    payload = {
+        "identifier": identifiers,
+        "name": keyword,
+        "url": record.get("url"),
+        "sameAs": identifiers[1:] if len(identifiers) > 1 else [],
+        "termCode": keyword,
+        "inDefinedTermSet": ["https://www.openml.org/keywords"],
+        "description": record.get("definition"),
+        "alternateName": record.get("aliases") or [],
+        "extraction_metadata": record.get("extraction_metadata") or {"source": "OpenML_keywords"},
+    }
+    
     return DefinedTerm(**payload).model_dump(mode="json", by_alias=True)
 
 
@@ -470,4 +487,3 @@ def normalize_models(
     if errors:
         logger.warning("Model normalization encountered %s errors", len(errors))
     return normalized_models
-

@@ -29,6 +29,7 @@ class TaskIdentifier(EntityIdentifier):
         if runs_df.empty:
             return tasks
 
+        # Extract task IDs from the task_id column
         tasks = self.extract_ids_from_column(runs_df, "task_id")
 
         logger.info("Identified %d unique tasks", len(tasks))
