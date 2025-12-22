@@ -332,6 +332,7 @@ def _get_display_name(record: Dict[str, Any]) -> Optional[str]:
         "datasets_json": AssetIn("openml_datasets_normalized"),
         "tasks_json": AssetIn("openml_tasks_normalized"),
         "keywords_json": AssetIn("openml_keywords_normalized"),
+        "runs_json": AssetIn("openml_runs_normalized"),
         "models_json": AssetIn("openml_models_normalized"),
         "normalized_folder_data": AssetIn("openml_normalized_run_folder"),
     },
@@ -341,6 +342,7 @@ def openml_create_translation_mapping(
     datasets_json: str,
     tasks_json: str,
     keywords_json: str,
+    runs_json: str,
     models_json: Tuple[str, str],
     normalized_folder_data: Tuple[str, str],
 ) -> str:
@@ -351,7 +353,7 @@ def openml_create_translation_mapping(
     translation_mapping: Dict[str, str] = {}
     uri_prefix = "https://w3id.org/mlentory/mlentory_graph/"
 
-    inputs = [datasets_json, tasks_json, keywords_json]
+    inputs = [datasets_json, tasks_json, keywords_json, runs_json]
     for path in inputs:
         records = _load_json(path) or []
         for rec in records:
