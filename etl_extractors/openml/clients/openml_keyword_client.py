@@ -13,7 +13,7 @@ import logging
 
 import pandas as pd
 
-from ..openml_helper import OpenMLHelper
+from etl.utils import generate_mlentory_entity_hash_id
 
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class OpenMLKeywordClient:
 
                 self.curated_definitions[keyword] = {
                     "keyword": keyword,
-                    "mlentory_id": OpenMLHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                    "mlentory_id": generate_mlentory_entity_hash_id("Keyword", keyword, platform="OpenML"),
                     "definition": row.get("definition"),
                     "aliases": aliases,
                     "source": "curated_csv",
@@ -144,7 +144,7 @@ class OpenMLKeywordClient:
             keyword_rows.append(
                 {
                     "keyword": keyword,
-                    "mlentory_id": OpenMLHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                    "mlentory_id": generate_mlentory_entity_hash_id("Keyword", keyword, platform="OpenML"),
                     "definition": None,
                     "aliases": [],
                     "source": "openml_tags",

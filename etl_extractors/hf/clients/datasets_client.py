@@ -10,7 +10,7 @@ import pandas as pd
 from huggingface_hub import HfApi
 import logging
 
-from ..hf_helper import HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class HFDatasetsClient:
                 return None
             return {
                 "datasetId": dataset.id,
-                "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Dataset", dataset.id),
+                "mlentory_id": generate_mlentory_entity_hash_id("Dataset", dataset.id, platform="HF"),
                 "croissant_metadata": croissant_metadata,
                 "enriched": True,
                 "entity_type": "Dataset",
@@ -94,7 +94,7 @@ class HFDatasetsClient:
                     # Create stub entity for non-enriched dataset
                     return {
                         "datasetId": dataset_id,
-                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Dataset", dataset_id),
+                        "mlentory_id": generate_mlentory_entity_hash_id("Dataset", dataset_id, platform="HF"),
                         "croissant_metadata": None,
                         "enriched": False,
                         "entity_type": "Dataset",
@@ -107,7 +107,7 @@ class HFDatasetsClient:
                     }
                 return {
                     "datasetId": dataset_id,
-                    "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Dataset", dataset_id),
+                    "mlentory_id": generate_mlentory_entity_hash_id("Dataset", dataset_id, platform="HF"),
                     "croissant_metadata": croissant_metadata,
                     "enriched": True,
                     "entity_type": "Dataset",
@@ -123,7 +123,7 @@ class HFDatasetsClient:
                 # Create stub entity on error
                 return {
                     "datasetId": dataset_id,
-                    "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Dataset", dataset_id),
+                    "mlentory_id": generate_mlentory_entity_hash_id("Dataset", dataset_id, platform="HF"),
                     "croissant_metadata": None,
                     "enriched": False,
                     "entity_type": "Dataset",
