@@ -21,7 +21,7 @@ from dagster import AssetIn, asset
 
 from etl.config import get_general_config
 
-from etl_loaders.hf_rdf_loader import (
+from etl_loaders.rdf_loader import (
     build_and_persist_models_rdf,
     build_and_persist_articles_rdf,
     build_and_persist_licenses_rdf,

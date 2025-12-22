@@ -19,7 +19,7 @@ import pytest
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, XSD
 
-from etl_loaders.hf_rdf_loader import (
+from etl_loaders.rdf_loader import (
     is_iri,
     to_xsd_datetime,
     mint_subject,
@@ -339,7 +339,7 @@ def test_build_model_triples_all_properties(empty_graph):
 @pytest.mark.integration
 def test_build_and_persist_models_rdf_file_not_found():
     """Test error handling for missing file."""
-    from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+    from etl_loaders.rdf_loader import build_and_persist_models_rdf
     from rdflib_neo4j import Neo4jStoreConfig
     
     config = Neo4jStoreConfig(
@@ -355,7 +355,7 @@ def test_build_and_persist_models_rdf_file_not_found():
 @pytest.mark.integration
 def test_build_and_persist_models_rdf_invalid_json(tmp_path):
     """Test error handling for invalid JSON."""
-    from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+    from etl_loaders.rdf_loader import build_and_persist_models_rdf
     from rdflib_neo4j import Neo4jStoreConfig
     
     # Create invalid JSON file
@@ -372,12 +372,12 @@ def test_build_and_persist_models_rdf_invalid_json(tmp_path):
         build_and_persist_models_rdf(str(json_file), config)
 
 @pytest.mark.integration
-@patch('etl_loaders.hf_rdf_loader.write_mlmodel_metadata_batch')
-@patch('etl_loaders.hf_rdf_loader.open_graph')
-@patch('etl_loaders.hf_rdf_loader.build_model_triples')
+@patch('etl_loaders.rdf_loader.write_mlmodel_metadata_batch')
+@patch('etl_loaders.rdf_loader.open_graph')
+@patch('etl_loaders.rdf_loader.build_model_triples')
 def test_build_and_persist_models_rdf_calls_batch_metadata(mock_build_triples, mock_open_graph, mock_write_batch, tmp_path):
     """Test that write_mlmodel_metadata_batch is called when write_metadata is True."""
-    from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+    from etl_loaders.rdf_loader import build_and_persist_models_rdf
     from rdflib_neo4j import Neo4jStoreConfig
 
     # Create a dummy JSON file with multiple models
