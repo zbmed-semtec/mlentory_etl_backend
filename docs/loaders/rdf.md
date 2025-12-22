@@ -343,7 +343,7 @@ dagster asset materialize -m etl.repository -a hf_load_models_rdf
 
 **Export only (without loading to Neo4j):**
 ```python
-from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+from etl_loaders.rdf_loader import build_and_persist_models_rdf
 
 stats = build_and_persist_models_rdf(
     json_path="/data/normalized/hf/mlmodels.json",
@@ -358,7 +358,7 @@ stats = build_and_persist_models_rdf(
 ```python
 from rdflib import Graph
 from etl_loaders.rdf_store import namespaces, open_graph
-from etl_loaders.hf_rdf_loader import build_model_triples
+from etl_loaders.rdf_loader import build_model_triples
 import json
 
 # Load FAIR4ML JSON

@@ -263,7 +263,7 @@ RDF uses subject-predicate-object triples:
 
 ### Building Triples from FAIR4ML
 
-The loader function `build_model_triples()` in `etl_loaders/hf_rdf_loader.py` does the conversion:
+The loader function `build_model_triples()` in `etl_loaders/rdf_loader.py` does the conversion:
 
 ```python
 def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
@@ -937,7 +937,7 @@ cat /data/3_rdf/hf/2025-01-15_12-00-00_abc123/mlmodels_load_report.json
 
 Test loader functions without Dagster:
 ```python
-from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+from etl_loaders.rdf_loader import build_and_persist_models_rdf
 
 stats = build_and_persist_models_rdf(
     json_path="/path/to/models.json",

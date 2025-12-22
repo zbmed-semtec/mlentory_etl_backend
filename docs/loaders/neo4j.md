@@ -338,7 +338,7 @@ The `+` notation means "include dependencies," so this will automatically run th
 
 **Standalone (without Dagster):**
 ```python
-from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+from etl_loaders.rdf_loader import build_and_persist_models_rdf
 from rdflib_neo4j import Neo4jStoreConfig
 
 config = Neo4jStoreConfig(
