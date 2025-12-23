@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import wikipediaapi
 from wikidata.client import Client as WikidataClient
 
-from ..hf_helper import HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 
 
 
@@ -67,7 +67,7 @@ class HFKeywordClient:
                 
                 self.curated_definitions[keyword] = {
                     'keyword': keyword,
-                    'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                    'mlentory_id': generate_mlentory_entity_hash_id("Keyword", keyword, platform="HF"),
                     'definition': row['definition'],
                     'aliases': aliases,
                     'source': 'curated_csv',
@@ -102,7 +102,7 @@ class HFKeywordClient:
             # No data found, create stub entity
             return {
                 'keyword': keyword,
-                'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                'mlentory_id': generate_mlentory_entity_hash_id("Keyword", keyword, platform="HF"),
                 'definition': None,
                 'source': 'not_found',
                 'url': None,
@@ -148,7 +148,7 @@ class HFKeywordClient:
                     # Add basic stub on error to keep pipeline moving
                     all_keyword_data.append({
                         'keyword': keyword,
-                        'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                        'mlentory_id': generate_mlentory_entity_hash_id("Keyword", keyword, platform="HF"),
                         'definition': None,
                         'source': 'error',
                         'url': None,
@@ -243,7 +243,7 @@ class HFKeywordClient:
             
             return {
                 'keyword': keyword,
-                'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                'mlentory_id': generate_mlentory_entity_hash_id("Keyword", keyword, platform="HF"),
                 'definition': definition,
                 'source': 'wikipedia',
                 'url': page.fullurl,

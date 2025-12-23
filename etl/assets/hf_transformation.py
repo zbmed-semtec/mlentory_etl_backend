@@ -32,7 +32,7 @@ from pydantic import BaseModel, ValidationError
 
 from dagster import asset, AssetIn
 
-from etl_extractors.hf import HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
@@ -304,13 +304,25 @@ def hf_entity_linking(
     
     for model_id in model_datasets.keys():
         model_entities = {
-            "datasets": [HFHelper.generate_mlentory_entity_hash_id('Dataset', x) for x in model_datasets[model_id]],
-            "articles": [HFHelper.generate_mlentory_entity_hash_id('Article', x) for x in model_articles[model_id]],
-            "keywords": [HFHelper.generate_mlentory_entity_hash_id('Keyword', x) for x in model_keywords[model_id]],
-            "licenses": [HFHelper.generate_mlentory_entity_hash_id('License', x) for x in model_licenses[model_id]],
-            "base_models": [HFHelper.generate_mlentory_entity_hash_id('Model', x) for x in model_base_models[model_id]],
-            "languages": [HFHelper.generate_mlentory_entity_hash_id('Language', x) for x in model_languages[model_id]],
-            "tasks": [HFHelper.generate_mlentory_entity_hash_id('Task', x) for x in model_tasks[model_id]],
+            "datasets": [
+                generate_mlentory_entity_hash_id("Dataset", x, platform="HF") for x in model_datasets[model_id]
+            ],
+            "articles": [
+                generate_mlentory_entity_hash_id("Article", x, platform="HF") for x in model_articles[model_id]
+            ],
+            "keywords": [
+                generate_mlentory_entity_hash_id("Keyword", x, platform="HF") for x in model_keywords[model_id]
+            ],
+            "licenses": [
+                generate_mlentory_entity_hash_id("License", x, platform="HF") for x in model_licenses[model_id]
+            ],
+            "base_models": [
+                generate_mlentory_entity_hash_id("Model", x, platform="HF") for x in model_base_models[model_id]
+            ],
+            "languages": [
+                generate_mlentory_entity_hash_id("Language", x, platform="HF") for x in model_languages[model_id]
+            ],
+            "tasks": [generate_mlentory_entity_hash_id("Task", x, platform="HF") for x in model_tasks[model_id]],
         }
 
         entity_linking[model_id] = model_entities
@@ -874,8 +886,8 @@ def hf_licenses_normalized(
             creative_work_data: Dict[str, Any] = {}
 
             identifiers: List[str] = []
-            mlentory_id = license_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
-                "License", identifier_value
+            mlentory_id = license_record.get("mlentory_id") or generate_mlentory_entity_hash_id(
+                "License", identifier_value, platform="HF"
             )
             _append_unique(identifiers, mlentory_id)
 
@@ -1011,8 +1023,8 @@ def hf_datasets_normalized(
 
     for idx, dataset_record in enumerate(raw_datasets):
         dataset_id = dataset_record.get("datasetId", f"dataset_{idx}")
-        mlentory_id = dataset_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
-            "Dataset", dataset_id
+        mlentory_id = dataset_record.get("mlentory_id") or generate_mlentory_entity_hash_id(
+            "Dataset", dataset_id, platform="HF"
         )
 
         try:
@@ -1175,8 +1187,8 @@ def hf_tasks_normalized(
 
     for idx, task_record in enumerate(raw_tasks):
         task_slug = task_record.get("task", f"task_{idx}")
-        mlentory_id = task_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
-            "Task", task_slug
+        mlentory_id = task_record.get("mlentory_id") or generate_mlentory_entity_hash_id(
+            "Task", task_slug, platform="HF"
         )
 
         try:
@@ -1309,8 +1321,8 @@ def hf_languages_normalized(
 
     for idx, lang_record in enumerate(raw_languages):
         code = lang_record.get("code", f"lang_{idx}")
-        mlentory_id = lang_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
-            "Language", code
+        mlentory_id = lang_record.get("mlentory_id") or generate_mlentory_entity_hash_id(
+            "Language", code, platform="HF"
         )
 
         try:
@@ -1422,8 +1434,8 @@ def hf_keywords_normalized(
 
     for idx, keyword_record in enumerate(raw_keywords):
         keyword = keyword_record.get("keyword", f"keyword_{idx}")
-        mlentory_id = keyword_record.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
-            "Keyword", keyword
+        mlentory_id = keyword_record.get("mlentory_id") or generate_mlentory_entity_hash_id(
+            "Keyword", keyword, platform="HF"
         )
 
         try:
