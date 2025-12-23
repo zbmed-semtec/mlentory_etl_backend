@@ -10,4 +10,5 @@ __all__ = [
     "rdf_loader",
     "elasticsearch_store",
     "hf_index_loader",
+    "openml_index_loader",
 ]

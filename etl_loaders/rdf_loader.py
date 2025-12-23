@@ -103,6 +103,7 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         "https://w3id.org/fair4ml/testedOn",
         "https://w3id.org/fair4ml/validatedOn",
         "https://w3id.org/fair4ml/evaluatedOn",
+        "https://w3id.org/fair4ml/hasEvaluation",
     ]
     for related_entity in related_entities_lst:
         add_literal_or_iri(graph, subject, related_entity,
@@ -234,6 +235,139 @@ def build_and_persist_models_rdf(
     if write_metadata:
         result["metadata_relationships"] = total_metadata_relationships
 
+    return result
+
+
+def build_run_triples(graph: Graph, run: Dict[str, Any]) -> int:
+    """
+    Build RDF triples for a single MLModelEvaluation (run).
+    """
+    triples_before = len(graph)
+
+    subject_iri = LoadHelpers.mint_subject(run)
+    subject = URIRef(subject_iri)
+
+    graph.add((subject, namespaces["rdf"].type, namespaces["fair4ml"].MLModelEvaluation))
+
+    string_properties = [
+        "https://schema.org/identifier",
+        "https://schema.org/name",
+        "https://schema.org/url",
+        "https://schema.org/author",
+    ]
+    for prop in string_properties:
+        add_literal_or_iri(graph, subject, prop, run.get(prop), datatype=XSD.string)
+
+    date_properties = [
+        "https://schema.org/datePublished",
+        "https://schema.org/dateCreated",
+    ]
+    for prop in date_properties:
+        add_literal_or_iri(graph, subject, prop, run.get(prop), datatype=XSD.dateTime)
+
+    related_entities = [
+        ("https://w3id.org/fair4ml/evaluatedOn", run.get("https://w3id.org/fair4ml/evaluatedOn") or run.get("dataset")),
+        ("https://w3id.org/fair4ml/mlTask", run.get("https://w3id.org/fair4ml/mlTask") or run.get("task")),
+        ("https://schema.org/keywords", run.get("https://schema.org/keywords") or run.get("keywords")),
+        ("https://w3id.org/fair4ml/evaluatesModel", run.get("flow")),
+    ]
+    for predicate, value in related_entities:
+        add_literal_or_iri(graph, subject, predicate, value)
+
+    # evaluations payload as JSON literal
+    evaluations = run.get("evaluations")
+    if evaluations is not None:
+        add_literal_or_iri(
+            graph,
+            subject,
+            "https://w3id.org/fair4ml/evaluationMetrics",
+            json.dumps(evaluations),
+            datatype=XSD.string,
+        )
+
+    triples_added = len(graph) - triples_before
+    return triples_added
+
+
+def build_and_persist_runs_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+    batch_size: int = 100,
+) -> Dict[str, Any]:
+    """
+    Build RDF triples from normalized runs (MLModelEvaluation) and persist to Neo4j.
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized runs file not found: {json_path}")
+
+    logger.info(f"Loading normalized runs from {json_path}")
+    with open(json_file, "r", encoding="utf-8") as f:
+        runs = json.load(f)
+
+    if not isinstance(runs, list):
+        raise ValueError(f"Expected list of runs, got {type(runs)}")
+
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+
+    total_triples = 0
+    errors = 0
+    subject_uris: List[str] = []
+    graph_closed = False
+    run_timestamp = datetime.now()
+
+    try:
+        batches = [runs[i:i + batch_size] for i in range(0, len(runs), batch_size)]
+        for batch_idx, batch in enumerate(batches):
+            try:
+                for run in batch:
+                    subject_uri = LoadHelpers.mint_subject(run)
+                    subject_uris.append(subject_uri)
+                    triples_added = build_run_triples(graph, run)
+                    total_triples += triples_added
+
+                if (batch_idx + 1) % 50 == 0:
+                    logger.info(
+                        "Processed %s/%s batches of runs, added %s triples",
+                        batch_idx + 1,
+                        len(batches),
+                        total_triples,
+                    )
+            except Exception as e:
+                errors += 1
+                logger.error("Error building triples for runs batch %s: %s", batch_idx, e, exc_info=True)
+
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export for runs...")
+            graph.close(True)
+            graph_closed = True
+
+            if subject_uris:
+                export_graph_neosemantics_batched(
+                    subject_uris=subject_uris,
+                    file_path=str(ttl_file),
+                    format="Turtle",
+                )
+                ttl_path = str(ttl_file)
+                logger.info("Saved runs Turtle file: %s", ttl_path)
+            else:
+                logger.warning("No run subjects to export, skipping TTL generation")
+    finally:
+        if not graph_closed:
+            graph.close(True)
+
+    result = {
+        "runs_processed": len(runs),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": run_timestamp.isoformat(),
+    }
     return result
 
 def mint_article_subject(article: Dict[str, Any]) -> str:

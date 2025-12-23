@@ -130,12 +130,24 @@ def hf_rdf_store_ready() -> Dict[str, Any]:
     ins={
         "normalized_models": AssetIn("hf_models_normalized"),
         "store_ready": AssetIn("hf_rdf_store_ready"),
+        "datasets_loaded": AssetIn("hf_load_datasets_to_neo4j"),
+        "tasks_loaded": AssetIn("hf_load_tasks_to_neo4j"),
+        "keywords_loaded": AssetIn("hf_load_keywords_to_neo4j"),
+        "languages_loaded": AssetIn("hf_load_languages_to_neo4j"),
+        "licenses_loaded": AssetIn("hf_load_licenses_to_neo4j"),
+        "articles_loaded": AssetIn("hf_load_articles_to_neo4j"),
     },
     tags={"pipeline": "hf_etl", "stage": "load"}
 )
 def hf_load_models_to_neo4j(
     normalized_models: Tuple[str, str],
     store_ready: Dict[str, Any],
+    datasets_loaded: Tuple[str, str],
+    tasks_loaded: Tuple[str, str],
+    keywords_loaded: Tuple[str, str],
+    languages_loaded: Tuple[str, str],
+    licenses_loaded: Tuple[str, str],
+    articles_loaded: Tuple[str, str],
 ) -> Tuple[str, str]:
     """
     Load normalized HF models as RDF triples into Neo4j.
@@ -143,9 +155,19 @@ def hf_load_models_to_neo4j(
     Builds RDF triples from FAIR4ML models and persists them to Neo4j
     using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
     
+    This asset depends on all other entity loaders (datasets, tasks, keywords,
+    languages, licenses, articles) to ensure referenced entities exist before
+    models create relationships to them.
+    
     Args:
         normalized_models: Tuple of (mlmodels_json_path, normalized_folder)
         store_ready: Store readiness status from hf_rdf_store_ready
+        datasets_loaded: Tuple from hf_load_datasets_to_neo4j
+        tasks_loaded: Tuple from hf_load_tasks_to_neo4j
+        keywords_loaded: Tuple from hf_load_keywords_to_neo4j
+        languages_loaded: Tuple from hf_load_languages_to_neo4j
+        licenses_loaded: Tuple from hf_load_licenses_to_neo4j
+        articles_loaded: Tuple from hf_load_articles_to_neo4j
         
     Returns:
         Tuple of (load_report_path, normalized_folder)
