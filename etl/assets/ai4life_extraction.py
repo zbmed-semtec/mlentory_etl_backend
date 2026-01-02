@@ -17,9 +17,9 @@ from typing import Tuple, List, Dict, Any
 import json
 import logging
 import pandas as pd
-
 from dagster import asset, AssetIn
-
+from etl_extractors.ai4life.ai4life_enrichment import AI4LifeEnrichment
+from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 from etl_extractors.ai4life.ai4life_extractor import AI4LifeExtractor
 from etl.config import get_ai4life_config
 
@@ -63,7 +63,7 @@ def ai4life_raw_records(run_folder: str) -> Dict[str, Any]:
     return payload
 
 
-@asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
+@asset(group_name="ai4life_extraction", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
 def ai4life_models_raw(raw_data: Dict[str, Any]) -> Tuple[str, str]:
     """
     Filter model records and wrap with extraction metadata.
@@ -79,17 +79,54 @@ def ai4life_models_raw(raw_data: Dict[str, Any]) -> Tuple[str, str]:
     return (str(models_path), raw_data['run_folder'])
 
 
-# @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
-# def ai4life_datasets_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
+@asset(
+    group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"}
+)
+def ai4life_identified_datasets(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify dataset references per model from raw HF models.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Tuple of ({model_id: [dataset_names]}, run_folder)
+    """
+    models_json_path, run_folder = models_data
+    enrichment = AI4LifeEnrichment()
+    models_df = AI4LifeHelper.load_models_dataframe(models_json_path)
+
+    model_datasets = enrichment.identifiers["datasets"].identify_per_model(models_df)
+    logger.info(f"Identified datasets for {len(model_datasets)} models")
+    trial_path = Path(run_folder) / "trial.json"
+    trial_path.write_text(
+    json.dumps(model_datasets, indent=2, ensure_ascii=False),
+    encoding="utf-8",)
+    return model_datasets
+
+
+
+# @asset(group_name="ai4life_enrichment", tags={"pipeline": "ai4life_etl"}, 
+#      ins={
+#         "raw_records": AssetIn("ai4life_raw_records"),
+#         "identified_datasets": AssetIn("ai4life_identified_datasets"),
+#     },)
+# def ai4life_datasets_raw(
+#     raw_records: Dict[str, Any],              
+#     identified_datasets: Dict[str, List[str]]) -> Tuple[str, str]:
 #     """
 #     Filter dataset records and wrap with extraction metadata.
 #     Returns (datasets_json_path, run_folder).
 #     """
-#     records, run_folder, extractor = raw_data
-    
-#     # Filter records by type
-#     datasets = [r for r in records if r.get("type") == "dataset"]
-    
+#     records = raw_records['data']
+#     run_folder = raw_records['run_folder']
+#     extractor = AI4LifeExtractor(records_data = records)
+#     dataset_names = set()
+#     for model_id, datasets in identified_datasets.items():
+#         dataset_names.update(datasets)
+#     dataset_df = extractor.extract_specific_datasets(dataset_names)
 #     # Wrap each dataset with metadata
 #     # wrapped_datasets = [extractor.wrap_record_with_metadata(d) for d in datasets]
     
@@ -101,25 +138,25 @@ def ai4life_models_raw(raw_data: Dict[str, Any]) -> Tuple[str, str]:
 #     return (str(datasets_path), run_folder)
 
 
-# @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
-# def ai4life_applications_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
-#     """
-#     Filter application records and wrap with extraction metadata.
-#     Returns (applications_json_path, run_folder).
-#     """
-#     records, run_folder, extractor = raw_data
+# # @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
+# # def ai4life_applications_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
+# #     """
+# #     Filter application records and wrap with extraction metadata.
+# #     Returns (applications_json_path, run_folder).
+# #     """
+# #     records, run_folder, extractor = raw_data
     
-#     # Filter records by type
-#     applications = [r for r in records if r.get("type") == "application"]
+# #     # Filter records by type
+# #     applications = [r for r in records if r.get("type") == "application"]
     
-#     # Wrap each application with metadata
-#     # wrapped_applications = [extractor.wrap_record_with_metadata(a) for a in applications]
+# #     # Wrap each application with metadata
+# #     # wrapped_applications = [extractor.wrap_record_with_metadata(a) for a in applications]
     
-#     # Save to JSON
-#     applications_path = Path(run_folder) / "applications.json"
-#     applications_path.write_text(json.dumps(applications, indent=2), encoding="utf-8")
+# #     # Save to JSON
+# #     applications_path = Path(run_folder) / "applications.json"
+# #     applications_path.write_text(json.dumps(applications, indent=2), encoding="utf-8")
     
-#     logger.info("Saved %d applications to %s", len(applications), applications_path)
-#     return (str(applications_path), run_folder)
+# #     logger.info("Saved %d applications to %s", len(applications), applications_path)
+# #     return (str(applications_path), run_folder)
 
 

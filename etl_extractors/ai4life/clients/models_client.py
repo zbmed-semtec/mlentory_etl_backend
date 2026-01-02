@@ -1,175 +1,204 @@
 from __future__ import annotations
-import requests
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-# from etl_extractors.ai4life import AI4LifeHelper
-from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import json
 import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
+
+from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 
 logger = logging.getLogger(__name__)
 
+
 class AI4LifeModelClient:
     """Extractor for fetching raw model metadata from the AI4Life platform."""
-    
-    def __init__(self, records_data):
-        self.records_data = records_data
-    
-    def get_models_metadata(self):
-        """get records from AI4Life API and set extraction timestamp."""
-         # Filter records by type
-        model_records = [r for r in self.records_data['data'] if r.get("type") == "model"]
+
+    def __init__(self, records_data: Dict[str, Any]):
+        # expected: {"data": [...], "timestamp": "..."}
+        self.records_data = records_data or {}
+
+    def get_models_metadata(self) -> pd.DataFrame:
+        """Filter records by type=model and return a dataframe of normalized metadata."""
+        records = self.records_data.get("data", []) or []
+        model_records = [r for r in records if isinstance(r, dict) and r.get("type") == "model"]
+
         models_metadata = [self.fetch_model_metadata(model_record) for model_record in model_records]
-        models_metadata_df = pd.DataFrame(models_metadata)
-        return models_metadata_df
-        
+        return pd.DataFrame(models_metadata)
+
+    # ---------- helpers for normalization ----------
+
+    @staticmethod
+    def _to_str(value: Any) -> str:
+        """Convert any value to string; missing/None becomes empty string."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        # keep nested objects representable, still a string
+        if isinstance(value, (list, dict)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    @staticmethod
+    def _first_hit(flat: Dict[str, Any], paths: List[str]) -> Any:
+        """Return first non-empty value found in flat for given paths; else None."""
+        for p in paths:
+            if p in flat:
+                v = flat[p]
+                if v not in (None, ""):
+                    return v
+        return None
+
+    @staticmethod
+    def _safe_utc_date(ts: Any) -> str:
+        """Convert unix timestamp (seconds) to YYYY-MM-DD. Else empty string."""
+        if isinstance(ts, (int, float)):
+            try:
+                return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+            except Exception:
+                return ""
+        return ""
+
     def fetch_model_metadata(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Fetch a single model's metadata.
-        
-        Args:
-            record: The model record dump.
-        
-        Returns:
-            Fetched model metadata following the defined schema.
-        """
-        flat = self._flatten_dict(record)
-        model_id = str(flat.get("id") or record.get("id") or "").split("/", 1)[-1]
-        mapping = {
-        "modelId":       ["id"],
-        "mlentory_id": AI4LifeHelper.generate_mlentory_entity_hash_id("Model", model_id, platform="AI4Life"),
-        "modelArchitecture":       ["manifest.weights.pytorch_state_dict.architecture.callable"],
-        "sharedBy":            ["created_by", "manifest.uploader.name", "manifest.uploader.email"],
-        "trainedOn":           ["manifest.training_data.id"],
-        "intendedUse":         ["manifest.description"],
-        "referencePublication":["config.zenodo.doi_url"],
-        "readme_file":      ["manifest.documentation"],
-        "citation":         ["manifest.cite"],
-        "maintainer":       ["manifest.maintainers"],
-        "author":           ["manifest.authors"],
-        "license":          ["manifest.license"],
-        "name":             ["manifest.name"],
-        "keywords":         ["manifest.tags", "config.zenodo.keywords"],
-        "version":          ["versions"],
-        "codeRepository":   ["git_repo"],
-        "datePublished":    ["config.zenodo.metadata.publication_date"],
-        "conditionsOfAccess":["config.zenodo.metadata.access_right"],
-        "dateCreated":      ["created_at"],
-        "dateModified":     ["last_modified"],
-        "archivedAt":       ["config.zenodo.links.record_html"],
-        "releaseNotes":     ["config.zenodo.notes"],
-        "extraction_timestamp": self.records_data['timestamp'],
-        "enriched": True,
-        "entity_type": "Model",
-        "platform": "AI4Life"}
-     
-        #id = mapping["modelId"].split("/", 1)[-1]
-        id = model_id
-        mapping["modelId"] = id
-        readme_file =  flat.get("manifest.documentation") or ""
-        mapping["readme_file"] = f"https://hypha.aicell.io/bioimage-io/artifacts/{id}/files/{readme_file}"
-        ai4life_url = f"https://bioimage.io/#/artifacts/{id}"
-        mapping["url"] = ai4life_url
-        mapping["archivedAt"] = [mapping["archivedAt"], ai4life_url]
+        """Fetch a single model's metadata and normalize all missing values to ''."""
+        flat = self._flatten_dict(record or {})
+        raw_id = flat.get("id") or record.get("id") or ""
+        model_id = str(raw_id).split("/", 1)[-1]  # keep last part
 
-        # Map simple fields
-        for out_key, paths in mapping.items():
-            if not isinstance(paths, list) or not paths or not all(isinstance(x, str) for x in paths):
-                continue
-                
-            values = [flat[p] for p in paths if p in flat]
-            if values:
-                mapping[out_key] = values[0] if len(values) == 1 else values
-         
-        # Process dates
-        for date_field in ["dateCreated", "dateModified"]:
-            if date_field in mapping and mapping[date_field] is not None:
-                mapping[date_field] = datetime.utcfromtimestamp(
-                    mapping[date_field]
-                ).strftime('%Y-%m-%d')
-        
-        # Process contributor fields (authors and maintainers)
-        for contributor_field in ["author", "maintainer"]:
-            contributors = mapping.get(contributor_field, []) or []
-            transformed = []
-            
-            # Normalize: sometimes it's a dict or a string, not a list
-            if isinstance(contributors, (str, dict)):
-                contributors = [contributors]
-            elif not isinstance(contributors, list):
-                contributors = []
+        out: Dict[str, Any] = {}
 
-            transformed = []
-            for contributor in contributors:
-                # contributor can be dict OR string
+        # fixed fields
+        out["modelId"] = model_id
+        out["mlentory_id"] = AI4LifeHelper.generate_mlentory_entity_hash_id(
+            "Model", model_id, platform="AI4Life"
+        )
+        out["extraction_timestamp"] = self._to_str(self.records_data.get("timestamp", ""))
+        out["enriched"] = True
+        out["entity_type"] = "Model"
+        out["platform"] = "AI4Life"
+
+        # url fields
+        out["url"] = f"https://bioimage.io/#/artifacts/{model_id}"
+        readme_file = self._to_str(flat.get("manifest.documentation") or "")
+        out["readme_file"] = (
+            f"https://hypha.aicell.io/bioimage-io/artifacts/{model_id}/files/{readme_file}"
+            if readme_file
+            else ""
+        )
+
+        # paths to extract (do NOT store path-lists in output)
+        path_map: Dict[str, List[str]] = {
+            "modelArchitecture": ["manifest.weights.pytorch_state_dict.architecture.callable"],
+            "sharedBy": ["created_by", "manifest.uploader.name", "manifest.uploader.email"],
+            "trainedOn": ["manifest.training_data.id"],
+            "intendedUse": ["manifest.description"],
+            "referencePublication": ["config.zenodo.doi_url"],
+            "citation": ["manifest.cite"],
+            "maintainer": ["manifest.maintainers"],
+            "author": ["manifest.authors"],
+            "license": ["manifest.license"],
+            "name": ["manifest.name"],
+            "keywords": ["manifest.tags", "config.zenodo.keywords"],
+            "codeRepository": ["git_repo"],
+            "datePublished": ["config.zenodo.metadata.publication_date"],
+            "conditionsOfAccess": ["config.zenodo.metadata.access_right"],
+            "archivedAt": ["config.zenodo.links.record_html"],
+            "releaseNotes": ["config.zenodo.notes"],
+        }
+
+        # extract fields
+        for key, paths in path_map.items():
+            val = self._first_hit(flat, paths)
+            out[key] = val if val is not None else ""
+
+        # dates: your record uses unix timestamps for created_at/last_modified
+        out["dateCreated"] = self._safe_utc_date(flat.get("created_at"))
+        out["dateModified"] = self._safe_utc_date(flat.get("last_modified"))
+
+        # version: take last version if list[dict] available; else empty string
+        versions = flat.get("versions")
+        if isinstance(versions, list) and versions:
+            last = versions[-1]
+            if isinstance(last, dict):
+                out["version"] = self._to_str(last.get("version", ""))
+            else:
+                out["version"] = self._to_str(last)
+        else:
+            out["version"] = ""
+
+        # archivedAt: store both zenodo record_html (if any) and ai4life url, as a JSON string
+        archived = []
+        if out.get("archivedAt"):
+            archived.append(out["archivedAt"])
+        if out.get("url"):
+            archived.append(out["url"])
+        out["archivedAt"] = json.dumps(archived, ensure_ascii=False) if archived else ""
+
+        # sharedBy: if extracted value is a list/dict, string-ify; else string
+        out["sharedBy"] = self._to_str(out.get("sharedBy", ""))
+
+        # contributor fields: convert to list[{"name":..., "url":...}] then JSON string
+        for field in ["author", "maintainer"]:
+            raw = out.get(field, "")
+            parsed: List[Any]
+
+            # raw might already be a list/dict in flat. Our extraction put it into out as-is.
+            if isinstance(raw, str):
+                # if it's already a JSON string from _to_str, try to parse
+                try:
+                    candidate = json.loads(raw)
+                    parsed = candidate if isinstance(candidate, list) else [candidate]
+                except Exception:
+                    parsed = [raw] if raw else []
+            elif isinstance(raw, dict):
+                parsed = [raw]
+            elif isinstance(raw, list):
+                parsed = raw
+            else:
+                parsed = []
+
+            transformed: List[Dict[str, str]] = []
+            for contributor in parsed:
                 if isinstance(contributor, str):
-                    transformed.append({"name": contributor, "url": ""})
+                    name = contributor
+                    transformed.append({"name": name, "url": ""})
                     continue
-
                 if not isinstance(contributor, dict):
                     continue
-            
-                name = contributor.get('name', '')
-                orcid = contributor.get('orcid', '')
-                github_user = contributor.get('github_user', '')
-                
-                url = (
-                    f"https://orcid.org/{orcid}" if orcid else
-                    f"https://github.com/{github_user}" if github_user else
-                    ""
-                )
-                
-                transformed.append({'name': name, 'url': url})
-            mapping[contributor_field] = transformed
-        
-        # Handle special case for sharedBy
-        shared_by = mapping.get("sharedBy")
-        mapping["sharedBy"] = shared_by[0] if shared_by else ""
-        
-        # Handle special case for version
-        version = mapping.get("version")
-        mapping["version"] = version[-1]["version"]
-        
-        return mapping
-    
+
+                name = self._to_str(contributor.get("name", ""))
+                orcid = self._to_str(contributor.get("orcid", ""))
+                github_user = self._to_str(contributor.get("github_user", ""))
+
+                url = ""
+                if orcid:
+                    url = f"https://orcid.org/{orcid}"
+                elif github_user:
+                    url = f"https://github.com/{github_user}"
+
+                transformed.append({"name": name, "url": url})
+
+            out[field] = json.dumps(transformed, ensure_ascii=False) if transformed else ""
+
+        # finally, enforce: everything missing -> "" (keep booleans as-is if you want)
+        for k, v in list(out.items()):
+            if v is None:
+                out[k] = ""
+            # if any remaining lists/dicts slipped through, stringify them
+            elif isinstance(v, (list, dict)):
+                out[k] = json.dumps(v, ensure_ascii=False)
+
+        return out
+
     def _flatten_dict(self, d: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dict[str, Any]:
-        """
-        Returns:
-            Dict[str, Any]: Flattened dictionary.
-        """
-        items = []
-        for key, value in d.items():
+        """Flatten nested dict keys using dot notation."""
+        items: List[tuple[str, Any]] = []
+        for key, value in (d or {}).items():
             new_key = f"{parent_key}{sep}{key}" if parent_key else key
             if isinstance(value, dict):
                 items.extend(self._flatten_dict(value, new_key, sep).items())
             else:
                 items.append((new_key, value))
         return dict(items)
-    
-    # def _wrap_metadata(self, value: Any, method: str = "hypha_api") -> List[Dict[str, Any]]:
-    #     """Wrap metadata value with extraction details.
-
-    #     Args:
-    #         value (Any): The metadata value to wrap.
-    #         method (str): The extraction method. Defaults to "hypha_api".
-
-    #     Returns:
-    #         List[Dict[str, Any]]: Wrapped metadata with extraction details.
-    #     """
-    #     return [{
-    #         "data": value,
-    #         "extraction_method": method,
-    #         "confidence": 1,
-    #         "extraction_time": self.records_data['timestamp']
-    #     }]
-
-    # def _wrap_mapped_models(self, mapped_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    #     """Wrap mapped models with metadata details.
-
-    #     Args:
-    #         mapped_models (List[Dict[str, Any]]): List of mapped model metadata.
-
-    #     Returns:
-    #         List[Dict[str, Any]]: Wrapped model metadata.
-    #     """
-    #     return [{k: self._wrap_metadata(v) for k, v in model.items()} for model in mapped_models]
