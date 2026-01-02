@@ -47,7 +47,7 @@ class AI4LifeModelClient:
         for p in paths:
             if p in flat:
                 v = flat[p]
-                if v not in (None, ""):
+                if v is not None and v != "" and v != p:
                     return v
         return None
 
@@ -111,7 +111,10 @@ class AI4LifeModelClient:
         # extract fields
         for key, paths in path_map.items():
             val = self._first_hit(flat, paths)
-            out[key] = val if val is not None else ""
+            if val is None or val == "":
+                out[key] = ""
+            else:
+                out[key] = val
 
         # dates: your record uses unix timestamps for created_at/last_modified
         out["dateCreated"] = self._safe_utc_date(flat.get("created_at"))
