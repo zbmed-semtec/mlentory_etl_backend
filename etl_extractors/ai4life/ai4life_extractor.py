@@ -43,6 +43,7 @@ class AI4LifeExtractor:
     
     def extract_specific_datasets(self, dataset_names):
         df = self.datasets_client.get_datasets_metadata(dataset_names)
+        return df
 
  
       

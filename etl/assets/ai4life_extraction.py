@@ -100,42 +100,36 @@ def ai4life_identified_datasets(models_data: Tuple[str, str]) -> Dict[str, List[
 
     model_datasets = enrichment.identifiers["datasets"].identify_per_model(models_df)
     logger.info(f"Identified datasets for {len(model_datasets)} models")
-    trial_path = Path(run_folder) / "trial.json"
-    trial_path.write_text(
-    json.dumps(model_datasets, indent=2, ensure_ascii=False),
-    encoding="utf-8",)
     return model_datasets
 
 
 
-# @asset(group_name="ai4life_enrichment", tags={"pipeline": "ai4life_etl"}, 
-#      ins={
-#         "raw_records": AssetIn("ai4life_raw_records"),
-#         "identified_datasets": AssetIn("ai4life_identified_datasets"),
-#     },)
-# def ai4life_datasets_raw(
-#     raw_records: Dict[str, Any],              
-#     identified_datasets: Dict[str, List[str]]) -> Tuple[str, str]:
-#     """
-#     Filter dataset records and wrap with extraction metadata.
-#     Returns (datasets_json_path, run_folder).
-#     """
-#     records = raw_records['data']
-#     run_folder = raw_records['run_folder']
-#     extractor = AI4LifeExtractor(records_data = records)
-#     dataset_names = set()
-#     for model_id, datasets in identified_datasets.items():
-#         dataset_names.update(datasets)
-#     dataset_df = extractor.extract_specific_datasets(dataset_names)
-#     # Wrap each dataset with metadata
-#     # wrapped_datasets = [extractor.wrap_record_with_metadata(d) for d in datasets]
+@asset(group_name="ai4life_enrichment", tags={"pipeline": "ai4life_etl"}, 
+     ins={
+        "raw_records": AssetIn("ai4life_raw_records"),
+        "identified_datasets": AssetIn("ai4life_identified_datasets"),
+    },)
+def ai4life_datasets_raw(
+    raw_records: Dict[str, Any],              
+    identified_datasets: Dict[str, List[str]]) -> Tuple[str, str]:
+    """
+    Filter dataset records and wrap with extraction metadata.
+    Returns (datasets_json_path, run_folder).
+    """
+    records = raw_records['data']
+    run_folder = raw_records['run_folder']
+    extractor = AI4LifeExtractor(records_data = records)
+    dataset_names = set()
+    for model_id, datasets in identified_datasets.items():
+        dataset_names.update(datasets)
+    dataset_df = extractor.extract_specific_datasets(dataset_names)
+  
+    # Save to JSON
+    datasets_path = Path(run_folder) / "datasets.json"
+    dataset_df.to_json(datasets_path, orient="records", indent=2)
     
-#     # Save to JSON
-#     datasets_path = Path(run_folder) / "datasets.json"
-#     datasets_path.write_text(json.dumps(datasets, indent=2), encoding="utf-8")
-    
-#     logger.info("Saved %d datasets to %s", len(datasets), datasets_path)
-#     return (str(datasets_path), run_folder)
+    logger.info("Saved %d datasets to %s", len(dataset_df), datasets_path)
+    return (str(datasets_path), run_folder)
 
 
 # # @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
