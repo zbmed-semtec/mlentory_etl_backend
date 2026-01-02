@@ -20,6 +20,11 @@ class AI4LifeDatasetsClient:
         dataset_records = [r for r in self.records_data['data'] if r.get("type") == "dataset"]
         self.dataset_records = dataset_records
         dataset_metadata = [self.get_dataset_metadata(dataset_name) for dataset_name in dataset_names]
+        # Filter out None values (datasets that weren't found)
+        dataset_metadata = [d for d in dataset_metadata if d is not None]
+        if not dataset_metadata:
+            # Return empty DataFrame with correct structure
+            return pd.DataFrame()
         dataset_metadata_df = pd.DataFrame(dataset_metadata)
         return dataset_metadata_df
     def get_dataset_metadata(self, dataset_name):
@@ -41,6 +46,19 @@ class AI4LifeDatasetsClient:
                         except Exception:
                             return ""
                     return ""
+                # Convert extraction timestamp to format YYYY-MM-DD_HH-MM-SS for extraction_time
+                extraction_timestamp = self.records_data.get("timestamp", "")
+                extraction_time = ""
+                if extraction_timestamp:
+                    try:
+                        # Parse ISO format timestamp and convert to YYYY-MM-DD_HH-MM-SS
+                        if isinstance(extraction_timestamp, str):
+                            dt = datetime.fromisoformat(extraction_timestamp.replace('Z', '+00:00'))
+                        else:
+                            dt = datetime.fromtimestamp(extraction_timestamp, tz=timezone.utc)
+                        extraction_time = dt.strftime("%Y-%m-%d_%H-%M-%S")
+                    except Exception:
+                        extraction_time = ""
                 # paths to extract (do NOT store path-lists in output)
                 path_map: Dict[str, Any] = {
                     "dataset_id": dataset_id,
@@ -55,7 +73,11 @@ class AI4LifeDatasetsClient:
                     "citation": manifest.get('cite', ''),
                     "license": manifest.get('license', ''),
                     "url": f"https://bioimage.io/#/artifacts/{dataset_id}",
-                    "extraction_timestamp": self.records_data.get("timestamp", ""),
+                    "extraction_metadata": {
+                        "extraction_method": "Hypha API",
+                        "confidence": 1.0,
+                        "extraction_time": extraction_time
+                    },
                     "enriched": True,
                     "entity_type": "Dataset",
                     "platform": "AI4Life"
