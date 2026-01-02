@@ -9,8 +9,8 @@ general:
   # Base data directory for extraction outputs
   data_root: "/data"
 
-  clean_elasticsearch_index: true
-  clean_neo4j_database: true
+  clean_elasticsearch_index: false
+  clean_neo4j_database: false
 
 # Platform-Specific Configurations
 platforms:

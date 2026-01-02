@@ -66,16 +66,16 @@ class ElasticsearchService(FacetedSearchMixin):
         # Calculate offset
         from_offset = (page - 1) * page_size
 
-        # Create search object
-        # search = self.client.search(index=self.config.hf_models_index, body=search_query)
-        search = None
-
+        # Create search object using elasticsearch_dsl
+        search = Search(using=self.client, index=self.config.hf_models_index)
         # Add search query if provided
         if search_query:
-            search = self.client.search(index=self.config.hf_models_index, body=Q("multi_match", query=search_query, fields=["name", "description", "keywords"]))
-
-        # Execute search with pagination
-        response = search.execute()[from_offset:from_offset + page_size]
+            search = search.query("multi_match", query=search_query, fields=["name", "description", "keywords"])
+        else:
+            search = search.query("match_all")
+        # Apply pagination and execute search
+        search = search[from_offset:from_offset + page_size]
+        response = search.execute()
 
         # Convert to ModelListItem objects
         models: List[ModelListItem] = []
