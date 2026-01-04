@@ -28,6 +28,7 @@ class GeneralConfig(BaseModel):
     clean_elasticsearch_index: bool = Field(default=False)
     clean_neo4j_database: bool = Field(default=False)
     save_loaded_extraction_metadata_file: bool = Field(default=False)
+    n10s_reset_on_config_change: bool = Field(default=False)
 
 
 class HuggingFaceConfig(BaseModel):
