@@ -18,6 +18,22 @@ from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
 
+class ValidPeriod(BaseModel):
+    """
+    Time period for which the extraction is valid.
+    """
+    start: Optional[datetime] = Field(
+        default=None,
+        alias="from",
+        description="Start timestamp of validity"
+    )
+    end: Optional[datetime] = Field(
+        default=None,
+        alias="until",
+        description="End timestamp of validity"
+    )
+
+
 class ExtractionMetadata(BaseModel):
     """
     Metadata about how a field was extracted/derived.
@@ -40,6 +56,10 @@ class ExtractionMetadata(BaseModel):
     notes: Optional[str] = Field(
         default=None,
         description="Additional notes about the extraction"
+    )
+    valid_period: Optional[ValidPeriod] = Field(
+        default=None,
+        description="Time period for which this metadata is valid"
     )
 
 
