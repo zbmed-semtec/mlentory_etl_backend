@@ -480,6 +480,59 @@ def hf_enriched_keywords(keywords_data: Tuple[Dict[str, List[str]], str]) -> str
     logger.info(f"Keywords saved to {final_path}")
     return str(final_path)
 
+@asset(
+    group_name="hf_enrichment",
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_identified_modelcard_chunks(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[dict]], str]:
+    """
+    Converts raw model card text into a structured AST, then processes 
+    that AST into a flat list of chunks using the generate_chunks logic.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Tuple of ({model_id: list_of_chunks}, run_folder)
+    """
+    models_json_path, run_folder = models_data
+    enrichment = HFEnrichment()
+    models_df = HFHelper.load_models_dataframe(models_json_path)
+
+    modelcard_ast = enrichment.identifiers["chunk"].identify_per_model(models_df)
+
+    return (modelcard_ast, run_folder)
+        
+@asset(
+    group_name="hf_enrichment",
+    ins={"chunks_data": AssetIn("hf_identified_modelcard_chunks")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str]) -> str:
+    """
+    Ranks chunks to find the one most likely 
+    to contain citation/BibTeX information.
+
+    Args:
+        chunks_data: Tuple of ({model_id: list_of_chunks}, run_folder)
+
+    Returns:
+        Tuple of ({model_id: identified_chunk}, run_folder)
+    """
+    chunks_dict, run_folder = chunks_data
+    enrichment = HFEnrichment()
+    output_root = Path(run_folder).parent.parent
+
+    json_path = enrichment.identifiers["citation"].identify_per_model(chunks_dict, output_root)
+
+    # Move to run folder with clean name
+    final_path = Path(run_folder) / "chunks_citation.json"
+    Path(json_path).rename(final_path)
+    
+    logger.info(f"Citation chunks saved to {final_path}")
+    return str(final_path)
+
 
 @asset(
     group_name="hf_enrichment",
