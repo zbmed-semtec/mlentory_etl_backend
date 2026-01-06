@@ -7,7 +7,7 @@ from etl_extractors.ai4life.clients.keywords_client import AI4LifeKeywordClient
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 
 import requests

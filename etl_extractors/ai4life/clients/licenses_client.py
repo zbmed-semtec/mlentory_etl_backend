@@ -11,15 +11,10 @@ import logging
 import pandas as pd
 import itertools
 import requests
-
-
-
 from ..ai4life_helper import AI4LifeHelper
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
 
 class AI4LifeLicenseClient:
     """
@@ -28,9 +23,6 @@ class AI4LifeLicenseClient:
 
     def __init__(self, records_data = None) -> None:
         self.records_data = records_data
-        
-   
-
         
     def get_licenses_metadata(self, license_ids: List[str]) -> pd.DataFrame:
         # make unique + deterministic
