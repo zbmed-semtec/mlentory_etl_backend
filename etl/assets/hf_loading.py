@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -82,8 +81,8 @@ def hf_rdf_store_ready() -> Dict[str, Any]:
             multithreading=True,
             max_workers=4,
         )
-        # Initialize/ensure n10s according to environment flag
-        reset_flag = os.getenv("N10S_RESET_ON_CONFIG_CHANGE", "false").lower() == "true"
+        # Initialize/ensure n10s according to configuration
+        reset_flag = get_general_config().n10s_reset_on_config_change
         desired_cfg = {"keepCustomDataTypes": True, "handleVocabUris": "SHORTEN"}
 
         if get_general_config().clean_neo4j_database:
@@ -339,6 +338,10 @@ def hf_export_metadata_json(
 
     logger.info(f"Exporting metadata JSON from models loaded in: {models_report_path}")
     logger.info(f"Neo4j store status: {store_ready['status']}")
+    
+    if not get_general_config().save_loaded_extraction_metadata_file:
+        logger.info("Skipping metadata export according to general configuration...")
+        return ""
 
     # Create RDF output directory parallel to normalized
     normalized_path = Path(normalized_folder)

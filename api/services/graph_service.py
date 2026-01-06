@@ -71,6 +71,7 @@ class GraphService:
     ) -> GraphResponse:
         """
         Fetch a subgraph starting from a specific entity.
+        We ignore the adjacent metadata nodes for now.
 
         Refactored to a 2-step approach using a helper for single-entity retrieval:
         1. Fetch the main entity (properties + allowed relations).
@@ -94,14 +95,6 @@ class GraphService:
         # If no relationships provided, choose sensible defaults per entity type
         if not relationships and entity_label:
             relationships = self.default_relationships.get(entity_label, [])
-            
-        logger.info("\n--------------------------------\n")
-        logger.info(f"Relationships: {relationships}")
-        logger.info(f"Entity URI: {entity_uri}")
-        logger.info(f"Entity Label: {entity_label}")
-        logger.info(f"Depth: {depth}")
-        logger.info(f"Direction: {direction}")
-        logger.info("\n--------------------------------\n")
 
         try:
             # --- STEP 1: Main Entity ---
@@ -141,6 +134,10 @@ class GraphService:
             for neighbor_uri in neighbor_uris:
                 # Fetch details for neighbor, NO restrictions on relationships
                 neighbor_data = self._get_entity_data(neighbor_uri, allowed_relationships=None)
+                
+                
+                if neighbor_uri == entity_uri:
+                    continue
                 
                 if not neighbor_data:
                     continue
@@ -182,6 +179,7 @@ class GraphService:
     def _get_entity_data(
         self,
         uri: str,
+        ignore_metadata: bool = True,
         allowed_relationships: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """
@@ -194,6 +192,7 @@ class GraphService:
             allowed_relationships: If provided, only these relationship types are fetched.
                                    If None, all outgoing relationships are fetched.
                                    
+            ignore_metadata: If True, ignore metadata nodes.
         Returns:
             Dict containing:
               - id: Node ID (URI or elementId)
@@ -219,11 +218,17 @@ class GraphService:
             
         node_record = props_res[0]
         node_id = node_record.get("id")
-        labels = node_record.get("labels", [])
-        raw_props = node_record.get("props", {})
+        labels = []
+        raw_props = {}
+        
+        for record in props_res:
+            if ignore_metadata and "Resource" not in record.get("labels", []):
+                continue
+            labels.extend(record.get("labels", []))
+            raw_props.update(record.get("props", {}))
         
         # Normalize properties to List[str] or strict types
-        # User requested "internal properties... treated as 'properties'"
+        # Internal properties are treated as 'properties'
         normalized_props = {}
         for k, v in raw_props.items():
             if v is None:
@@ -232,7 +237,15 @@ class GraphService:
                 normalized_props[k] = [str(x) for x in v if x is not None]
             else:
                 normalized_props[k] = [str(v)]
-                
+
+        if labels:
+            normalized_props["type"] = []
+            for label in labels:
+                # Identify custom types like "fair4ml__MLModel" or "schema__Dataset"
+                if "__" in label:
+                    normalized_props["type"].append(label)
+            if len(labels) == 1 and labels[0] == "Resource":
+                normalized_props["type"].append("schema__url")
         # 2. Get Relations (treated as properties + explicit edges)
         # If allowed_relationships is set, we filter.
         
@@ -635,7 +648,244 @@ class GraphService:
             return grouped, count
         except Exception as e:
             logger.error(f"Error listing entities: {e}", exc_info=True)
-            return {}, 0      
+            return {}, 0
+
+    def get_model_metadata(self, model_uri: str) -> Dict[str, Any]:
+        """
+        Fetch extraction metadata for a model's properties.
+        
+        Args:
+            model_uri: The full URI of the model.
+            
+        Returns:
+            Dict mapping property URIs to their metadata.
+        """
+        query = """
+        MATCH (m {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
+        WHERE r.valid_to IS NULL
+        RETURN 
+            s.predicate_iri as predicate,
+            s.extraction_method as method,
+            s.confidence as confidence,
+            s.notes as notes,
+            r.valid_from as valid_from,
+            r.valid_to as valid_to
+        """
+        
+        try:
+            results = _run_cypher(query, {"uri": model_uri}, self.config)
+            
+            metadata = {}
+            for record in results:
+                predicate = record.get("predicate")
+                if not predicate:
+                    continue
+                    
+                meta_item = {
+                    "extraction_method": record.get("method"),
+                    "confidence": record.get("confidence"),
+                    "notes": record.get("notes"),
+                }
+                
+                # Add valid_period if dates exist
+                valid_from = record.get("valid_from")
+                valid_to = record.get("valid_to")
+                
+                if valid_from or valid_to:
+                    meta_item["valid_period"] = {
+                        "from": str(valid_from) if valid_from else None,
+                        "until": str(valid_to) if valid_to else None
+                    }
+                    
+                metadata[predicate] = meta_item
+                
+            return metadata
+            
+        except Exception as e:
+            logger.error(f"Error fetching metadata for {model_uri}: {e}", exc_info=True)
+            return {}
+
+    def get_model_history(self, model_uri: str) -> List[Dict[str, Any]]:
+        """
+        Fetch the full history of a model including all property versions and their metadata.
+        
+        This method retrieves all property snapshots (current and historical) for a model
+        and reconstructs the state of the model at each distinct modification time.
+        
+        Args:
+            model_uri: The full URI of the model.
+            
+        Returns:
+            List of model states, sorted by dateModified (newest first).
+        """
+        query = """
+        MATCH (m {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
+        RETURN 
+            s.predicate_iri as predicate,
+            s.value as value,
+            s.value_uri as value_uri,
+            s.extraction_method as method,
+            s.confidence as confidence,
+            s.notes as notes,
+            r.valid_from as valid_from,
+            r.valid_to as valid_to
+        ORDER BY r.valid_from DESC
+        """
+        
+        try:
+            results = _run_cypher(query, {"uri": model_uri}, self.config)
+            
+            # 1. Collect all distinct time points (valid_from dates)
+            # These represent the moments when the model state changed
+            time_points = set()
+            snapshots = []
+            
+            for record in results:
+                valid_from = record.get("valid_from")
+                if valid_from:
+                    time_points.add(str(valid_from))
+                
+                # Normalize record for easier processing
+                snapshot = {
+                    "predicate": record.get("predicate"),
+                    "value": record.get("value"),
+                    "value_uri": record.get("value_uri"),
+                    "metadata": {
+                        "extraction_method": record.get("method"),
+                        "confidence": record.get("confidence"),
+                        "notes": record.get("notes"),
+                        "valid_period": {
+                            "from": str(valid_from) if valid_from else None,
+                            "until": str(record.get("valid_to")) if record.get("valid_to") else None
+                        }
+                    },
+                    "valid_from": str(valid_from) if valid_from else None,
+                    "valid_to": str(record.get("valid_to")) if record.get("valid_to") else None
+                }
+                snapshots.append(snapshot)
+                
+            # Sort time points descending (newest first)
+            sorted_time_points = sorted(list(time_points), reverse=True)
+            
+            history = []
+            
+            # 2. Reconstruct model state for each time point
+            for timestamp in sorted_time_points:
+                model_state = {
+                    "dateModified": timestamp,
+                    "extraction_metadata": {}
+                }
+                
+                # Check which snapshots were valid at this timestamp
+                for snap in snapshots:
+                    # A snapshot is valid if:
+                    # valid_from <= timestamp AND (valid_to is NULL OR valid_to > timestamp)
+                    # Note: We use string comparison for ISO dates which works for standard format
+                    
+                    is_active = (snap["valid_from"] is None or snap["valid_from"] <= timestamp) and \
+                                (snap["valid_to"] is None or snap["valid_to"] >= timestamp)
+                                
+                    if is_active:
+                        predicate = snap["predicate"]
+                        
+                        # Handle value (scalar or URI)
+                        # We collect values in a list to handle multi-valued properties
+                        val = snap["value_uri"] if snap["value_uri"] else snap["value"]
+                        
+                        # Store property value
+                        if predicate not in model_state:
+                            model_state[predicate] = []
+                        if val is not None and val not in model_state[predicate]:
+                            model_state[predicate].append(val)
+                            
+                        # Store metadata
+                        # We just overwrite metadata for the property (assuming uniform metadata for multi-values or last-win)
+                        model_state["extraction_metadata"][predicate] = snap["metadata"]
+                        
+                history.append(model_state)
+                
+            return history
+            
+        except Exception as e:
+            logger.error(f"Error fetching model history for {model_uri}: {e}", exc_info=True)
+            return []
+
+    def extract_related_entity_uris(
+        self,
+        state: Dict[str, Any]
+    ) -> Dict[str, List[str]]:
+        """
+        Extract URIs from relationship properties in a state dict.
+
+        Args:
+            state: Dictionary containing property predicates and values
+
+        Returns:
+            Dictionary mapping relationship types to lists of entity URIs
+        """
+        relationship_uris: Dict[str, List[str]] = {}
+
+        for predicate, values in state.items():
+            # Process values - look for URIs
+            if not isinstance(values, list):
+                values = [values]
+
+            uris = []
+            for val in values:
+                if isinstance(val, str) and val.startswith("https://"):
+                    uris.append(val)
+
+            if uris:
+                relationship_uris[predicate] = uris
+
+        return relationship_uris
+
+    def build_related_entities_from_uris(
+        self,
+        relationship_uris: Dict[str, List[str]]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Build related entities dictionary by fetching entity details from the graph.
+
+        Args:
+            relationship_uris: Dictionary mapping relationship types to entity URIs
+
+        Returns:
+            Dictionary mapping relationship types to entity detail lists
+        """
+        if not relationship_uris:
+            return {}
+
+        # Collect all unique URIs for batch fetch
+        all_uris = set()
+        for uris in relationship_uris.values():
+            all_uris.update(uris)
+
+        if not all_uris:
+            return {}
+
+        # Fetch entity properties in batch
+        entity_properties = self.get_entities_properties_batch(
+            entity_ids=list(all_uris),
+            properties=None  # Fetch all properties
+        )
+
+        # Build related entities structure
+        related_entities: Dict[str, List[Dict[str, Any]]] = {}
+
+        for rel_type, uris in relationship_uris.items():
+            related_entities[rel_type] = []
+
+            for uri in uris:
+                entity_dict = {"uri": uri}
+
+                # Add properties if available
+                if uri in entity_properties:
+                    entity_dict.update(entity_properties[uri])
+
+                related_entities[rel_type].append(entity_dict)
+
+        return related_entities
 
 # Global service instance
 graph_service = GraphService()

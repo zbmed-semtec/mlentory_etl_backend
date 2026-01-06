@@ -11,13 +11,17 @@ general:
 
   clean_elasticsearch_index: false
   clean_neo4j_database: false
+  # Whether to save the file with the metadata extraction after the loading stage
+  save_extraction_metadata_file: false
+  # Whether to reset Neo4j database and re-initialize n10s on config change
+  n10s_reset_on_config_change: false
 
 # Platform-Specific Configurations
 platforms:
   # HuggingFace Configuration
   huggingface:
     # Number of latest models to extract
-    num_models: 0
+    num_models: 10
     # Whether to prioritize recently updated models
     update_recent: true
     # Number of parallel threads for extraction
@@ -29,7 +33,7 @@ platforms:
     # Number of threads for enrichment operations (datasets, articles, etc.)
     enrichment_threads: 4
     # Offset for pagination (if applicable)
-    offset: 9000
+    offset: 100
 
   # OpenML Configuration
   openml:

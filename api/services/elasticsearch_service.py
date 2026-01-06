@@ -68,11 +68,13 @@ class ElasticsearchService(FacetedSearchMixin):
 
         # Create search object using elasticsearch_dsl
         search = Search(using=self.client, index=self.config.hf_models_index)
+
         # Add search query if provided
         if search_query:
             search = search.query("multi_match", query=search_query, fields=["name", "description", "keywords"])
         else:
             search = search.query("match_all")
+
         # Apply pagination and execute search
         search = search[from_offset:from_offset + page_size]
         response = search.execute()
