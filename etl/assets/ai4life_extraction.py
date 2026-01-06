@@ -132,6 +132,67 @@ def ai4life_datasets_raw(
     return (str(datasets_path), run_folder)
 
 
+@asset(
+    group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"}
+)
+def ai4life_identified_licenses(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify license references per model from raw AI4Life models.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Dict of {model_id: [license_ids_or_names]}
+    """
+    models_json_path, _ = models_data
+    enrichment = AI4LifeEnrichment()
+    models_df = AI4LifeHelper.load_models_dataframe(models_json_path)
+
+    model_licenses = enrichment.identifiers["licenses"].identify_per_model(models_df)
+    logger.info("Identified licenses for %d models", len(model_licenses))
+    return model_licenses
+
+@asset(
+    group_name="ai4life_enrichment",
+    tags={"pipeline": "ai4life_etl"},
+    ins={
+        "raw_records": AssetIn("ai4life_raw_records"),
+        "identified_licenses": AssetIn("ai4life_identified_licenses"),
+    },
+)
+def ai4life_licenses_raw(
+    raw_records: Dict[str, Any],
+    identified_licenses: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Extract license records and save to licenses.json.
+    Returns (licenses_json_path, run_folder).
+    """
+    records = raw_records["data"]
+    run_folder = raw_records["run_folder"]
+
+    # Collect unique licenses
+    license_names: Set[str] = set()
+    for _, lic_list in identified_licenses.items():
+        license_names.update([x for x in lic_list if x])
+
+    if not license_names:
+        logger.info("No licenses to extract")
+        return ("", run_folder)
+
+    extractor = AI4LifeExtractor(records_data=records)
+    license_df = extractor.extract_specific_licenses(list(license_names))
+
+    license_path = Path(run_folder) / "licenses.json"
+    license_df.to_json(str(license_path), orient="records", indent=2)
+
+    logger.info("Saved %d licenses to %s", len(license_df), license_path)
+    return (str(license_path), run_folder)
+
+
 # # @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
 # # def ai4life_applications_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
 # #     """

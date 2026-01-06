@@ -1,6 +1,7 @@
 from __future__ import annotations
 from etl_extractors.ai4life.clients.models_client import AI4LifeModelClient
 from etl_extractors.ai4life.clients.datasets_client import AI4LifeDatasetsClient
+from etl_extractors.ai4life.clients.licenses_client import AI4LifeLicenseClient
 
 import json
 from pathlib import Path
@@ -19,9 +20,11 @@ class AI4LifeExtractor:
 
     def __init__(self, records_data = None, 
                  models_client: Optional[AI4LifeModelClient] = None,
-                 datasets_client: Optional[AI4LifeDatasetsClient] = None) -> None:
+                 datasets_client: Optional[AI4LifeDatasetsClient] = None,
+                 licenses_client: Optional[AI4LifeLicenseClient] = None) -> None:
         self.models_client = models_client or AI4LifeModelClient(records_data)
         self.datasets_client = datasets_client or AI4LifeDatasetsClient(records_data)
+        self.licenses_client = licenses_client or AI4LifeLicenseClient()
         
     def fetch_records(self, num_models:int, base_url:str, parent_id:str) -> Dict[str, Any]:
         """Fetch records from AI4Life API and set extraction timestamp."""
@@ -43,6 +46,10 @@ class AI4LifeExtractor:
     
     def extract_specific_datasets(self, dataset_names):
         df = self.datasets_client.get_datasets_metadata(dataset_names)
+        return df
+    
+    def extract_specific_licenses(self, license_names):
+        df = self.licenses_client.get_licenses_metadata(license_names)
         return df
 
  

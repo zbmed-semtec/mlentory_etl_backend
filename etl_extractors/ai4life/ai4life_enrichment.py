@@ -14,6 +14,7 @@ from .ai4life_helper import AI4LifeHelper
 from .ai4life_extractor import AI4LifeExtractor
 from .entity_identifiers.base import EntityIdentifier
 from .entity_identifiers.dataset_identifier import DatasetIdentifier 
+from .entity_identifiers.license_identifier import LicenseIdentifier
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class AI4LifeEnrichment:
         # Register entity identifiers
         self.identifiers: Dict[str, EntityIdentifier] = {
             "datasets": DatasetIdentifier(),
+            "licenses": LicenseIdentifier()
            }
         
     

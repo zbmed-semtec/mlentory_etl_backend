@@ -7,13 +7,15 @@ import pandas as pd
 from ..ai4life_helper import AI4LifeHelper
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 class AI4LifeDatasetsClient:
     """
-    Client for interacting with HuggingFace datasets (Croissant metadata).
+    Client for interacting with AI4Life datasets (Croissant metadata).
     """
     def __init__(self, records_data) -> None:
         self.records_data = records_data
         self.dataset_records = None
+        
     def get_datasets_metadata(self, dataset_names):
         """get records from AI4Life API and set extraction timestamp."""
         # Filter records by type
@@ -27,6 +29,7 @@ class AI4LifeDatasetsClient:
             return pd.DataFrame()
         dataset_metadata_df = pd.DataFrame(dataset_metadata)
         return dataset_metadata_df
+    
     def get_dataset_metadata(self, dataset_name):
         if not self.dataset_records:
             return None
