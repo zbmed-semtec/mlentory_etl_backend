@@ -192,6 +192,66 @@ def ai4life_licenses_raw(
     logger.info("Saved %d licenses to %s", len(license_df), license_path)
     return (str(license_path), run_folder)
 
+@asset(
+    group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"}
+)
+def ai4life_identified_keywords(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify keyword references per model from raw AI4Life models.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Dict of {model_id: [keyword_names]}
+    """
+    models_json_path, _ = models_data
+    enrichment = AI4LifeEnrichment()
+    models_df = AI4LifeHelper.load_models_dataframe(models_json_path)
+
+    model_keywords = enrichment.identifiers["keywords"].identify_per_model(models_df)
+    logger.info("Identified keywords for %d models", len(model_keywords))
+    return model_keywords
+
+@asset(
+    group_name="ai4life_enrichment",
+    tags={"pipeline": "ai4life_etl"},
+    ins={
+        "raw_records": AssetIn("ai4life_raw_records"),
+        "identified_keywords": AssetIn("ai4life_identified_keywords"),
+    },
+)
+def ai4life_keywords_raw(
+    raw_records: Dict[str, Any],
+    identified_keywords: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Extract keyword records and save to licenses.json.
+    Returns (keywords_json_path, run_folder).
+    """
+    records = raw_records["data"]
+    run_folder = raw_records["run_folder"]
+
+    # Collect unique keywords
+    keywords_names: Set[str] = set()
+    for _, keyword_list in identified_keywords.items():
+        keywords_names.update([x for x in keyword_list if x])
+
+    if not keywords_names:
+        logger.info("No keywords to extract")
+        return ("", run_folder)
+
+    extractor = AI4LifeExtractor(records_data=records)
+    keywords_df = extractor.extract_specific_keywords(list(keywords_names))
+
+    keywords_path = Path(run_folder) / "keywords.json"
+    keywords_df.to_json(str(keywords_path), orient="records", indent=2)
+
+    logger.info("Saved %d keywords to %s", len(keywords_df), keywords_path)
+    return (str(keywords_path), run_folder)
+
 
 # # @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
 # # def ai4life_applications_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
