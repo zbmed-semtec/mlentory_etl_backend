@@ -51,7 +51,7 @@ platforms:
   # AI4Life Configuration
   ai4life:
     # Number of models to extract
-    num_models: 50
+    num_models: 500
     # Base URL for AI4Life API
     base_url: "https://hypha.aicell.io"
     # Parent ID for collection filtering
