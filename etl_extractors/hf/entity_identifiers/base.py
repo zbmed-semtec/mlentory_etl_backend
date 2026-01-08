@@ -4,7 +4,8 @@ Base interface for entity identifiers.
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Set, Dict, Any, List
+from typing import Set, Dict, Any, List, Tuple
+from pathlib import Path
 import pandas as pd
 
 
@@ -36,7 +37,7 @@ class EntityIdentifier(ABC):
         pass
 
     @abstractmethod
-    def identify_per_model(self, models_df: pd.DataFrame) -> Dict[str, List[str]]:
+    def identify_per_model(self, models_df: pd.DataFrame) -> Dict[str, Any]:
         """
         Extract entity IDs/names per model from the models DataFrame.
 
@@ -45,6 +46,18 @@ class EntityIdentifier(ABC):
 
         Returns:
             Dict mapping model_id to list of entity identifiers for that model
+        """
+        pass
+
+    def identify_from_chunks(self, chunks_dict: Dict[str, List[Dict[str, Any]]], output_root: Path) -> Any:
+        """
+        Extract entity IDs/names from a dictionary of model card chunks per model ID
+
+        Args:
+            chunks_data: Tuple of ({model_id: list_of_chunks}, run_folder)
+
+        Returns:
+            Path of saved Dict mapping model_id to list of entity identifiers for that model
         """
         pass
 

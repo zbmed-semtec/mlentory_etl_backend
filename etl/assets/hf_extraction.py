@@ -500,9 +500,9 @@ def hf_identified_modelcard_chunks(models_data: Tuple[str, str]) -> Tuple[Dict[s
     enrichment = HFEnrichment()
     models_df = HFHelper.load_models_dataframe(models_json_path)
 
-    modelcard_ast = enrichment.identifiers["chunk"].identify_per_model(models_df)
+    modelcard_chunks = enrichment.identifiers["chunk"].identify_per_model(models_df)
 
-    return (modelcard_ast, run_folder)
+    return (modelcard_chunks, run_folder)
         
 @asset(
     group_name="hf_enrichment",
@@ -524,7 +524,7 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
     enrichment = HFEnrichment()
     output_root = Path(run_folder).parent.parent
 
-    json_path = enrichment.identifiers["citation"].identify_per_model(chunks_dict, output_root)
+    json_path = enrichment.identifiers["citation"].identify_from_chunks(chunks_dict, output_root)
 
     # Move to run folder with clean name
     final_path = Path(run_folder) / "chunks_citation.json"
@@ -533,6 +533,29 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
     logger.info(f"Citation chunks saved to {final_path}")
     return str(final_path)
 
+@asset(
+    group_name="hf_enrichment",
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, str | None], str]:
+    """
+    Identify model size per model from raw HF models.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Tuple of ({model_id: model_size(e.g. 7B, 540M)}, run_folder)
+    """
+    models_json_path, run_folder = models_data
+    enrichment = HFEnrichment()
+    models_df = HFHelper.load_models_dataframe(models_json_path)
+
+    model_sizes = enrichment.identifiers["modelsize"].identify_per_model(models_df)
+    logger.info(f"Identified model size for {len(model_sizes)} models")
+
+    return (model_sizes, run_folder)
 
 @asset(
     group_name="hf_enrichment",

@@ -26,11 +26,13 @@ class CitationIdentifier(EntityIdentifier):
     def entity_type(self) -> str:
         return "citation"
 
-    def identify(self, chunks_dict: Dict[str, dict]) -> Set[str]:
-        # not used for this step, so just return an empty set
-        return set()
+    def identify(self, models_df: pd.DataFrame) -> Set[str]:
+        return super().identify(models_df)
+    
+    def identify_per_model(self, models_df: pd.DataFrame) -> Dict[str, Any]:
+        return super().identify_per_model(models_df)
 
-    def identify_per_model(self, chunks_dict: Dict[str, List[Dict[str, Any]]], output_root: Path) ->  Dict[str, dict | None]:
+    def identify_from_chunks(self, chunks_dict: Dict[str, List[Dict[str, Any]]], output_root: Path) ->  Path:
         """
         Identifies chunks that contain property: citation.
 
@@ -70,3 +72,44 @@ class CitationIdentifier(EntityIdentifier):
 
         logger.info("Saved %s to %s", suffix, json_path)
         return json_path
+
+
+class ModelSizeIdentifier(EntityIdentifier):
+    """
+    Identifies modelsize from huggingface model card tags
+    
+    """
+
+    @property
+    def entity_type(self) -> str:
+        return "modelsize"
+
+    def identify(self, models_df: pd.DataFrame) -> Set[str]:
+        # not used for this step, so just return an empty set
+        return set()
+
+    def identify_per_model(self, models_df: pd.DataFrame) ->  Dict[str, str | None]:
+        """
+        Identifies model size from huggingface model card ID
+
+        Returns:
+            Dict of model_id : model_size
+        """
+        model_sizes: Dict[str,  str | None] = {}
+
+        if models_df.empty:
+            return model_sizes
+
+        for _, row in models_df.iterrows():
+            model_id = row.get("modelId", "")
+            if not model_id:
+                continue
+            
+            regex = r"\b(\d+(\.\d+)?[BM])\b"
+            model_id = model_id.split("/")[1]
+            match = re.search(regex, model_id, re.IGNORECASE)
+            size = match.group(1) if match else None
+            model_sizes[model_id] = size
+
+        logger.info("Identified sizes for %d models", len(model_sizes))
+        return model_sizes
