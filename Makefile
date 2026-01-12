@@ -67,7 +67,7 @@ build: ## Build Docker images
 
 rebuild: ## Rebuild Docker images without cache
 	@echo "$(BLUE)Rebuilding Docker images...$(NC)"
-	docker compose build --no-cache
+	docker compose --profile=complete build --no-cache
 	@echo "$(GREEN)Rebuild complete!$(NC)"
 
 ##@ Data & Cleanup
