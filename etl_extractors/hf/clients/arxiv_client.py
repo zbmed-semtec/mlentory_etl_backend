@@ -9,7 +9,7 @@ import traceback
 import pandas as pd
 import arxiv
 
-from ..hf_helper import HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class HFArxivClient:
                 for arxiv_id in batch_ids:
                     arxiv_data.append({
                         "arxiv_id": arxiv_id,
-                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Article", arxiv_id),
+                        "mlentory_id": generate_mlentory_entity_hash_id("Article", arxiv_id, platform="HF"),
                         "title": None,
                         "enriched": False,
                         "entity_type": "Article",
@@ -103,7 +103,7 @@ class HFArxivClient:
 
                     paper_metadata = {
                         "arxiv_id": arxiv_id,
-                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Article", arxiv_id),
+                        "mlentory_id": generate_mlentory_entity_hash_id("Article", arxiv_id, platform="HF"),
                         "title": paper.title,
                         "published": published,
                         "updated": updated,
@@ -130,7 +130,7 @@ class HFArxivClient:
                     logger.warning("Error processing arXiv paper '%s': %s, creating stub", arxiv_id, e)
                     arxiv_data.append({
                         "arxiv_id": arxiv_id,
-                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Article", arxiv_id),
+                        "mlentory_id": generate_mlentory_entity_hash_id("Article", arxiv_id, platform="HF"),
                         "title": None,
                         "enriched": False,
                         "entity_type": "Article",
@@ -149,7 +149,7 @@ class HFArxivClient:
                     logger.warning("arXiv paper '%s' not found in results, creating stub", arxiv_id)
                     arxiv_data.append({
                         "arxiv_id": arxiv_id,
-                        "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Article", arxiv_id),
+                        "mlentory_id": generate_mlentory_entity_hash_id("Article", arxiv_id, platform="HF"),
                         "title": None,
                         "enriched": False,
                         "entity_type": "Article",

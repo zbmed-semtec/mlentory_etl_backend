@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 import numpy as np
 
-from ..hf_helper import HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 
 
 
@@ -111,7 +111,7 @@ class HFKeywordClient:
                 
                 self.curated_definitions[keyword] = {
                     'keyword': keyword,
-                    'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                    'mlentory_id': generate_mlentory_entity_hash_id("Keyword", keyword, platform="HF"),
                     'definition': row['definition'],
                     'aliases': aliases,
                     'source': 'curated_csv',
@@ -434,7 +434,7 @@ class HFKeywordClient:
             # No data found, create stub entity
             return {
                 'keyword': keyword,
-                'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                'mlentory_id': generate_mlentory_entity_hash_id("Keyword", keyword, platform="HF"),
                 'definition': None,
                 'source': 'not_found',
                 'url': None,
@@ -484,7 +484,7 @@ class HFKeywordClient:
                     # Add basic stub on error to keep pipeline moving
                     all_keyword_data.append({
                         'keyword': keyword,
-                        'mlentory_id': HFHelper.generate_mlentory_entity_hash_id("Keyword", keyword),
+                        'mlentory_id': generate_mlentory_entity_hash_id("Keyword", keyword, platform="HF"),
                         'definition': None,
                         'source': 'error',
                         'url': None,
@@ -502,4 +502,107 @@ class HFKeywordClient:
         
         return pd.DataFrame(all_keyword_data)
 
+    def _search_wikipedia(self, keyword: str) -> Optional[str]:
+        """
+        Search Wikipedia for keyword with technology/AI context.
+        Returns the title of the most relevant page.
+        """
+        url = "https://en.wikipedia.org/w/api.php"
+        # Prioritize technology and AI context
+        search_query = f"{keyword} AI"
+        
+        params = {
+            "action": "query",
+            "list": "search",
+            "srsearch": search_query,
+            "format": "json",
+            "srlimit": 1
+        }
+        
+        try:
+            headers = {"User-Agent": self.user_agent}
+            response = requests.get(url, params=params, headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                search_results = data.get("query", {}).get("search", [])
+                if search_results:
+                    return search_results[0]["title"]
+        except Exception as e:
+            logger.debug("Wikipedia search failed for %s: %s", keyword, e)
+            
+        return None
+
+    def _fetch_from_wikipedia(self, keyword: str) -> Optional[Dict[str, Any]]:
+        """Fetch keyword definition from Wikipedia and enrich with Wikidata."""
+        if not self.wiki:
+            return None
+        
+        try:
+            # 1. Try to find a more relevant page title using context search
+            page_title = self._search_wikipedia(keyword) or keyword
+            
+            # 2. Fetch the page
+            page = self.wiki.page(page_title)
+            
+            if not page.exists():
+                # Fallback to original keyword if the search result (if any) failed/didn't exist
+                if page_title != keyword:
+                    logger.debug("Context search failed for '%s', falling back to exact match", page_title)
+                    page = self.wiki.page(keyword)
+            
+            if not page.exists():
+                logger.debug("Wikipedia page not found for keyword: %s", keyword)
+                return None
+            
+            # Get summary (first 500 chars)
+            definition = page.summary[:500] if page.summary else None
+            if not definition:
+                return None
+            
+            # Enrich with Wikidata if available
+            aliases = []
+            wikidata_qid = None
+            
+            if self.wikidata_client and hasattr(page, 'pageid'):
+                try:
+                    # Try to get Wikidata entity
+                    # Note: This is a simplified approach; production might need more robust lookup
+                    wikidata_qid = self._get_wikidata_qid(page.title)
+                    if wikidata_qid:
+                        entity = self.wikidata_client.get(wikidata_qid, load=True)
+                        if hasattr(entity, 'data') and 'aliases' in entity.data:
+                            en_aliases = entity.data['aliases'].get('en', [])
+                            aliases = [alias['value'] for alias in en_aliases]
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Error fetching Wikidata for %s: %s", keyword, e)
+            
+            return {
+                'keyword': keyword,
+                'mlentory_id': generate_mlentory_entity_hash_id("Keyword", keyword, platform="HF"),
+                'definition': definition,
+                'source': 'wikipedia',
+                'url': page.fullurl,
+                'aliases': aliases,
+                'wikidata_qid': wikidata_qid,
+                'enriched': True,
+                'entity_type': 'Keyword',
+                'platform': 'HF',
+                'extraction_metadata': {
+                    'extraction_method': 'Wikipedia API' + (' + Wikidata' if wikidata_qid else ''),
+                    'confidence': 0.8,
+                }
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Error fetching Wikipedia data for %s: %s", keyword, e)
+            return None
+
+    def _get_wikidata_qid(self, wikipedia_title: str) -> Optional[str]:
+        """
+        Get Wikidata QID from Wikipedia title.
+        This is a simplified implementation.
+        """
+        # In production, you'd use the Wikidata API to lookup by Wikipedia title
+        # For now, return None (Wikidata integration is optional)
+        return None
 

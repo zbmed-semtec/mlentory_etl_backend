@@ -14,7 +14,7 @@ The HF RDF Loader implements a complete pipeline for persisting normalized Huggi
            │
            ▼
 ┌─────────────────────┐
-│  hf_rdf_loader.py   │
+│  rdf_loader.py   │
 │  - Mint subject IRIs│
 │  - Build triples    │
 │  - Serialize Turtle │
@@ -47,7 +47,7 @@ NEO4J_PASSWORD=your_password
 NEO4J_DATABASE=neo4j
 ```
 
-### 2. `etl_loaders/hf_rdf_loader.py`
+### 2. `etl_loaders/rdf_loader.py`
 
 HF-specific RDF building logic.
 
@@ -127,7 +127,7 @@ result = materialize([hf_rdf_store_ready, hf_models_normalized, hf_load_models_r
 
 ```python
 from etl_loaders.rdf_store import get_neo4j_store_config_from_env
-from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+from etl_loaders.rdf_loader import build_and_persist_models_rdf
 
 # Load config from env
 config = get_neo4j_store_config_from_env(
@@ -312,12 +312,12 @@ graph.close(True)
 
 Run unit tests:
 ```bash
-pytest tests/loaders/test_hf_rdf_loader.py -v
+pytest tests/loaders/test_rdf_loader.py -v
 ```
 
 Run integration tests (requires Neo4j):
 ```bash
-pytest tests/loaders/test_hf_rdf_loader.py -v -m integration
+pytest tests/loaders/test_rdf_loader.py -v -m integration
 ```
 
 ## Future Enhancements (v2+)

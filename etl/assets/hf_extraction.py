@@ -12,6 +12,7 @@ import pandas as pd
 from dagster import asset, AssetIn
 
 from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 from etl.config import get_hf_config
 
 
@@ -619,7 +620,7 @@ def hf_enriched_base_models(
     base_model_entities: Dict[str, Dict] = {}
 
     for base_model_id in sorted(unique_base_model_ids):
-        mlentory_id = HFHelper.generate_mlentory_entity_hash_id("Model", base_model_id)
+        mlentory_id = generate_mlentory_entity_hash_id("Model", base_model_id, platform="HF")
         if base_model_id in ancestor_models_by_id:
             model_record = dict(ancestor_models_by_id[base_model_id])
             model_record["mlentory_id"] = model_record.get("mlentory_id", mlentory_id)

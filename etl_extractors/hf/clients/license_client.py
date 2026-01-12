@@ -8,7 +8,7 @@ import pandas as pd
 import logging
 import spdx_lookup
 
-from ..hf_helper import HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 
 
 
@@ -36,7 +36,7 @@ class HFLicenseClient:
         for license_id in license_ids:
             license_data: Dict[str, Any] = {
                 "Name": license_id,
-                "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("License", license_id),
+                "mlentory_id": generate_mlentory_entity_hash_id("License", license_id, platform="HF"),
                 "Identifier": None,
                 "OSI Approved": None,
                 "Deprecated": None,

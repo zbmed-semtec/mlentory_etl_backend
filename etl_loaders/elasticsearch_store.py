@@ -30,6 +30,7 @@ class ElasticsearchConfig:
     username: Optional[str]
     password: Optional[str]
     hf_models_index: str
+    openml_models_index: str
 
     @classmethod
     def from_env(cls) -> "ElasticsearchConfig":
@@ -52,16 +53,18 @@ class ElasticsearchConfig:
         username = os.getenv("ELASTIC_USER", "elastic")
         password = os.getenv("ELASTIC_PASSWORD", "changeme")
         hf_models_index = os.getenv("ELASTIC_HF_MODELS_INDEX", "hf_models")
+        openml_models_index = os.getenv("ELASTIC_OPENML_MODELS_INDEX", "openml_models")
 
         logger.info(
             "Loaded Elasticsearch config from env: host=%s, port=%s, scheme=%s, "
-            "username=%s, password=%s, hf_models_index=%s",
+            "username=%s, password=%s, hf_models_index=%s, openml_models_index=%s",
             host,
             port_raw,
             scheme,
             username,
             password,
             hf_models_index,
+            openml_models_index,
         )
 
         try:
@@ -71,11 +74,12 @@ class ElasticsearchConfig:
 
         logger.info(
             "Loaded Elasticsearch config from env: host=%s, port=%s, scheme=%s, "
-            "hf_models_index=%s",
+            "hf_models_index=%s, openml_models_index=%s",
             host,
             port,
             scheme,
             hf_models_index,
+            openml_models_index,
         )
 
         return cls(
@@ -85,6 +89,7 @@ class ElasticsearchConfig:
             username=username,
             password=password,
             hf_models_index=hf_models_index,
+            openml_models_index=openml_models_index,
         )
 
 
@@ -98,6 +103,7 @@ def _config_cache_key(config: ElasticsearchConfig) -> str:
             config.username or "",
             config.password or "",
             config.hf_models_index,
+            config.openml_models_index,
         ]
     )
     return hashlib.sha256(materialized.encode("utf-8")).hexdigest()

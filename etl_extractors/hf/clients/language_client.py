@@ -8,7 +8,7 @@ import logging
 import pandas as pd
 import pycountry
 
-from ..hf_helper import HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class HFLanguagesClient:
             "name": getattr(language, "name", None) if language else None,
             "scope": getattr(language, "scope", None) if language else None,
             "type": getattr(language, "type", None) if language else None,
-            "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Language", code),
+            "mlentory_id": generate_mlentory_entity_hash_id("Language", code, platform="HF"),
             "enriched": language is not None,
             "entity_type": "Language",
             "platform": "HF",

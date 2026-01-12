@@ -12,7 +12,7 @@ to facilitate future JSON-LD conversion.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
@@ -92,12 +92,12 @@ class MLModel(BaseModel):
     )
     
     # ========== Authorship & Provenance (schema.org + fair4ml) ==========
-    author: Optional[str] = Field(
+    author: Optional[Union[str, List[str]]] = Field(
         default=None,
         description="Author(s) of the model (schema:author)",
         alias="https://schema.org/author"
     )
-    sharedBy: Optional[str] = Field(
+    sharedBy: Optional[Union[str, List[str]]] = Field(
         default=None,
         description="Person or Organization who shared the model online (fair4ml:sharedBy)",
         alias="https://w3id.org/fair4ml/sharedBy"
@@ -226,6 +226,11 @@ class MLModel(BaseModel):
         default_factory=list,
         description="Evaluation metrics and their values (fair4ml:evaluationMetrics)",
         alias="https://w3id.org/fair4ml/evaluationMetrics"
+    )
+    hasEvaluation: Optional[List[Union[str, Dict[str, Any]]]] = Field(
+        default_factory=list,
+        description="Evaluations or evaluation references (URI or object) (fair4ml:hasEvaluation)",
+        alias="https://w3id.org/fair4ml/hasEvaluation"
     )
     
     # ========== Additional URLs (schema.org + codemeta) ==========

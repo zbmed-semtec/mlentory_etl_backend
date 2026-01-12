@@ -18,6 +18,9 @@ import pandas as pd
 from .clients import (
     OpenMLRunsClient,
     OpenMLDatasetsClient,
+    OpenMLFlowsClient,
+    OpenMLTasksClient,
+    OpenMLKeywordClient,
 )
 from .scrapers import OpenMLWebScraper
 
@@ -36,6 +39,9 @@ class OpenMLExtractor:
         self,
         runs_client: Optional[OpenMLRunsClient] = None,
         datasets_client: Optional[OpenMLDatasetsClient] = None,
+        flows_client: Optional[OpenMLFlowsClient] = None,
+        tasks_client: Optional[OpenMLTasksClient] = None,
+        keyword_client: Optional[OpenMLKeywordClient] = None,
         enable_scraping: bool = False,
     ) -> None:
         """
@@ -46,6 +52,7 @@ class OpenMLExtractor:
             datasets_client: Client for datasets extraction
             flows_client: Client for flows extraction
             tasks_client: Client for tasks extraction
+            keyword_client: Client for keywords extraction
             enable_scraping: Whether to enable web scraping for dataset stats
         """
         # Initialize scraper if enabled
@@ -63,6 +70,9 @@ class OpenMLExtractor:
         self.datasets_client = datasets_client or OpenMLDatasetsClient(
             scraper=self.scraper
         )
+        self.flows_client = flows_client or OpenMLFlowsClient()
+        self.tasks_client = tasks_client or OpenMLTasksClient()
+        self.keyword_client = keyword_client or OpenMLKeywordClient()
 
     def extract_runs(
         self,
@@ -120,7 +130,83 @@ class OpenMLExtractor:
         )
         return df, json_path
 
-    # Flows and tasks are not extracted as separate enrichment entities anymore
+    def extract_specific_flows(
+        self,
+        flow_ids: List[int],
+        threads: int = 4,
+        output_root: Path | None = None,
+        save_csv: bool = False,
+    ) -> tuple[pd.DataFrame, Path]:
+        """
+        Extract metadata for specific flows.
+
+        Args:
+            flow_ids: List of flow IDs to extract
+            threads: Number of threads for parallel processing
+            output_root: Root directory for outputs
+            save_csv: Whether to also save as CSV
+
+        Returns:
+            Tuple of (DataFrame, json_path)
+        """
+        df = self.flows_client.get_specific_flows_metadata(
+            flow_ids=flow_ids, threads=threads
+        )
+        json_path = self.save_dataframe_to_json(
+            df, output_root=output_root, save_csv=save_csv, suffix="openml_flows"
+        )
+        return df, json_path
+
+    def extract_specific_tasks(
+        self,
+        task_ids: List[int],
+        threads: int = 4,
+        output_root: Path | None = None,
+        save_csv: bool = False,
+    ) -> tuple[pd.DataFrame, Path]:
+        """
+        Extract metadata for specific tasks.
+
+        Args:
+            task_ids: List of task IDs to extract
+            threads: Number of threads for parallel processing
+            output_root: Root directory for outputs
+            save_csv: Whether to also save as CSV
+
+        Returns:
+            Tuple of (DataFrame, json_path)
+        """
+        df = self.tasks_client.get_specific_tasks_metadata(
+            task_ids=task_ids, threads=threads
+        )
+        json_path = self.save_dataframe_to_json(
+            df, output_root=output_root, save_csv=save_csv, suffix="openml_tasks"
+        )
+        return df, json_path
+
+    def extract_specific_keywords(
+        self,
+        keywords: List[str],
+        output_root: Path | None = None,
+        save_csv: bool = False,
+    ) -> tuple[pd.DataFrame, Path]:
+        """
+        Extract metadata for specific keywords.
+
+        Args:
+            keywords: List of keywords to extract
+            output_root: Root directory for outputs
+            save_csv: Whether to also save as CSV
+
+        Returns:
+            Tuple of (DataFrame, json_path)
+        """
+        # Keyword client handles threading internally
+        df = self.keyword_client.get_keywords_metadata(keywords)
+        json_path = self.save_dataframe_to_json(
+            df, output_root=output_root, save_csv=save_csv, suffix="openml_keywords"
+        )
+        return df, json_path
 
     def save_dataframe_to_json(
         self,
@@ -145,9 +231,15 @@ class OpenMLExtractor:
         output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         json_path = output_dir / f"{timestamp}_{suffix}.json"
-        df.to_json(path_or_buf=str(json_path), orient="records", indent=2, date_format="iso")
         
-        if save_csv:
+        # Check if dataframe is empty to avoid errors or write empty file
+        if df.empty:
+            with open(json_path, 'w') as f:
+                f.write("[]")
+        else:
+            df.to_json(path_or_buf=str(json_path), orient="records", indent=2, date_format="iso")
+        
+        if save_csv and not df.empty:
             csv_path = output_dir / f"{timestamp}_{suffix}.csv"
             df.to_csv(csv_path, index=False)
         
@@ -166,5 +258,3 @@ class OpenMLExtractor:
                 self.scraper.close()
             except:
                 pass
-
-

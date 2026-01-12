@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run build hf-etl run-by-tag
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run build hf-etl run-by-tag docs docs-build
 
 # Default target
 .DEFAULT_GOAL := help
@@ -62,7 +62,7 @@ logs-elasticsearch: ## View Elasticsearch logs
 
 build: ## Build Docker images
 	@echo "$(BLUE)Building Docker images...$(NC)"
-	docker compose --profile=complete build
+	sudo docker compose --profile=complete build
 	@echo "$(GREEN)Build complete!$(NC)"
 
 rebuild: ## Rebuild Docker images without cache
@@ -132,6 +132,19 @@ typecheck: ## Run mypy type checking
 	@echo "$(GREEN)Type checking complete!$(NC)"
 
 lint: format typecheck ## Run all linting and formatting
+
+##@ Documentation
+
+docs: ## Serve documentation locally (with auto-reload)
+	@echo "$(BLUE)Starting MkDocs server...$(NC)"
+	@echo "$(GREEN)Documentation will be available at http://127.0.0.1:8000$(NC)"
+	@echo "$(YELLOW)Press Ctrl+C to stop the server$(NC)"
+	mkdocs serve
+
+docs-build: ## Build static documentation site
+	@echo "$(BLUE)Building static documentation site...$(NC)"
+	mkdocs build
+	@echo "$(GREEN)Documentation built in site/ directory$(NC)"
 
 ##@ ETL Operations
 
