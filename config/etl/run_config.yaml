@@ -11,10 +11,6 @@ general:
 
   clean_elasticsearch_index: false
   clean_neo4j_database: false
-  # Whether to save the file with the metadata extraction after the loading stage
-  save_extraction_metadata_file: false
-  # Whether to reset Neo4j database and re-initialize n10s on config change
-  n10s_reset_on_config_change: false
 
 # Platform-Specific Configurations
 platforms:

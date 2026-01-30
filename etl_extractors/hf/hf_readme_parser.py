@@ -9,9 +9,9 @@ import uuid
 
 class MDParserChunker:
 
-    def __init__(self, logger):
+    def __init__(self):
 
-        self.logger = logger
+        self.logger = None # TODO: Add logger support
 
     def generate_ast(self, model_card):
         """
