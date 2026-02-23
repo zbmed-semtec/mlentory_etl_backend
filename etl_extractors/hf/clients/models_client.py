@@ -9,7 +9,7 @@ from huggingface_hub import HfApi, ModelCard
 from datasets import load_dataset
 import logging
 
-from ..hf_helper import HFHelper
+from etl.utils import generate_mlentory_entity_hash_id
 
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class HFModelsClient:
 
             model_info = {
                 "modelId": model.id,
-                "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Model", model.id),
+                "mlentory_id": generate_mlentory_entity_hash_id("Model", model.id, platform="HF"),
                 "author": model.author,
                 "last_modified": model.last_modified,
                 "downloads": model.downloads,
@@ -137,7 +137,7 @@ class HFModelsClient:
 
                 model_info = {
                     "modelId": model.id,
-                    "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Model", model.id),
+                    "mlentory_id": generate_mlentory_entity_hash_id("Model", model.id, platform="HF"),
                     "author": model.author,
                     "last_modified": model.last_modified,
                     "downloads": model.downloads,
