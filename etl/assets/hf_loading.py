@@ -1241,10 +1241,6 @@ def ai4life_load_keywords_to_neo4j(
 
     return (str(rdf_report_path), normalized_folder)
 
-
-
-
-
 @asset(
     group_name="ai4life_loading",
     ins={
@@ -1329,6 +1325,76 @@ def ai4life_load_datasets_to_neo4j(
     logger.info(f"Datasets load report also saved to: {rdf_report_path}")
 
     return (str(rdf_report_path), normalized_folder)
+
+from typing import Any, Dict, Tuple
+import json
+from pathlib import Path
+from dagster import asset, AssetIn
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
+        "models_loaded": AssetIn("ai4life_load_models_to_neo4j"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"},
+)
+def ai4life_export_metadata_json(
+    models_loaded: Tuple[str, str],
+    store_ready: Dict[str, Any],
+) -> str:
+    models_report_path, normalized_folder = models_loaded
+
+    logger.info("Exporting metadata JSON from models loaded in: %s", models_report_path)
+    logger.info("Neo4j store status: %s", store_ready.get("status"))
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "ai4life"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    json_path = rdf_run_folder / "metadata.json"
+    rdf_report_path = rdf_run_folder / "metadata_export_report.json"
+
+    enabled = bool(get_general_config().save_loaded_extraction_metadata_file)
+    logger.info("save_loaded_extraction_metadata_file=%s", enabled)
+    logger.info("Metadata JSON outputs will be saved to: %s", rdf_run_folder)
+
+    # If disabled, still write a report so the user sees an output file
+    if not enabled:
+        report = {
+            "status": "skipped",
+            "reason": "save_loaded_extraction_metadata_file is disabled in general config",
+            "models_report_input": models_report_path,
+            "rdf_folder": str(rdf_run_folder),
+            "json_file": str(json_path),
+            "neo4j_uri": store_ready.get("uri"),
+            "neo4j_database": store_ready.get("database"),
+        }
+        with open(rdf_report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        logger.info("Metadata export skipped. Report saved to: %s", rdf_report_path)
+        return str(rdf_report_path)
+
+    # Export metadata as JSON
+    logger.info("Exporting metadata property graph as Neo4j JSON...")
+    export_stats = export_metadata_graph_json(output_json_path=str(json_path))
+
+    report = {
+        "status": "ok",
+        "models_report_input": models_report_path,
+        "rdf_folder": str(rdf_run_folder),
+        "json_file": str(json_path),
+        "neo4j_uri": store_ready.get("uri"),
+        "neo4j_database": store_ready.get("database"),
+        **export_stats,
+    }
+
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    logger.info("Metadata export report saved to: %s", rdf_report_path)
+    return str(rdf_report_path)
 
 
 
