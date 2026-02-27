@@ -34,7 +34,7 @@ MLentory ETL is a Dagster-based orchestration platform designed to:
 - **Neo4j** - Graph database for model relationships
 - **Elasticsearch** - Full-text search and discovery
 - **Pydantic** - Schema validation and data modeling
-- **Poetry/uv** - Dependency management
+- **Poetry** - Dependency management
 
 ## 📁 Project Structure
 

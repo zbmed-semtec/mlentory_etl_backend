@@ -75,6 +75,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.config import get_es_client, get_neo4j_config
 from api.routers.graph import router as graph_router
 from api.routers.models import router as models_router
+from api.routers.llm import router as llm_router
 from api.routers.stats import router as stats_router
 from api.schemas.responses import HealthResponse
 
@@ -122,6 +123,12 @@ app.include_router(
     graph_router,
     prefix="/api/v1",
     tags=["graph"],
+)
+
+app.include_router(
+    llm_router,
+    prefix="/api/v1",
+    tags=["llm"],
 )
 
 app.include_router(
