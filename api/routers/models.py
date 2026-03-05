@@ -39,6 +39,7 @@ from api.schemas.responses import (
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.graph_service import graph_service
 from api.services.model_service import model_service
+from api.services.ro_crate_service import ro_crate_service
 
 logger = logging.getLogger(__name__)
 
@@ -394,6 +395,73 @@ async def get_model_detail_with_metadata(
         raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
         logger.error(f"Error getting model detail with metadata for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Specific routes MUST be defined before dynamic routes
+@router.get("/models/ro-crate")
+async def get_model_ro_crate(
+    model_id: str = Query(..., description="Model ID (URI or compact ID)"),
+) -> Dict[str, Any]:
+    """
+    Get a model's RO-Crate representation.
+    
+    Generates a JSON-LD RO-Crate (Research Object Crate) representation of the ML model
+    metadata, conforming to RO-Crate specification 1.1.
+    
+    Args:
+        model_id: ID of the model to retrieve (can be full URI or compact ID)
+        
+    Returns:
+        Dictionary containing the RO-Crate JSON-LD representation
+        
+    Raises:
+        HTTPException: If model not found or other errors occur
+        
+    Example:
+        ```
+        GET /api/v1/models/ro-crate?model_id=https://w3id.org/mlentory/mlentory_graph/abc123
+        ```
+    """
+    try:
+        result = ro_crate_service.create_crate(model_id)
+        return result
+
+    except ValueError as ve:
+        logger.error(f"Model not found for RO-Crate: {model_id}")
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error generating RO-Crate for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"RO Crate error: {str(e)}")
+
+
+# Dynamic route MUST be last - it catches all /models/{anything}
+@router.get("/models/{model_id}", response_model=ModelDetail)
+async def get_model_detail(
+    model_id: str,
+    resolve_properties: List[str] = Query(
+        [],
+        description="List of properties/relationships to resolve as full entities (e.g., 'schema__DefinedTerm', 'schema__author')",
+        examples=["schema__license", "schema__author", "fair4ml__trainedOn"],
+    ),
+) -> ModelDetail:
+    """
+    Get detailed information about a specific ML model.
+
+    Returns basic model info from Elasticsearch plus optional related entities from Neo4j.
+    The model_id can be the full URI or the alphanumeric ID.
+    
+    To include related entities, specify the relationship types in `resolve_properties` or leave it empty to get all the information.
+    """
+    try:
+        return model_service.get_model_detail(
+            model_id=model_id,
+            resolve_properties=resolve_properties if resolve_properties else None
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error getting model detail for {model_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
