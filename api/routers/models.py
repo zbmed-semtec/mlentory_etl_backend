@@ -40,6 +40,7 @@ from api.services.elasticsearch_service import elasticsearch_service
 from api.services.graph_service import graph_service
 from api.services.model_service import model_service
 from api.services.ro_crate_service import ro_crate_service
+from api.services.metadata_service import metadata_service
 
 logger = logging.getLogger(__name__)
 
@@ -433,6 +434,44 @@ async def get_model_ro_crate(
     except Exception as e:
         logger.error(f"Error generating RO-Crate for {model_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"RO Crate error: {str(e)}")
+
+
+@router.get("/models/metadata")
+async def get_model_metadata(
+    model_id: str = Query(..., description="Model ID (URI or compact ID)"),
+) -> Dict[str, Any]:
+    """
+    Get a model's metadata in JSON-LD format.
+    
+    Returns a JSON-LD representation of the model metadata conforming to
+    schema.org MLModel vocabulary, including properties like name, description,
+    license, dates, and related metadata.
+    
+    Args:
+        model_id: ID of the model to retrieve (can be full URI or compact ID)
+        
+    Returns:
+        Dictionary containing the JSON-LD metadata representation
+        
+    Raises:
+        HTTPException: If model not found or other errors occur
+        
+    Example:
+        ```
+        GET /api/v1/models/metadata?model_id=https://w3id.org/mlentory/mlentory_graph/abc123
+        ```
+    """
+    try:
+        result = metadata_service.get_metadata(model_id)
+        return result
+
+    except ValueError as ve:
+        logger.error(f"Model not found for metadata: {model_id}")
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error getting model metadata for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Metadata retrieval error: {str(e)}")
+
 
 
 # Dynamic route MUST be last - it catches all /models/{anything}
