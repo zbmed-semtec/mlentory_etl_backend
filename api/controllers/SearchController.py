@@ -1,8 +1,6 @@
 from datetime import datetime
 import re
 
-from api.dbHandler.SQLHandler import SQLHandler
-from api.dbHandler.RDFHandler import RDFHandler
 from api.dbHandler.IndexHandler import IndexHandler
 from api.controllers.EntityController import EntityController
 from typing import List, Dict, Any
@@ -10,11 +8,9 @@ from api.controllers.LLMController import LLMController
 
 class SearchController:
     def __init__(
-        self, sqlHandler: SQLHandler, rdfHandler: RDFHandler, indexHandler: IndexHandler, entityController: EntityController,
+        self, indexHandler: IndexHandler, entityController: EntityController,
         llmController: LLMController
     ):
-        self.sqlHandler = sqlHandler
-        self.rdfHandler = rdfHandler
         self.indexHandler = indexHandler
         self.entityController = entityController
         self.llmController = llmController

@@ -71,6 +71,7 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from api.config import get_es_client, get_neo4j_config
 from api.routers.graph import router as graph_router
@@ -78,6 +79,27 @@ from api.routers.models import router as models_router
 from api.routers.llm import router as llm_router
 from api.routers.stats import router as stats_router
 from api.schemas.responses import HealthResponse
+
+#Import controllers
+from api.dbHandler.SQLHandler import SQLHandler
+from api.dbHandler.IndexHandler import IndexHandler
+from api.controllers.EntityController import EntityController
+from api.controllers.SearchController import SearchController
+from api.controllers.LLMController import LLMController
+from api.controllers.ModelContextProcessor import ModelContextProcessor
+from api.controllers.PlatformDocsController import PlatformDocsController
+
+# Import LLMRunner implementations
+from api.utils.llm_runners import LLMRunner, OllamaRunner, VLLMRunner, OpenAIRunner
+
+# Global controller instances
+sqlHandler = None
+indexHandler = None
+searchController = None
+entityController = None
+llmController = None
+modelContextProcessor = None
+platformDocsController = None
 
 # Configure logging
 logging.basicConfig(
@@ -91,6 +113,95 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager."""
     logger.info("Starting MLentory API")
+    global searchController, entityController, llmController, modelContextProcessor, platformDocsController, sqlHandler, indexHandler
+    
+    # Get database configuration from environment variables
+    # postgres_host = os.environ.get("POSTGRES_HOST", "postgres_db")
+    # postgres_user = os.environ.get("POSTGRES_USER", "user")
+    # postgres_password = os.environ.get("POSTGRES_PASSWORD", "password")
+    # postgres_db = os.environ.get("POSTGRES_DB", "history_DB")
+
+    # elasticsearch_host = os.environ.get("ELASTIC_HOST", "elastic_db")
+    # elasticsearch_port = int(os.environ.get("ELASTIC_PORT", "9200"))
+    
+    # sqlHandler = SQLHandler(
+    #     host=postgres_host,
+    #     user=postgres_user,
+    #     password=postgres_password,
+    #     database=postgres_db,
+    # )
+    # sqlHandler.connect()
+
+    # indexHandler = IndexHandler(
+    #     es_host=elasticsearch_host,
+    #     es_port=elasticsearch_port,
+    # )
+    # entityController = EntityController(sqlHandler)
+    # searchController = SearchController(indexHandler, entityController, llmController)
+
+    # Initialize LLM Runner based on environment configuration
+    llm_provider = os.environ.get("LLM_PROVIDER", "vllm").lower()
+    # llm_model = os.environ.get("LLM_MODEL", "Qwen/Qwen3-4B-Thinking-2507-FP8")
+    llm_model = os.environ.get("LLM_MODEL", "google/gemma-3-4b-it")
+    # llm_model = os.environ.get("LLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+    # llm_model = os.environ.get("LLM_MODEL", "google/gemma-3-1b-it")
+    llm_temperature = float(os.environ.get("LLM_TEMPERATURE", "0.1"))
+    
+    llm_runner = None
+    if llm_provider == "ollama":
+        ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
+        llm_runner = OllamaRunner(
+            base_url=ollama_base_url,
+            model_name=llm_model,
+            temperature=llm_temperature,
+            max_retries=3,
+            retry_delay=5
+        )
+    elif llm_provider == "vllm":
+        vllm_base_url = os.environ.get("VLLM_BASE_URL", "http://vllm:8000")
+        # vllm_base_url = os.environ.get("VLLM_BASE_URL", "http://193.196.29.16:8003")
+        llm_runner = VLLMRunner(
+            base_url=vllm_base_url,
+            model_name=llm_model,
+            temperature=llm_temperature,
+            max_retries=20,  # Increased for model loading time
+            retry_delay=20   # Longer delay between retries
+        )
+    elif llm_provider == "openai":
+        # Placeholder for future OpenAI implementation
+        # Will need to implement OpenAIRunner first
+        # api_key = os.environ.get("OPENAI_API_KEY")
+        # if not api_key:
+        #     raise ValueError("OPENAI_API_KEY environment variable is required when LLM_PROVIDER is 'openai'")
+        # llm_runner = OpenAIRunner(
+        #     api_key=api_key,
+        #     model_name=llm_model,
+        #     temperature=llm_temperature
+        # )
+        print("OpenAI provider selected but not yet implemented. Falling back to Ollama.")
+        ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
+        llm_runner = OllamaRunner(
+            base_url=ollama_base_url,
+            model_name=llm_model,
+            temperature=llm_temperature
+        )
+    else:
+        print(f"Unknown LLM provider '{llm_provider}'. Falling back to Ollama.")
+        ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
+        llm_runner = OllamaRunner(
+            base_url=ollama_base_url,
+            model_name=llm_model,
+            temperature=llm_temperature
+        )
+    
+    # Initialize LLMController with the configured runner
+    llmController = LLMController(
+        llm_runner=llm_runner
+    )
+    
+    # Initialize ModelContextProcessor
+    modelContextProcessor = ModelContextProcessor()
+
     yield
     logger.info("Shutting down MLentory API")
 

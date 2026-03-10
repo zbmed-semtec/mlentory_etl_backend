@@ -14,6 +14,7 @@ from api.controllers.ModelContextProcessor import ModelContextProcessor
 from api.controllers.PlatformDocsController import PlatformDocsController
 from api.controllers.SearchController import SearchController
 from api.controllers.EntityController import EntityController
+from api.services.elasticsearch_service import elasticsearch_service
 
 # Create router with prefix and tags
 router = APIRouter(prefix="/llm", tags=["LLM"])
@@ -36,23 +37,23 @@ KNOWN_FILTERABLE_FIELDS = {
 
 # Controller dependencies
 def get_llm_controller():
-    from main import llmController
+    from api.main import llmController
     return llmController
 
 def get_model_context_processor():
-    from main import modelContextProcessor
+    from api.main import modelContextProcessor
     return modelContextProcessor
 
 def get_platform_docs_controller():
-    from main import platformDocsController
+    from api.main import platformDocsController
     return platformDocsController
 
 def get_search_controller():
-    from main import searchController
+    from api.main import searchController
     return searchController
 
 def get_entity_controller():
-    from main import entityController
+    from api.main import entityController
     return entityController
 
 # Define Pydantic models for request and response
@@ -909,7 +910,6 @@ def summarize_models_endpoint(
     request: SummarizeModelsRequest,
     llm_controller: LLMController = Depends(get_llm_controller),
     model_context_processor: ModelContextProcessor = Depends(get_model_context_processor),
-    search_controller: SearchController = Depends(get_search_controller)
 ):
     """
     Generates a summary for a list of specified models, highlighting common themes.
@@ -936,7 +936,7 @@ def summarize_models_endpoint(
         not_found_ids = []
 
         for model_id in request.model_ids:
-            model_details = search_controller.search_model_by_id(model_id, extended=True)
+            model_details = elasticsearch_service.get_model_by_id(model_id)
             if not model_details:
                 not_found_ids.append(model_id)
                 continue # Skip if model not found
@@ -944,7 +944,8 @@ def summarize_models_endpoint(
             # Use the first result if search_model_by_id returns a list
             current_details = model_details[0] if isinstance(model_details, list) else model_details
             model_details_list.append(current_details)
-            model_names.append(current_details.get("name", f"Model {model_id}")[0])
+            # model_names.append(current_details.get("name", f"Model {model_id}")[0])
+            model_names.append(current_details.name)
 
         if not_found_ids:
             raise HTTPException(status_code=404, detail=f"Models not found: {', '.join(not_found_ids)}")
