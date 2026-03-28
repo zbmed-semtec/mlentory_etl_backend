@@ -66,6 +66,7 @@ Example:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -75,6 +76,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.config import get_es_client, get_neo4j_config
 from api.routers.graph import router as graph_router
 from api.routers.models import router as models_router
+from api.routers.stella import router as stella_router
 from api.routers.stats import router as stats_router
 from api.schemas.responses import HealthResponse
 
@@ -90,6 +92,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager."""
     logger.info("Starting MLentory API")
+    if os.environ.get("USE_STELLA", "false").lower() == "true":
+        logger.info("STELLA integration enabled (USE_STELLA=true)")
+    else:
+        logger.info("STELLA integration disabled (USE_STELLA!=true)")
     yield
     logger.info("Shutting down MLentory API")
 
@@ -116,6 +122,12 @@ app.include_router(
     models_router,
     prefix="/api/v1",
     tags=["models"],
+)
+
+app.include_router(
+    stella_router,
+    prefix="/api/v1",
+    tags=["stella"],
 )
 
 app.include_router(
