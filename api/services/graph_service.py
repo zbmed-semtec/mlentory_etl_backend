@@ -597,6 +597,35 @@ class GraphService:
             logger.error(f"Error getting entities by type '{entity_type}': {e}", exc_info=True)
             return []
 
+    def get_models_with_same_base(self, model_uri: str, limit: int = 20) -> List[str]:
+        """
+        Find ML models that share the same base model via fair4ml__fineTunedFrom.
+
+        Args:
+            model_uri: Source model URI
+            limit: Maximum number of related model URIs to return
+
+        Returns:
+            List of related model URIs
+        """
+        query = """
+        MATCH (source:fair4ml__MLModel {uri: $model_uri})-[:fair4ml__fineTunedFrom]->(base)
+        MATCH (related:fair4ml__MLModel)-[:fair4ml__fineTunedFrom]->(base)
+        WHERE related.uri <> $model_uri
+        RETURN DISTINCT related.uri AS related_uri
+        LIMIT $limit
+        """
+        try:
+            rows = _run_cypher(
+                query,
+                {"model_uri": model_uri, "limit": max(1, min(limit, 100))},
+                self.config,
+            )
+            return [row.get("related_uri") for row in rows if row.get("related_uri")]
+        except Exception as e:
+            logger.error(f"Error finding same-base models for '{model_uri}': {e}", exc_info=True)
+            return []
+
     def get_entity_types(self) -> List[str]:
         """
         List available entity type labels from graph node labels.

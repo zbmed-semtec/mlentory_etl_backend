@@ -35,6 +35,7 @@ from api.schemas.responses import (
     ModelDetail,
     ModelListItem,
     PaginatedResponse,
+    RelatedModelsResponse,
 )
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.graph_service import graph_service
@@ -422,9 +423,9 @@ async def get_model_full_history(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/models/{model_id}/with_extraction_metadata", response_model=ModelDetail)
+@router.get("/models/with_extraction_metadata", response_model=ModelDetail)
 async def get_model_detail_with_metadata(
-    model_id: str,
+    model_id: str = Query(..., description="Model identifier (URI or compact ID)"),
 ) -> ModelDetail:
     """
     Get detailed model information including extraction metadata.
@@ -442,10 +443,70 @@ async def get_model_detail_with_metadata(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# Dynamic route MUST be last - it catches all /models/{anything}
-@router.get("/models/{model_id}", response_model=ModelDetail)
+@router.get("/models/related/same_author", response_model=RelatedModelsResponse)
+async def get_related_models_same_author(
+    model_id: str = Query(..., description="Model identifier (URI or compact ID)"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum related models to return"),
+) -> RelatedModelsResponse:
+    """Get models shared by the same author/publisher."""
+    try:
+        return model_service.get_related_models_same_author(model_id=model_id, limit=limit)
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error getting same-author related models for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/models/related/similar_tasks", response_model=RelatedModelsResponse)
+async def get_related_models_similar_tasks(
+    model_id: str = Query(..., description="Model identifier (URI or compact ID)"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum related models to return"),
+) -> RelatedModelsResponse:
+    """Get models with overlapping tasks."""
+    try:
+        return model_service.get_related_models_similar_tasks(model_id=model_id, limit=limit)
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error getting similar-task related models for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/models/related/same_base", response_model=RelatedModelsResponse)
+async def get_related_models_same_base(
+    model_id: str = Query(..., description="Model identifier (URI or compact ID)"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum related models to return"),
+) -> RelatedModelsResponse:
+    """Get models that share the same base model."""
+    try:
+        return model_service.get_related_models_same_base(model_id=model_id, limit=limit)
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error getting same-base related models for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/models/related/keywords", response_model=RelatedModelsResponse)
+async def get_related_models_by_keywords(
+    model_id: str = Query(..., description="Model identifier (URI or compact ID)"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum related models to return"),
+) -> RelatedModelsResponse:
+    """Get models with overlapping keywords."""
+    try:
+        return model_service.get_related_models_related_keywords(model_id=model_id, limit=limit)
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error getting keyword-related models for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Model detail lookup by query param (supports full URI safely)
+@router.get("/models/by_id", response_model=ModelDetail)
 async def get_model_detail(
-    model_id: str,
+    model_id: str = Query(..., description="Model identifier (URI or compact ID)"),
     resolve_properties: List[str] = Query(
         [],
         description="List of properties/relationships to resolve as full entities (e.g., 'schema__DefinedTerm', 'schema__author')",

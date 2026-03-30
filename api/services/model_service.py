@@ -12,7 +12,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from api.schemas.responses import ModelDetail, ModelListItem
+from api.schemas.responses import (
+    ModelDetail,
+    ModelListItem,
+    RelatedModelItem,
+    RelatedModelsResponse,
+)
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.graph_service import graph_service
 
@@ -373,6 +378,162 @@ class ModelService:
             processed_history.append(processed_state)
             
         return processed_history
+
+    def get_related_models_same_author(self, model_id: str, limit: int = 20) -> RelatedModelsResponse:
+        """Get models shared by the same author/publisher."""
+        source_uri = self._normalize_model_uri(model_id)
+        source_model = self.es_service.get_model_by_id(source_uri)
+        if not source_model:
+            raise ValueError(f"Model not found: {model_id}")
+
+        author = source_model.sharedBy
+        if not author:
+            return RelatedModelsResponse(
+                source_model_id=model_id,
+                strategy="same_author",
+                count=0,
+                results=[],
+            )
+
+        related = self.es_service.find_models_by_exact_field(
+            field_name="shared_by",
+            field_value=author,
+            exclude_model_uri=source_uri,
+            limit=limit,
+        )
+
+        items = [
+            RelatedModelItem(model=model, match_count=1, matched_values=[author])
+            for model in related
+        ]
+        return RelatedModelsResponse(
+            source_model_id=model_id,
+            strategy="same_author",
+            count=len(items),
+            results=items,
+        )
+
+    def get_related_models_similar_tasks(self, model_id: str, limit: int = 20) -> RelatedModelsResponse:
+        """Get models with overlapping ML tasks."""
+        source_uri = self._normalize_model_uri(model_id)
+        source_model = self.es_service.get_model_by_id(source_uri)
+        if not source_model:
+            raise ValueError(f"Model not found: {model_id}")
+
+        source_tasks = set(source_model.mlTask or [])
+        if not source_tasks:
+            return RelatedModelsResponse(
+                source_model_id=model_id,
+                strategy="similar_tasks",
+                count=0,
+                results=[],
+            )
+
+        candidates = self.es_service.find_models_by_overlap_field(
+            field_name="ml_tasks",
+            values=list(source_tasks),
+            exclude_model_uri=source_uri,
+            limit=limit * 3,
+        )
+
+        scored: List[RelatedModelItem] = []
+        for model in candidates:
+            overlap = sorted(source_tasks.intersection(set(model.mlTask or [])))
+            if not overlap:
+                continue
+            scored.append(
+                RelatedModelItem(
+                    model=model,
+                    match_count=len(overlap),
+                    matched_values=overlap,
+                )
+            )
+
+        scored.sort(key=lambda item: item.match_count, reverse=True)
+        final_items = scored[:limit]
+        return RelatedModelsResponse(
+            source_model_id=model_id,
+            strategy="similar_tasks",
+            count=len(final_items),
+            results=final_items,
+        )
+
+    def get_related_models_related_keywords(self, model_id: str, limit: int = 20) -> RelatedModelsResponse:
+        """Get models with overlapping keywords."""
+        source_uri = self._normalize_model_uri(model_id)
+        source_model = self.es_service.get_model_by_id(source_uri)
+        if not source_model:
+            raise ValueError(f"Model not found: {model_id}")
+
+        source_keywords = set(source_model.keywords or [])
+        if not source_keywords:
+            return RelatedModelsResponse(
+                source_model_id=model_id,
+                strategy="related_keywords",
+                count=0,
+                results=[],
+            )
+
+        candidates = self.es_service.find_models_by_overlap_field(
+            field_name="keywords",
+            values=list(source_keywords),
+            exclude_model_uri=source_uri,
+            limit=limit * 3,
+        )
+
+        scored: List[RelatedModelItem] = []
+        for model in candidates:
+            overlap = sorted(source_keywords.intersection(set(model.keywords or [])))
+            if not overlap:
+                continue
+            scored.append(
+                RelatedModelItem(
+                    model=model,
+                    match_count=len(overlap),
+                    matched_values=overlap,
+                )
+            )
+
+        scored.sort(key=lambda item: item.match_count, reverse=True)
+        final_items = scored[:limit]
+        return RelatedModelsResponse(
+            source_model_id=model_id,
+            strategy="related_keywords",
+            count=len(final_items),
+            results=final_items,
+        )
+
+    def get_related_models_same_base(self, model_id: str, limit: int = 20) -> RelatedModelsResponse:
+        """Get models that share the same base model."""
+        source_uri = self._normalize_model_uri(model_id)
+        source_model = self.es_service.get_model_by_id(source_uri)
+        if not source_model:
+            raise ValueError(f"Model not found: {model_id}")
+
+        related_uris = self.graph_service.get_models_with_same_base(
+            model_uri=source_uri,
+            limit=limit,
+        )
+
+        items: List[RelatedModelItem] = []
+        for uri in related_uris:
+            related_model = self.es_service.get_model_by_id(uri)
+            if not related_model:
+                continue
+            items.append(
+                RelatedModelItem(
+                    model=related_model,
+                    match_count=1,
+                    matched_values=["fair4ml__fineTunedFrom"],
+                )
+            )
+
+        return RelatedModelsResponse(
+            source_model_id=model_id,
+            strategy="same_base",
+            count=len(items),
+            results=items,
+        )
 
 
 # Global service instance

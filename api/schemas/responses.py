@@ -124,3 +124,26 @@ class FacetValuesResponse(BaseModel):
     values: List[FacetValue] = Field(description="List of facet values with counts")
     after_key: Optional[str] = Field(description="Next pagination cursor", default=None)
     has_more: bool = Field(description="Whether more values are available", default=False)
+
+
+class RelatedModelItem(BaseModel):
+    """Related model with match metadata for recommendation endpoints."""
+
+    model: ModelListItem = Field(description="Related model basic information")
+    match_count: int = Field(description="Number of matched values", default=1)
+    matched_values: List[str] = Field(
+        description="Values that matched between source and related model",
+        default_factory=list,
+    )
+
+
+class RelatedModelsResponse(BaseModel):
+    """Response for related models lookup by a single strategy."""
+
+    source_model_id: str = Field(description="Source model ID (URI or compact ID)")
+    strategy: str = Field(description="Relationship strategy used")
+    count: int = Field(description="Total related models returned")
+    results: List[RelatedModelItem] = Field(
+        description="Related models ordered by relevance",
+        default_factory=list,
+    )

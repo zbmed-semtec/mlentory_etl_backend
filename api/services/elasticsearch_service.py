@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
 
 from elasticsearch_dsl import Q, Search
 
@@ -42,6 +42,29 @@ class ElasticsearchService(FacetedSearchMixin):
         """Initialize the Elasticsearch service."""
         self.client = get_es_client()
         self.config = get_es_config()
+
+    def _source_to_model_item(self, source: Dict[str, Any]) -> ModelListItem:
+        """Convert ES source document to ModelListItem."""
+        mlentory_id = next(
+            (
+                identifier
+                for identifier in source.get("db_identifier", [])
+                if identifier.startswith("https://w3id.org/mlentory/mlentory_graph/")
+            ),
+            -1,
+        )
+        return ModelListItem(
+            db_identifier=source.get("db_identifier", []),
+            mlentory_id=mlentory_id,
+            name=source.get("name", ""),
+            description=source.get("description"),
+            sharedBy=source.get("shared_by"),
+            license=source.get("license"),
+            mlTask=source.get("ml_tasks", []) or [],
+            keywords=source.get("keywords", []) or [],
+            datasets=source.get("datasets", []) or [],
+            platform=source.get("platform", "Unknown"),
+        )
 
     def search_models(
         self,
@@ -143,18 +166,90 @@ class ElasticsearchService(FacetedSearchMixin):
             -1
         )
         
-        return ModelListItem(
-            db_identifier=hit["db_identifier"],
-            mlentory_id=mlentory_id,
-            name=hit["name"] or "",
-            description=hit["description"],
-            sharedBy=hit["shared_by"],  # Note: ES field is snake_case, but schema uses camelCase
-            license=hit["license"],
-            mlTask=hit["ml_tasks"] or [],  # Note: ES field is snake_case, but schema uses camelCase
-            keywords=hit["keywords"] or [],
-            datasets=hit.get("datasets", []) or [],
-            platform=hit.get("platform", "Unknown"),
-        )
+        return self._source_to_model_item(hit)
+
+    def find_models_by_exact_field(
+        self,
+        field_name: str,
+        field_value: str,
+        exclude_model_uri: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[ModelListItem]:
+        """Find models with an exact field value match."""
+        if not field_value:
+            return []
+
+        query: Dict[str, Any] = {
+            "size": max(1, min(limit, 100)),
+            "query": {
+                "bool": {
+                    "must": [{"term": {field_name: field_value}}],
+                    "must_not": [],
+                }
+            },
+        }
+
+        if exclude_model_uri:
+            query["query"]["bool"]["must_not"].append({"term": {"db_identifier": exclude_model_uri}})
+
+        try:
+            response = self.client.search(index=self.config.hf_models_index, body=query)
+            hits = response.get("hits", {}).get("hits", [])
+            return [self._source_to_model_item(hit.get("_source", {})) for hit in hits if hit.get("_source")]
+        except Exception as e:
+            logger.error(f"Error finding models by exact field '{field_name}': {e}", exc_info=True)
+            return []
+
+    def find_models_by_overlap_field(
+        self,
+        field_name: str,
+        values: List[str],
+        exclude_model_uri: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[ModelListItem]:
+        """Find models sharing one or more values in a multi-valued field."""
+        cleaned_values = [v for v in values if v]
+        if not cleaned_values:
+            return []
+
+        should_clauses = [{"term": {field_name: value}} for value in cleaned_values]
+        query: Dict[str, Any] = {
+            "size": max(1, min(limit, 100)),
+            "query": {
+                "bool": {
+                    "should": should_clauses,
+                    "minimum_should_match": 1,
+                    "must_not": [],
+                }
+            },
+        }
+
+        if exclude_model_uri:
+            query["query"]["bool"]["must_not"].append({"term": {"db_identifier": exclude_model_uri}})
+
+        try:
+            response = self.client.search(index=self.config.hf_models_index, body=query)
+            hits = response.get("hits", {}).get("hits", [])
+
+            deduped: List[ModelListItem] = []
+            seen_uris: Set[str] = set()
+            for hit in hits:
+                source = hit.get("_source", {})
+                model = self._source_to_model_item(source)
+                model_uri = next(
+                    (identifier for identifier in model.db_identifier if identifier.startswith("https://")),
+                    None,
+                )
+                if model_uri and model_uri in seen_uris:
+                    continue
+                if model_uri:
+                    seen_uris.add(model_uri)
+                deduped.append(model)
+
+            return deduped
+        except Exception as e:
+            logger.error(f"Error finding models by overlap field '{field_name}': {e}", exc_info=True)
+            return []
 
 
 
