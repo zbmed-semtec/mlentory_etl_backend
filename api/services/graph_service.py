@@ -554,6 +554,49 @@ class GraphService:
             )
             return []
 
+    def get_entities_by_type(self, entity_type: str) -> List[Dict[str, Any]]:
+        """
+        Get entities by label/type.
+
+        Accepts exact labels (e.g., "fair4ml__MLModel") and shorthand names
+        (e.g., "MLModel"), matching known schema/fair4ml prefixes.
+        """
+        query = """
+        MATCH (e)
+        WHERE any(lbl IN labels(e) WHERE
+            toLower(lbl) = toLower($entityType) OR
+            toLower(lbl) = toLower('fair4ml__' + $entityType) OR
+            toLower(lbl) = toLower('schema__' + $entityType)
+        )
+        RETURN DISTINCT
+            e.uri as uri,
+            coalesce(e.schema__name, e.name, e.rdfs__label, e.label) as name,
+            labels(e) as entity_types
+        ORDER BY name
+        """
+
+        try:
+            results = _run_cypher(query, {"entityType": entity_type}, self.config)
+            entities: List[Dict[str, Any]] = []
+
+            for record in results:
+                uri = record.get("uri")
+                if not uri:
+                    continue
+
+                entities.append(
+                    {
+                        "uri": uri,
+                        "name": record.get("name"),
+                        "entity_types": record.get("entity_types", []),
+                    }
+                )
+
+            return entities
+        except Exception as e:
+            logger.error(f"Error getting entities by type '{entity_type}': {e}", exc_info=True)
+            return []
+
     def grouped_facet_values(self, entity_type: List[str]) -> Tuple[Dict[str, List[str]], int]:
         """
         List all entities grouped by relationship type.

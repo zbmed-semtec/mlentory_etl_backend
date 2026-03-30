@@ -12,7 +12,14 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from api.schemas.entities import EntityBatchRequest, EntityBatchResponse, RelatedEntitiesResponse, EntityURIResponse, RelatedModelsResponse
+from api.schemas.entities import (
+    EntityBatchRequest,
+    EntityBatchResponse,
+    RelatedEntitiesResponse,
+    EntityURIResponse,
+    RelatedModelsResponse,
+    EntitiesByTypeResponse,
+)
 
 from api.schemas.graph import GraphResponse, GroupedFacetValuesResponse
 from api.services.graph_service import graph_service
@@ -132,6 +139,30 @@ async def grouped_facet_values(entity_type: List = Query(
     except Exception as e:
         logger.error(f"Error listing entities: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/graph/entities_by_type", response_model=EntitiesByTypeResponse)
+async def get_entities_by_type(
+    entity_type: str = Query(
+        ...,
+        description="Entity type label or shorthand (e.g., 'fair4ml__MLModel' or 'MLModel')",
+    )
+) -> EntitiesByTypeResponse:
+    """
+    📋 Get entities filtered by type.
+
+    Returns entities matching a requested graph label/type.
+    """
+    try:
+        entities = graph_service.get_entities_by_type(entity_type=entity_type)
+        return EntitiesByTypeResponse(
+            entity_type=entity_type,
+            entities=entities,
+            count=len(entities),
+        )
+    except Exception as e:
+        logger.error(f"Error getting entities by type '{entity_type}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/graph/{entity_id}", response_model=GraphResponse)
@@ -289,3 +320,4 @@ async def get_models_by_entity_uri(
     except Exception as e:
         logger.error(f"Error getting models for entity URI: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+

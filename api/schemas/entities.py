@@ -72,3 +72,22 @@ class RelatedModelsResponse(BaseModel):
         default_factory=list
     )
     count: int = Field(description="Total number of related models")
+
+
+class EntityByTypeItem(BaseModel):
+    """Single entity entry returned by type lookup."""
+
+    uri: str = Field(description="Entity URI")
+    name: Optional[str] = Field(default=None, description="Entity name when available")
+    entity_types: List[str] = Field(default_factory=list, description="Entity type labels")
+
+
+class EntitiesByTypeResponse(BaseModel):
+    """Response model for entities filtered by type."""
+
+    entity_type: str = Field(description="The requested entity type")
+    entities: List[EntityByTypeItem] = Field(
+        default_factory=list,
+        description="Entities matching the requested type"
+    )
+    count: int = Field(description="Total number of entities returned")
