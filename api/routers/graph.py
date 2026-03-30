@@ -181,6 +181,31 @@ async def get_entity_types() -> EntityTypesResponse:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/graph/entities_related_by_prefix", response_model=RelatedEntitiesResponse)
+async def get_entities_related_by_prefix(
+    uri_prefix: str = Query(
+        ...,
+        description="URI prefix used to select seed entities (e.g., 'https://w3id.org/mlentory/mlentory_graph/')",
+    ),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of seed entities to expand"),
+) -> RelatedEntitiesResponse:
+    """
+    🔗 Fetch related entities for all entities matching a URI prefix.
+    """
+    try:
+        related_data = graph_service.get_entities_related_by_prefix(
+            uri_prefix=uri_prefix,
+            limit=limit,
+        )
+        return RelatedEntitiesResponse(
+            count=len(related_data),
+            related_entities=related_data,
+        )
+    except Exception as e:
+        logger.error(f"Error in related-by-prefix fetch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/graph/{entity_id}", response_model=GraphResponse)
 async def get_entity_graph(
     entity_id: str,

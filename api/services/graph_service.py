@@ -616,6 +616,38 @@ class GraphService:
             logger.error(f"Error listing entity types: {e}", exc_info=True)
             return []
 
+    def get_entities_related_by_prefix(
+        self,
+        uri_prefix: str,
+        limit: int = 100,
+    ) -> Dict[str, Dict[str, List[str]]]:
+        """
+        Fetch related entities for all entities whose URI starts with a prefix.
+        """
+        if not uri_prefix:
+            return {}
+
+        query = """
+        MATCH (n)
+        WHERE n.uri STARTS WITH $uriPrefix
+        RETURN n.uri AS uri
+        ORDER BY uri
+        LIMIT $limit
+        """
+        try:
+            seed_rows = _run_cypher(query, {"uriPrefix": uri_prefix, "limit": limit}, self.config)
+            seed_uris = [row.get("uri") for row in seed_rows if row.get("uri")]
+            if not seed_uris:
+                return {}
+
+            return self.get_related_entities(entity_ids=seed_uris)
+        except Exception as e:
+            logger.error(
+                f"Error getting entities related by prefix '{uri_prefix}': {e}",
+                exc_info=True,
+            )
+            return {}
+
     def grouped_facet_values(self, entity_type: List[str]) -> Tuple[Dict[str, List[str]], int]:
         """
         List all entities grouped by relationship type.
