@@ -96,6 +96,50 @@ async def list_models(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/models/search_by_phrase", response_model=PaginatedResponse[ModelListItem])
+async def search_models_by_phrase(
+    phrase: str = Query(..., min_length=1, description="Simple phrase query"),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page (max 100)"),
+) -> PaginatedResponse[ModelListItem]:
+    """
+    Simple phrase search over model fields.
+    """
+    try:
+        models, total_count = elasticsearch_service.search_models(
+            search_query=phrase,
+            page=page,
+            page_size=page_size,
+        )
+
+        base_url = "/api/v1/models/search_by_phrase"
+        query_params: Dict[str, Any] = {"phrase": phrase}
+        if page_size != 20:
+            query_params["page_size"] = page_size
+
+        next_url = None
+        if (page * page_size) < total_count:
+            next_params = query_params.copy()
+            next_params["page"] = page + 1
+            next_url = f"{base_url}?{urlencode(next_params)}"
+
+        prev_url = None
+        if page > 1:
+            prev_params = query_params.copy()
+            prev_params["page"] = page - 1
+            prev_url = f"{base_url}?{urlencode(prev_params)}"
+
+        return PaginatedResponse[ModelListItem](
+            count=total_count,
+            next=next_url,
+            prev=prev_url,
+            results=models,
+        )
+    except Exception as e:
+        logger.error(f"Error in phrase search: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 # NOTE: Static routes MUST be defined BEFORE dynamic {model_id} route
 # Otherwise FastAPI will match "search", "facets", etc. as model IDs
 
@@ -376,6 +420,7 @@ async def get_model_full_history(
     except Exception as e:
         logger.error(f"Error getting model history for {model_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @router.get("/models/{model_id}/with_extraction_metadata", response_model=ModelDetail)
 async def get_model_detail_with_metadata(
