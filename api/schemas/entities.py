@@ -91,3 +91,13 @@ class EntitiesByTypeResponse(BaseModel):
         description="Entities matching the requested type"
     )
     count: int = Field(description="Total number of entities returned")
+
+
+class EntityTypesResponse(BaseModel):
+    """Response model for available graph entity types."""
+
+    entity_types: List[str] = Field(
+        default_factory=list,
+        description="List of available entity type labels in the graph"
+    )
+    count: int = Field(description="Total number of entity types returned")

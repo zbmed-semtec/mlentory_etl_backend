@@ -19,6 +19,7 @@ from api.schemas.entities import (
     EntityURIResponse,
     RelatedModelsResponse,
     EntitiesByTypeResponse,
+    EntityTypesResponse,
 )
 
 from api.schemas.graph import GraphResponse, GroupedFacetValuesResponse
@@ -162,6 +163,21 @@ async def get_entities_by_type(
         )
     except Exception as e:
         logger.error(f"Error getting entities by type '{entity_type}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/graph/entitity_types", response_model=EntityTypesResponse)
+async def get_entity_types() -> EntityTypesResponse:
+    """
+    🧾 List available entity types.
+
+    Returns distinct graph labels currently present in Neo4j.
+    """
+    try:
+        entity_types = graph_service.get_entity_types()
+        return EntityTypesResponse(entity_types=entity_types, count=len(entity_types))
+    except Exception as e:
+        logger.error(f"Error listing entity types: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

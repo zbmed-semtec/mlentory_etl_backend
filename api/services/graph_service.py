@@ -597,6 +597,25 @@ class GraphService:
             logger.error(f"Error getting entities by type '{entity_type}': {e}", exc_info=True)
             return []
 
+    def get_entity_types(self) -> List[str]:
+        """
+        List available entity type labels from graph node labels.
+        """
+        query = """
+        MATCH (e)
+        UNWIND labels(e) AS label
+        WITH DISTINCT label
+        WHERE label IS NOT NULL AND trim(label) <> ''
+        RETURN label AS entity_type
+        ORDER BY entity_type
+        """
+        try:
+            results = _run_cypher(query, {}, self.config)
+            return [str(row.get("entity_type")) for row in results if row.get("entity_type")]
+        except Exception as e:
+            logger.error(f"Error listing entity types: {e}", exc_info=True)
+            return []
+
     def grouped_facet_values(self, entity_type: List[str]) -> Tuple[Dict[str, List[str]], int]:
         """
         List all entities grouped by relationship type.
