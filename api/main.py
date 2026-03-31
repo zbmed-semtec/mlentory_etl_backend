@@ -202,6 +202,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize ModelContextProcessor
     modelContextProcessor = ModelContextProcessor()
 
+     # Initialize PlatformDocsController
+    # platformDocsController = PlatformDocsController(docs_base_path="../data/platform_docs")
+
     yield
     logger.info("Shutting down MLentory API")
 

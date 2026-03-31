@@ -312,9 +312,9 @@ def answer_with_model_and_platform_docs(
     """
     try:
         # Get model details to use as context
-        model_details = search_controller.search_model_by_id(model_id, extended=True)
+        model_details = elasticsearch_service.get_model_by_id(model_id)
         
-        if not model_details or len(model_details) == 0:
+        if not model_details:
             raise HTTPException(status_code=404, detail=f"Model with ID {model_id} not found")
             
         # Use the first model if a list is returned
@@ -325,10 +325,10 @@ def answer_with_model_and_platform_docs(
         model_context = model_context_processor.format_model_details(model_details, include_raw_json)
         
         # Get relevant documentation context
-        platform_context = platform_docs_controller.get_context_for_llm(platform_name, question, max_tokens=3000)
+        # platform_context = platform_docs_controller.get_context_for_llm(platform_name, question, max_tokens=3000)
         
         # Combine contexts
-        combined_context = f"MODEL INFORMATION:\n{model_context}\n\nPLATFORM DOCUMENTATION:\n{platform_context}"
+        combined_context = f"MODEL INFORMATION:\n{model_context}"
         
         # Create a simplified prompt template with clear separator markers that avoid JSON examples
         # which can confuse LangChain's template processor
@@ -430,7 +430,7 @@ def compare_models(
         model_names = []
         
         for model_id in model_ids:
-            model_details = search_controller.search_model_by_id(model_id, extended=True)
+            model_details = elasticsearch_service.get_model_by_id(model_id)
             if not model_details:
                 raise HTTPException(status_code=404, detail=f"Model with ID {model_id} not found")
                 
@@ -501,7 +501,7 @@ def query_model_aspect(
     """
     try:
         # Get model details to use as context
-        model_details = search_controller.search_model_by_id(model_id, extended=True)
+        model_details = elasticsearch_service.get_model_by_id(model_id)
         
         if not model_details or len(model_details) == 0:
             raise HTTPException(status_code=404, detail=f"Model with ID {model_id} not found")
