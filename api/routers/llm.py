@@ -769,14 +769,14 @@ def refine_query_endpoint(
         available_filters_values_dict = {}
         
         # Get facets configuration to know which facets are available
-        facets_config = search_controller.get_facets_config()
+        facets_config = elasticsearch_service.get_facets_config()
         
         # Fetch values only for key properties to give LLM examples
         # Focus on most important facets and limit total data to avoid token limit
         # Prioritize mlTask first, then license, then keywords
         filter_properties_to_fetch_values = []
         for facet_name in ["mlTask", "license", "keywords"]:  # Order by priority
-            if facet_name in facets_config and facets_config[facet_name].get("pinned", False):
+            if facet_name in facets_config and facets_config[facet_name].pinned:
                 filter_properties_to_fetch_values.append(facet_name)
         
         # Limit to maximum 2 properties to reduce context size
