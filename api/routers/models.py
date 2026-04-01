@@ -502,33 +502,3 @@ async def get_model_detail(
     except Exception as e:
         logger.error(f"Error getting model detail for {model_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# Dynamic route MUST be last - it catches all /models/{anything}
-@router.get("/models/{model_id}", response_model=ModelDetail)
-async def get_model_detail(
-    model_id: str,
-    resolve_properties: List[str] = Query(
-        [],
-        description="List of properties/relationships to resolve as full entities (e.g., 'schema__DefinedTerm', 'schema__author')",
-        examples=["schema__license", "schema__author", "fair4ml__trainedOn"],
-    ),
-) -> ModelDetail:
-    """
-    Get detailed information about a specific ML model.
-
-    Returns basic model info from Elasticsearch plus optional related entities from Neo4j.
-    The model_id can be the full URI or the alphanumeric ID.
-    
-    To include related entities, specify the relationship types in `resolve_properties` or leave it empty to get all the information.
-    """
-    try:
-        return model_service.get_model_detail(
-            model_id=model_id,
-            resolve_properties=resolve_properties if resolve_properties else None
-        )
-    except ValueError as ve:
-        raise HTTPException(status_code=404, detail=str(ve))
-    except Exception as e:
-        logger.error(f"Error getting model detail for {model_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
