@@ -86,15 +86,15 @@ class ModelContextProcessor:
         formatted_text = []
         
         # Add model name and ID if available
-        if "name" in model_details:
-            formatted_text.append(f"Model Name: {model_details['name'][0]}")
+        if model_details.name:
+            formatted_text.append(f"Model Name: {model_details.name}")
         
         # if "id" in model_details:
         #     formatted_text.append(f"Model ID: {model_details['id'][0]}")
         
         # Add description if available
-        if "description" in model_details and model_details["description"]:
-            formatted_text.append(f"\nDescription: {model_details['description'][0]}")
+        if model_details.description:
+            formatted_text.append(f"\nDescription: {model_details.description}")
         
         # Add key model properties in sections
         formatted_text.append("\n== Model Properties ==")
