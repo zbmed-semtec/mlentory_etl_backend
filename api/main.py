@@ -85,7 +85,7 @@ from api.dbHandler.SQLHandler import SQLHandler
 from api.dbHandler.IndexHandler import IndexHandler
 from api.controllers.EntityController import EntityController
 from api.controllers.SearchController import SearchController
-from api.controllers.LLMController import LLMController
+from api.services.llm_service import LLMService
 from api.controllers.ModelContextProcessor import ModelContextProcessor
 from api.controllers.PlatformDocsController import PlatformDocsController
 
@@ -97,7 +97,7 @@ sqlHandler = None
 indexHandler = None
 searchController = None
 entityController = None
-llmController = None
+llmService = None
 modelContextProcessor = None
 platformDocsController = None
 
@@ -113,7 +113,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager."""
     logger.info("Starting MLentory API")
-    global searchController, entityController, llmController, modelContextProcessor, platformDocsController, sqlHandler, indexHandler
+    global searchController, entityController, llmService, modelContextProcessor, platformDocsController, sqlHandler, indexHandler
     
     # Get database configuration from environment variables
     # postgres_host = os.environ.get("POSTGRES_HOST", "postgres_db")
@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     #     es_port=elasticsearch_port,
     # )
     # entityController = EntityController(sqlHandler)
-    # searchController = SearchController(indexHandler, entityController, llmController)
+    # searchController = SearchController(indexHandler, entityController, llmService)
 
     # Initialize LLM Runner based on environment configuration
     llm_provider = os.environ.get("LLM_PROVIDER", "vllm").lower()
@@ -194,8 +194,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             temperature=llm_temperature
         )
     
-    # Initialize LLMController with the configured runner
-    llmController = LLMController(
+    # Initialize LLMService with the configured runner
+    llmService = LLMService(
         llm_runner=llm_runner
     )
     
