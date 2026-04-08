@@ -92,7 +92,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager."""
     logger.info("Starting MLentory API")
-    if os.environ.get("USE_STELLA", "false").lower() == "true":
+    if os.environ.get("USE_STELLA", "true").lower() == "true":
         logger.info("STELLA integration enabled (USE_STELLA=true)")
     else:
         logger.info("STELLA integration disabled (USE_STELLA!=true)")

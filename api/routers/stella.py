@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/models/search_with_stella")
+@router.get("/stella/search_with_stella")
 async def search_models_with_stella(
     query: str = Query("", description="Optional text search query"),
     filters: str = Query("{}", description="JSON string of property filters"),
@@ -60,7 +60,7 @@ async def search_models_with_stella(
     except json.JSONDecodeError as je:
         raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
 
-    stella_proxy_base = os.getenv("STELLA_PROXY_API", "http://stella_app:8005/proxy").rstrip("/")
+    stella_proxy_base = os.getenv("STELLA_PROXY_API", "http://stella-app:8005/proxy").rstrip("/")
     default_base = os.getenv("BACKEND_BASE_URL", "mlentory-api:8000/api/v1/models")
     backend_base = (base_url or default_base).strip().strip("/")
     stella_proxy_url = f"{stella_proxy_base}/{backend_base}"
@@ -100,14 +100,14 @@ async def search_models_with_stella(
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 
-@router.post("/models/stella_feedback")
+@router.post("/stella/stella_feedback")
 async def stella_feedback(data: Dict[str, Any] = Body(...)) -> Any:
     """Forward click feedback to STELLA App (``/stella/api/v1/ranking/.../feedback``)."""
     if os.getenv("USE_STELLA", "false").lower() != "true":
         raise HTTPException(status_code=503, detail="STELLA integration is disabled")
 
     stella_app_api = os.getenv(
-        "STELLA_APP_API", "http://stella_app:8005/stella/api/v1"
+        "STELLA_APP_API", "http://stella-app:8005/stella/api/v1"
     ).rstrip("/")
     ranking_id = data.get("ranking_id")
     payload = data.get("payload", {})
