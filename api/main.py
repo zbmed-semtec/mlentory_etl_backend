@@ -80,26 +80,23 @@ from api.routers.llm import router as llm_router
 from api.routers.stats import router as stats_router
 from api.schemas.responses import HealthResponse
 
-#Import controllers
+#Import services
 from api.dbHandler.SQLHandler import SQLHandler
 from api.dbHandler.IndexHandler import IndexHandler
-from api.controllers.EntityController import EntityController
-from api.controllers.SearchController import SearchController
+from api.services.search_service import SearchService
 from api.services.llm_service import LLMService
-from api.controllers.ModelContextProcessor import ModelContextProcessor
-from api.controllers.PlatformDocsController import PlatformDocsController
+from api.services.model_context_service import ModelContextService
 
 # Import LLMRunner implementations
 from api.utils.llm_runners import LLMRunner, OllamaRunner, VLLMRunner, OpenAIRunner
 
-# Global controller instances
+# Global service instances
 sqlHandler = None
 indexHandler = None
-searchController = None
-entityController = None
+searchService = None
+entityService = None
 llmService = None
-modelContextProcessor = None
-platformDocsController = None
+modelContextService = None
 
 # Configure logging
 logging.basicConfig(
@@ -113,32 +110,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager."""
     logger.info("Starting MLentory API")
-    global searchController, entityController, llmService, modelContextProcessor, platformDocsController, sqlHandler, indexHandler
-    
-    # Get database configuration from environment variables
-    # postgres_host = os.environ.get("POSTGRES_HOST", "postgres_db")
-    # postgres_user = os.environ.get("POSTGRES_USER", "user")
-    # postgres_password = os.environ.get("POSTGRES_PASSWORD", "password")
-    # postgres_db = os.environ.get("POSTGRES_DB", "history_DB")
-
-    # elasticsearch_host = os.environ.get("ELASTIC_HOST", "elastic_db")
-    # elasticsearch_port = int(os.environ.get("ELASTIC_PORT", "9200"))
-    
-    # sqlHandler = SQLHandler(
-    #     host=postgres_host,
-    #     user=postgres_user,
-    #     password=postgres_password,
-    #     database=postgres_db,
-    # )
-    # sqlHandler.connect()
-
-    # indexHandler = IndexHandler(
-    #     es_host=elasticsearch_host,
-    #     es_port=elasticsearch_port,
-    # )
-    # entityController = EntityController(sqlHandler)
-    # searchController = SearchController(indexHandler, entityController, llmService)
-
+    global searchService, entityService, llmService, modelContextService, sqlHandler, indexHandler
     # Initialize LLM Runner based on environment configuration
     llm_provider = os.environ.get("LLM_PROVIDER", "vllm").lower()
     # llm_model = os.environ.get("LLM_MODEL", "Qwen/Qwen3-4B-Thinking-2507-FP8")
@@ -199,11 +171,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         llm_runner=llm_runner
     )
     
-    # Initialize ModelContextProcessor
-    modelContextProcessor = ModelContextProcessor()
-
-     # Initialize PlatformDocsController
-    # platformDocsController = PlatformDocsController(docs_base_path="../data/platform_docs")
+    # Initialize ModelContextService
+    modelContextService = ModelContextService()
 
     yield
     logger.info("Shutting down MLentory API")

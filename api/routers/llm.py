@@ -8,12 +8,10 @@ import traceback
 import json # Added for parsing potential JSON from LLM
 import re # Added for regular expression operations
 
-# Import controllers
+# Import services
 from api.services.llm_service import LLMService
-from api.controllers.ModelContextProcessor import ModelContextProcessor
-from api.controllers.PlatformDocsController import PlatformDocsController
-from api.controllers.SearchController import SearchController
-from api.controllers.EntityController import EntityController
+from api.services.model_context_service import ModelContextService
+from api.services.search_service import SearchService
 from api.services.elasticsearch_service import elasticsearch_service
 
 # Create router with prefix and tags
@@ -23,7 +21,7 @@ router = APIRouter(prefix="/llm", tags=["LLM"])
 default_model_id = "<https://w3id.org/mlentory/mlentory_graph/3939aa6b6b70406f21c21b35514e79ea6603b996a3d733486f66e91adbd06f98>"
 
 # --- Define Known Filterable Fields --- 
-# List of fields that are actually filterable in the SearchController.search_models_with_filters method
+# List of fields that are actually filterable in the SearchService.search_models_with_filters method
 # (Based on the fields used in the query building logic there)
 KNOWN_FILTERABLE_FIELDS = {
     "mlTask", 
@@ -40,21 +38,13 @@ def get_llm_service():
     from api.main import llmService
     return llmService
 
-def get_model_context_processor():
-    from api.main import modelContextProcessor
-    return modelContextProcessor
+def get_model_context_service():
+    from api.main import modelContextService
+    return modelContextService
 
-def get_platform_docs_controller():
-    from api.main import platformDocsController
-    return platformDocsController
-
-def get_search_controller():
-    from api.main import searchController
-    return searchController
-
-def get_entity_controller():
-    from api.main import entityController
-    return entityController
+def get_search_service():
+    from api.main import SearchService
+    return SearchService
 
 # Define Pydantic models for request and response
 class QuestionRequest(BaseModel):
@@ -226,8 +216,8 @@ def answer_with_model_context(
     model_id: str = Query(default=default_model_id, description="Model ID to use as context"),
     include_raw_json: bool = Query(default=False, description="Whether to include raw JSON in context"),
     llm_service: LLMService = Depends(get_llm_service),
-    model_context_processor: ModelContextProcessor = Depends(get_model_context_processor),
-    search_controller: SearchController = Depends(get_search_controller)
+    model_context_service: ModelContextService = Depends(get_model_context_service),
+    search_service: SearchService = Depends(get_search_service)
 ):
     """
     Answer a question using the LLM with context from a specific model's details.
@@ -236,9 +226,9 @@ def answer_with_model_context(
         question: Question to answer about the model
         model_id: ID of the model to use as context
         include_raw_json: Whether to include the raw JSON in the context
-        llm_service: Injected LLM controller
-        model_context_processor: Injected model context processor
-        search_controller: Injected search controller
+        llm_service: Injected LLM service
+        model_context_service: Injected model context service
+        search_service: Injected search service
         
     Returns:
         Dict containing the answer and source documents
@@ -248,7 +238,7 @@ def answer_with_model_context(
     """
     try:
         # Get model details to use as context
-        model_details = search_controller.search_model_by_id(model_id, extended=False)
+        model_details = search_service.search_model_by_id(model_id, extended=False)
         
         if not model_details:
             raise HTTPException(status_code=404, detail=f"Model with ID {model_id} not found")
@@ -257,11 +247,11 @@ def answer_with_model_context(
         if isinstance(model_details, list):
             model_details = model_details[0]
         
-        # Format model details using the ModelContextProcessor
-        structured_context = model_context_processor.format_model_details(model_details, include_raw_json)
+        # Format model details using the ModelContextService
+        structured_context = model_context_service.format_model_details(model_details, include_raw_json)
         
-        # Get prompt template from ModelContextProcessor
-        prompt_template = model_context_processor.create_single_model_prompt()
+        # Get prompt template from ModelContextService
+        prompt_template = model_context_service.create_single_model_prompt()
         
         # Process and answer the question
         result = llm_service.process_and_answer(
@@ -287,9 +277,7 @@ def answer_with_model_and_platform_docs(
     platform_name: str = Query(default="huggingface", description="Platform to use for documentation context"),
     include_raw_json: bool = Query(default=False, description="Whether to include raw JSON in model context"),
     llm_service: LLMService = Depends(get_llm_service),
-    model_context_processor: ModelContextProcessor = Depends(get_model_context_processor),
-    platform_docs_controller: PlatformDocsController = Depends(get_platform_docs_controller),
-    search_controller: SearchController = Depends(get_search_controller)
+    model_context_service: ModelContextService = Depends(get_model_context_service),
 ):
     """
     Answer a question using the LLM with context from both model details and platform documentation.
@@ -299,10 +287,8 @@ def answer_with_model_and_platform_docs(
         model_id: ID of the model to use as context
         platform_name: Platform to use for documentation context
         include_raw_json: Whether to include raw JSON in model context
-        llm_service: Injected LLM controller
-        model_context_processor: Injected model context processor
-        platform_docs_controller: Injected platform docs controller
-        search_controller: Injected search controller
+        llm_service: Injected LLM service
+        model_context_service: Injected model context service
         
     Returns:
         Dict containing the answer and source documents
@@ -321,11 +307,11 @@ def answer_with_model_and_platform_docs(
         if isinstance(model_details, list):
             model_details = model_details[0]
         
-        # Format model details using the ModelContextProcessor
-        model_context = model_context_processor.format_model_details(model_details, include_raw_json)
+        # Format model details using the ModelContextService
+        model_context = model_context_service.format_model_details(model_details, include_raw_json)
         
         # Get relevant documentation context
-        # platform_context = platform_docs_controller.get_context_for_llm(platform_name, question, max_tokens=3000)
+        # platform_context = platform_docs_service.get_context_for_llm(platform_name, question, max_tokens=3000)
         
         # Combine contexts
         combined_context = f"MODEL INFORMATION:\n{model_context}"
@@ -401,8 +387,8 @@ def compare_models(
     model_ids: List[str] = Query(..., description="List of model IDs to compare"),
     include_raw_json: bool = Query(default=False, description="Whether to include raw JSON in context"),
     llm_service: LLMService = Depends(get_llm_service),
-    model_context_processor: ModelContextProcessor = Depends(get_model_context_processor),
-    search_controller: SearchController = Depends(get_search_controller)
+    model_context_service: ModelContextService = Depends(get_model_context_service),
+    search_service: SearchService = Depends(get_search_service)
 ):
     """
     Compare multiple models by answering a question about them.
@@ -411,9 +397,9 @@ def compare_models(
         question: Question to answer about the models
         model_ids: List of model IDs to compare
         include_raw_json: Whether to include raw JSON in context
-        llm_service: Injected LLM controller
-        model_context_processor: Injected model context processor
-        search_controller: Injected search controller
+        llm_service: Injected LLM service
+        model_context_service: Injected model context service
+        search_service: Injected search service
         
     Returns:
         Dict containing the answer and source documents
@@ -444,15 +430,15 @@ def compare_models(
             else:
                 model_names.append(f"Model {model_id}")
         
-        # Format models for comparison using ModelContextProcessor
-        combined_context = model_context_processor.format_models_for_comparison(
+        # Format models for comparison using ModelContextService
+        combined_context = model_context_service.format_models_for_comparison(
             model_details_list, 
             model_names,
             include_raw_json
         )
         
-        # Get comparison prompt template from ModelContextProcessor
-        prompt_template = model_context_processor.create_model_comparison_prompt(len(model_ids))
+        # Get comparison prompt template from ModelContextService
+        prompt_template = model_context_service.create_model_comparison_prompt(len(model_ids))
         
         # Process and answer the question
         result = llm_service.process_and_answer(
@@ -478,8 +464,8 @@ def query_model_aspect(
     aspect: str = Query(..., description="Specific aspect to focus on (e.g., 'performance', 'architecture', 'licensing', 'training')"),
     include_raw_json: bool = Query(default=False, description="Whether to include raw JSON in context"),
     llm_service: LLMService = Depends(get_llm_service),
-    model_context_processor: ModelContextProcessor = Depends(get_model_context_processor),
-    search_controller: SearchController = Depends(get_search_controller)
+    model_context_service: ModelContextService = Depends(get_model_context_service),
+    search_service: SearchService = Depends(get_search_service)
 ):
     """
     Answer a question about a specific aspect of a machine learning model.
@@ -489,9 +475,9 @@ def query_model_aspect(
         model_id: ID of the model to use as context
         aspect: Specific aspect to focus on (e.g., 'performance', 'architecture')
         include_raw_json: Whether to include raw JSON in context
-        llm_service: Injected LLM controller
-        model_context_processor: Injected model context processor
-        search_controller: Injected search controller
+        llm_service: Injected LLM service
+        model_context_service: Injected model context service
+        search_service: Injected search service
         
     Returns:
         Dict containing the answer and source documents
@@ -510,11 +496,11 @@ def query_model_aspect(
         if isinstance(model_details, list):
             model_details = model_details[0]
         
-        # Format model details using the ModelContextProcessor
-        structured_context = model_context_processor.format_model_details(model_details, include_raw_json)
+        # Format model details using the ModelContextService
+        structured_context = model_context_service.format_model_details(model_details, include_raw_json)
         
-        # Get aspect-specific prompt template from ModelContextProcessor
-        prompt_template = model_context_processor.create_model_aspect_prompt(aspect)
+        # Get aspect-specific prompt template from ModelContextService
+        prompt_template = model_context_service.create_model_aspect_prompt(aspect)
         
         # Process and answer the question
         result = llm_service.process_and_answer(
@@ -536,162 +522,25 @@ def query_model_aspect(
 
 @router.get("/available_aspects")
 def list_available_aspects(
-    model_context_processor: ModelContextProcessor = Depends(get_model_context_processor)
+    model_context_service: ModelContextService = Depends(get_model_context_service)
 ):
     """
     List available model aspects that can be queried.
     
     Args:
-        model_context_processor: Injected model context processor
+        model_context_service: Injected model context service
         
     Returns:
         Dict containing available aspects and their descriptions
     """
-    return {"available_aspects": model_context_processor.get_available_aspects()}
-
-
-@router.post("/answer_with_platform_docs")
-def answer_with_platform_docs(
-    question: str = Query(..., description="Question to answer"),
-    platform_name: str = Query(..., description="Platform to use for documentation"),
-    query: str = Query(None, description="Optional search query to find relevant docs (defaults to the question)"),
-    max_tokens: int = Query(default=4000, description="Maximum number of tokens to include in context"),
-    llm_service: LLMService = Depends(get_llm_service),
-    platform_docs_controller: PlatformDocsController = Depends(get_platform_docs_controller)
-):
-    """
-    Answer a question using the LLM with context from platform documentation.
-    
-    Args:
-        question: Question to answer
-        platform_name: Platform to use for documentation
-        query: Optional search query (defaults to the question)
-        max_tokens: Maximum number of tokens to include in context
-        llm_service: Injected LLM controller
-        platform_docs_controller: Injected platform docs controller
-        
-    Returns:
-        Dict containing the answer and source documents
-        
-    Raises:
-        HTTPException: If platform not found or LLM service unavailable
-    """
-    try:
-        # Use question as query if not provided
-        search_query = query if query else question
-        
-        # Get context from platform documentation
-        context = platform_docs_controller.get_context_for_llm(platform_name, search_query, max_tokens)
-        
-        if not context:
-            raise HTTPException(status_code=404, detail=f"No relevant documentation found for query: {search_query}")
-        
-        # Create a prompt template that includes platform name
-        prompt_template = f"""You are an expert on {platform_name} technology and documentation.
-        
-Answer the following question based on the provided documentation:
-
-Question: {question}
-
-Relevant Documentation:
-{context}
-
-Answer:"""
-        
-        # Process and answer the question
-        result = llm_service.process_and_answer(
-            question=question,
-            context_documents=[context],
-            prompt_template=prompt_template
-        )
-        
-        return result
-    
-    except KeyError as ke:
-        raise HTTPException(status_code=404, detail=str(ke))
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except ConnectionError as ce:
-        raise HTTPException(status_code=503, detail=f"LLM service unavailable: {str(ce)}")
-    except Exception as e:
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Question answering error: {str(e)}")
-
-
-@router.post("/answer_with_multi_platform_docs")
-def answer_with_multi_platform_docs(
-    question: str = Query(..., description="Question to answer"),
-    platforms: List[str] = Query(..., description="List of platforms to use for documentation"),
-    query: str = Query(None, description="Optional search query to find relevant docs (defaults to the question)"),
-    max_tokens: int = Query(default=6000, description="Maximum number of tokens to include in context"),
-    llm_service: LLMService = Depends(get_llm_service),
-    platform_docs_controller: PlatformDocsController = Depends(get_platform_docs_controller)
-):
-    """
-    Answer a question using the LLM with context from multiple platform documentations.
-    
-    Args:
-        question: Question to answer
-        platforms: List of platforms to use for documentation
-        query: Optional search query (defaults to the question)
-        max_tokens: Maximum number of tokens to include in context
-        llm_service: Injected LLM controller
-        platform_docs_controller: Injected platform docs controller
-        
-    Returns:
-        Dict containing the answer and source documents
-        
-    Raises:
-        HTTPException: If platforms not found or LLM service unavailable
-    """
-    try:
-        # Use question as query if not provided
-        search_query = query if query else question
-        
-        # Get context from multiple platform documentations
-        context = platform_docs_controller.get_multi_platform_context(platforms, search_query, max_tokens)
-        
-        if not context:
-            raise HTTPException(status_code=404, detail=f"No relevant documentation found for query: {search_query}")
-        
-        # Create a prompt template that includes platform names
-        platforms_str = ", ".join(platforms)
-        prompt_template = f"""You are an expert on {platforms_str} technologies and documentation.
-        
-Answer the following question based on the provided documentation from multiple platforms:
-
-Question: {question}
-
-Relevant Documentation:
-{context}
-
-Answer:"""
-        
-        # Process and answer the question
-        result = llm_service.process_and_answer(
-            question=question,
-            context_documents=[context],
-            prompt_template=prompt_template
-        )
-        
-        return result
-    
-    except KeyError as ke:
-        raise HTTPException(status_code=404, detail=str(ke))
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except ConnectionError as ce:
-        raise HTTPException(status_code=503, detail=f"LLM service unavailable: {str(ce)}")
-    except Exception as e:
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Question answering error: {str(e)}")
+    return {"available_aspects": model_context_service.get_available_aspects()}
 
 # --- New Conversational Search Endpoint ---
 
 @router.post("/search/conversation", response_model=ConversationResponse)
 def handle_search_conversation_endpoint(
     request: ConversationRequest,
-    search_controller: SearchController = Depends(get_search_controller),
+    search_service: SearchService = Depends(get_search_service),
     llm_service: LLMService = Depends(get_llm_service)
 ):
     """
@@ -703,7 +552,7 @@ def handle_search_conversation_endpoint(
     a search.
     """
     try:
-        # Convert Pydantic models back to simple dicts for the controller if needed
+        # Convert Pydantic models back to simple dicts for the service if needed
         history_list = [msg.dict() for msg in request.conversation_history]
         # history_list = history_list[:3]
         # print(f"Conversation history: {history_list}")
@@ -715,7 +564,6 @@ def handle_search_conversation_endpoint(
         
         # for prop in filter_properties_to_fetch_values:
         #     try:
-        #         details = entity_controller.get_distinct_property_values_with_entity_details(prop)
         #         available_filters_values_dict[prop] = [d.get("name", v).lower().replace("_", " ") for v, d in details.items()]
         #     except Exception as e:
         #         print(f"Warning: Could not fetch distinct values for filter '{prop}': {e}")
@@ -755,7 +603,7 @@ def handle_search_conversation_endpoint(
 def refine_query_endpoint(
     request: RefineQueryRequest,
     llm_service: LLMService = Depends(get_llm_service),
-    search_controller: SearchController = Depends(get_search_controller)
+    search_service: SearchService = Depends(get_search_service)
 ):
     """
     Refine the user's current query and filters using the LLM.
@@ -765,7 +613,7 @@ def refine_query_endpoint(
     Does NOT perform a search.
     """
     try:
-        # --- Fetch available filter VALUES using SearchController's faceted search infrastructure --- 
+        # --- Fetch available filter VALUES using SearchService's faceted search infrastructure --- 
         available_filters_values_dict = {}
         
         # Get facets configuration to know which facets are available
@@ -790,12 +638,12 @@ def refine_query_endpoint(
                 break
                 
             try:
-                # Use SearchController's fetch_facet_values method
+                # Use SearchService's fetch_facet_values method
                 # Reduced limit to avoid context length issues
                 remaining_quota = max_total_values - total_values_collected
                 prop_limit = min(15, remaining_quota)  # Don't exceed remaining quota
                 
-                facet_data = search_controller.fetch_facet_values(
+                facet_data = search_service.fetch_facet_values(
                     field=prop,
                     limit=prop_limit,  # Dynamic limit based on remaining quota
                     current_filters={}  # No filters for getting all available values
@@ -813,17 +661,17 @@ def refine_query_endpoint(
                 if formatted_values:
                     available_filters_values_dict[prop] = formatted_values
                     total_values_collected += len(formatted_values)
-                    print(f"Fetched {len(formatted_values)} values for {prop} using SearchController")
+                    print(f"Fetched {len(formatted_values)} values for {prop} using SearchService")
                 
             except Exception as e:
-                print(f"ERROR!!! : Could not fetch facet values for '{prop}' using SearchController: {e}")
+                print(f"ERROR!!! : Could not fetch facet values for '{prop}' using SearchService: {e}")
                 # Continue without example values for this property
         # --- End Fetch available filter values --- 
         
         print(f"Total facet values collected for LLM: {total_values_collected} across {len(available_filters_values_dict)} properties")
         print(f"Available filters summary: {[(k, len(v)) for k, v in available_filters_values_dict.items()]}")
 
-        # Call the LLM controller method for refinement
+        # Call the LLM service method for refinement
         llm_analysis = llm_service.refine_query_and_suggest_filters(
             current_query=request.current_query,
             current_filters=request.current_filters,
@@ -871,7 +719,7 @@ def improve_query_endpoint(
     
     Args:
         request: Request containing the current query and optional search context
-        llm_service: Injected LLM controller
+        llm_service: Injected LLM service
         
     Returns:
         ImproveQueryResponse: Contains improved query, clarifying questions, and guidance
@@ -880,7 +728,7 @@ def improve_query_endpoint(
         HTTPException: If query improvement fails or LLM service unavailable
     """
     try:
-        # Call the LLM controller method for query improvement
+        # Call the LLM service method for query improvement
         improvement_result = llm_service.improve_query_only(
             current_query=request.current_query,
             search_context=request.search_context
@@ -909,16 +757,16 @@ def improve_query_endpoint(
 def summarize_models_endpoint(
     request: SummarizeModelsRequest,
     llm_service: LLMService = Depends(get_llm_service),
-    model_context_processor: ModelContextProcessor = Depends(get_model_context_processor),
+    model_context_service: ModelContextService = Depends(get_model_context_service),
 ):
     """
     Generates a summary for a list of specified models, highlighting common themes.
 
     Args:
         request: Request containing the list of model IDs.
-        llm_service: Injected LLM controller.
-        model_context_processor: Injected model context processor.
-        search_controller: Injected search controller.
+        llm_service: Injected LLM service.
+        model_context_service: Injected model context service.
+        search_service: Injected search service.
 
     Returns:
         SummarizeModelsResponse: Containing the summary and source context.
@@ -953,12 +801,15 @@ def summarize_models_endpoint(
         if not model_details_list:
              raise HTTPException(status_code=404, detail="No valid models found for summarization.")
 
-        # Format models context using ModelContextProcessor
+        # Format models context using ModelContextService
         # Using format_models_for_comparison as it structures multiple models well
-        combined_context = model_context_processor.format_models_for_comparison(
-            model_details_list,
-            model_names,
-            request.include_raw_json
+        print(model_names)
+        print(model_names[0])
+        print(type(model_names[0]))
+        combined_context = model_context_service.format_models_for_comparison(
+            model_details_list = model_details_list,
+            model_names = model_names,
+            include_raw_json = request.include_raw_json
         )
 
         # Define the summarization prompt
