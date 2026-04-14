@@ -1,0 +1,27 @@
+# Local DB / search data (wrong perms for build context; not needed in images)
+config/neo4j/data
+config/neo4j/logs
+config/neo4j/import
+config/neo4j/plugins
+config/elasticsearch/data
+
+# Python / VCS
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+venv
+env
+
+# Env secrets
+.env
+.env.*
+
+# Misc
+*.md
+Dockerfile*
+docker-compose*.yml
