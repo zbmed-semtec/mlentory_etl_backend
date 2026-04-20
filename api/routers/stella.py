@@ -50,7 +50,7 @@ async def search_models_with_stella(
     STELLA forwards the same query parameters to your ranker containers; those containers
     should invoke ``GET .../api/v1/models/search`` (this API), mapping ``limit`` ↔ ``page_size``.
     """
-    if os.getenv("USE_STELLA", "false").lower() != "true":
+    if os.environ.get("USE_STELLA", "true").lower() != "true":
         raise HTTPException(status_code=503, detail="STELLA integration is disabled")
 
     try:
@@ -103,7 +103,7 @@ async def search_models_with_stella(
 @router.post("/stella/stella_feedback")
 async def stella_feedback(data: Dict[str, Any] = Body(...)) -> Any:
     """Forward click feedback to STELLA App (``/stella/api/v1/ranking/.../feedback``)."""
-    if os.getenv("USE_STELLA", "false").lower() != "true":
+    if os.environ.get("USE_STELLA", "true").lower() != "true":
         raise HTTPException(status_code=503, detail="STELLA integration is disabled")
 
     stella_app_api = os.getenv(
