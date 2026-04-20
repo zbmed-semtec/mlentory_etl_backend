@@ -37,6 +37,7 @@ from api.schemas.responses import (
     PaginatedResponse,
 )
 from api.services.elasticsearch_service import elasticsearch_service
+from api.services.vector_search_service import vector_search_service
 from api.services.graph_service import graph_service
 from api.services.model_service import model_service
 from api.services.ro_crate_service import ro_crate_service
@@ -212,6 +213,66 @@ async def search_models_with_facets(
         raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
     except Exception as e:
         logger.error(f"Error in faceted search: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+
+@router.get("/models/search_with_vector")
+async def search_models_with_vector(
+    query: str = Query("", description="Semantic search query (encoded to vector)"),
+    filters: str = Query(
+        "{}",
+        description="JSON string of property filters (e.g., {'license': ['MIT'], 'mlTask': ['text-generation']})",
+        examples=['{"license": ["MIT"], "mlTask": ["text-generation"]}'],
+    ),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(50, ge=1, le=1000, description="Results per page (max 1000)"),
+    facets: str = Query(
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
+        description="JSON array of facet field names to aggregate",
+        examples=['["mlTask", "license", "keywords"]'],
+    ),
+    facet_size: int = Query(20, ge=1, le=100, description="Maximum values per facet (max 100)"),
+    facet_query: str = Query(
+        "{}",
+        description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
+        examples=['{"keywords": "medical"}'],
+    ),
+) -> Dict[str, Any]:
+    """
+    Vector-based semantic search using `model_vector` cosine similarity.
+
+    This mirrors the `/models/search_with_vector` endpoint from `mlentory_backend`.
+    """
+    try:
+        filter_dict = json.loads(filters) if filters else {}
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "datasets", "platform"]
+        facet_query_dict = json.loads(facet_query) if facet_query else {}
+
+        if not isinstance(filter_dict, dict):
+            raise ValueError("Filters must be a JSON object/dictionary")
+        if not isinstance(facets_list, list):
+            raise ValueError("Facets must be a JSON array/list")
+        if not isinstance(facet_query_dict, dict):
+            raise ValueError("Facet query must be a JSON object/dictionary")
+        for key, values in filter_dict.items():
+            if not isinstance(values, list):
+                raise ValueError(f"Filter values for '{key}' must be a list")
+
+        return vector_search_service.vector_search(
+            query=query,
+            filters=filter_dict,
+            limit=limit,
+            page=page,
+            facets=facets_list,
+            facet_size=facet_size,
+            facet_query=facet_query_dict,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except json.JSONDecodeError as je:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
+    except Exception as e:
+        logger.error("Error in vector search: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 
