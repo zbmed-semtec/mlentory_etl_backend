@@ -35,6 +35,7 @@ from api.schemas.responses import (
     ModelDetail,
     ModelListItem,
     PaginatedResponse,
+    VectorFacetedSearchResponse,
 )
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.vector_search_service import vector_search_service
@@ -216,7 +217,7 @@ async def search_models_with_facets(
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 
-@router.get("/models/search_with_vector")
+@router.get("/models/search_with_vector", response_model=VectorFacetedSearchResponse)
 async def search_models_with_vector(
     query: str = Query("", description="Semantic search query (encoded to vector)"),
     filters: str = Query(
@@ -237,7 +238,7 @@ async def search_models_with_vector(
         description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
         examples=['{"keywords": "medical"}'],
     ),
-) -> Dict[str, Any]:
+) -> VectorFacetedSearchResponse:
     """
     Vector-based semantic search using `model_vector` cosine similarity.
 
