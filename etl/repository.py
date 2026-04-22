@@ -12,6 +12,7 @@ from etl.assets import hf_loading as hf_loading_module
 from etl.assets import openml_extraction as openml_assets_module
 from etl.assets import ai4life_extraction as ai4life_assets_module
 from etl.assets import ai4life_transformation as ai4life_transformation_module
+from etl.assets import vector_indexing as vector_indexing_module
 
 @repository
 def mlentory_etl_repository():
@@ -27,5 +28,14 @@ def mlentory_etl_repository():
     openml_assets = load_assets_from_modules([openml_assets_module])
     ai4life_assets = load_assets_from_modules([ai4life_assets_module])
     ai4life_transformation_assets = load_assets_from_modules([ai4life_transformation_module])
-    return [*hf_extraction_assets, *hf_transformation_assets, *hf_loading_assets, *openml_assets, *ai4life_assets, *ai4life_transformation_assets]
+    vector_indexing_assets = load_assets_from_modules([vector_indexing_module])
+    return [
+        *hf_extraction_assets,
+        *hf_transformation_assets,
+        *hf_loading_assets,
+        *openml_assets,
+        *ai4life_assets,
+        *ai4life_transformation_assets,
+        *vector_indexing_assets,
+    ]
 
