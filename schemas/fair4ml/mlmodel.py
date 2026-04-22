@@ -85,9 +85,9 @@ class MLModel(BaseModel):
         description="Human-readable name of the model", 
         alias="https://schema.org/name"
     )
-    url: Optional[str] = Field(
-        default=None,
-        description="Primary URL where the model can be accessed",
+    url: List[str] = Field(
+        default_factory=list,
+        description="URLs where the model can be accessed",
         alias="https://schema.org/url"
     )
     
@@ -285,7 +285,10 @@ class MLModel(BaseModel):
             "example": {
                 "identifier": "https://huggingface.co/bert-base-uncased",
                 "name": "bert-base-uncased",
-                "url": "https://huggingface.co/bert-base-uncased",
+                "url": [
+                    "https://huggingface.co/bert-base-uncased",
+                    "https://mlentory.zbmed.de/mlentory_graph/4b31454870c7d69c4b9b486efd17337b516d1881376559bbe1159df13cd3bfe4",
+                ],
                 "author": "google",
                 "dateCreated": "2020-01-01T00:00:00Z",
                 "keywords": ["bert", "transformer", "nlp"],
