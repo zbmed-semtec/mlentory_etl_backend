@@ -16,6 +16,7 @@ from typing import Dict, Any, Optional
 import logging
 from etl_extractors.hf import HFHelper
 import pycountry
+from etl_transformers.common.utils import extract_normalized_doi, build_identifier
 
 from schemas.fair4ml import MLModel, ExtractionMetadata
 
@@ -148,10 +149,16 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     # Extract clean description
     description = _strip_frontmatter(card) if card else None
     
+    doi = extract_normalized_doi(
+        raw_record=raw_model,
+        candidate_fields=("doi", "DOI", "referencePublication", "reference_publication"),
+    )
+    identifier = build_identifier(doi=doi, mlentory_id=mlentory_id)
+
     # Build result with mapped fields
     result = {
         # Core identification
-        "identifier": [hf_base_url or model_id, mlentory_id],
+        "identifier": identifier,
         "name": _extract_model_name(model_id),
         "url": hf_base_url or "",
         
@@ -179,8 +186,8 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "identifier": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
             confidence=1.0,
-            source_field="modelId",
-            notes="Converted to HuggingFace URL format and mlentory_id"
+            source_field="doi, referencePublication, mlentory_id",
+            notes="Contains only DOI (if present) and mlentory_id"
         ),
         "name": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
