@@ -49,3 +49,26 @@ def build_identifier(doi: Optional[str], mlentory_id: str) -> List[str]:
 
     # Deduplicate while preserving order.
     return list(dict.fromkeys(identifiers))
+
+
+def build_model_urls(platform_url: Optional[str], mlentory_id: Optional[str]) -> List[str]:
+    """
+    Build URL list with platform URL and MLentory UI URL.
+    """
+    urls: List[str] = []
+
+    if platform_url:
+        cleaned_platform_url = platform_url.strip()
+        if cleaned_platform_url:
+            urls.append(cleaned_platform_url)
+
+    if mlentory_id:
+        cleaned_mlentory_id = mlentory_id.strip()
+        prefix = "https://w3id.org/mlentory/"
+        if cleaned_mlentory_id.startswith(prefix):
+            mlentory_ui_url = cleaned_mlentory_id.replace(
+                prefix, "https://mlentory.zbmed.de/", 1
+            )
+            urls.append(mlentory_ui_url)
+
+    return list(dict.fromkeys(urls))
