@@ -16,7 +16,11 @@ from typing import Dict, Any, Optional
 import logging
 from etl_extractors.hf import HFHelper
 import pycountry
-from etl_transformers.common.utils import extract_normalized_doi, build_identifier
+from etl_transformers.common.utils import (
+    extract_normalized_doi,
+    build_identifier,
+    build_model_urls,
+)
 
 from schemas.fair4ml import MLModel, ExtractionMetadata
 
@@ -155,12 +159,14 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     )
     identifier = build_identifier(doi=doi, mlentory_id=mlentory_id)
 
+    urls = build_model_urls(platform_url=hf_base_url, mlentory_id=mlentory_id)
+
     # Build result with mapped fields
     result = {
         # Core identification
         "identifier": identifier,
         "name": _extract_model_name(model_id),
-        "url": hf_base_url or "",
+        "url": urls,
         
         # Authorship
         "author": author,
@@ -198,8 +204,8 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "url": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
             confidence=1.0,
-            source_field="modelId",
-            notes="Generated HuggingFace model URL"
+            source_field="modelId, mlentory_id",
+            notes="Contains platform URL and MLentory UI URL"
         ),
         "author": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
