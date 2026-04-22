@@ -17,7 +17,11 @@ from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 import pycountry
 import json
 from typing import Any, List, Dict
-from etl_transformers.common.utils import extract_normalized_doi, build_identifier
+from etl_transformers.common.utils import (
+    extract_normalized_doi,
+    build_identifier,
+    build_model_urls,
+)
 from schemas.fair4ml import MLModel, ExtractionMetadata
 
 
@@ -162,6 +166,7 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         candidate_fields=("doi", "DOI", "referencePublication", "reference_publication"),
     )
     identifier: List[str] = build_identifier(doi=doi, mlentory_id=mlentory_id)
+    urls: List[str] = build_model_urls(platform_url=url, mlentory_id=mlentory_id)
 
     name = str(raw_model.get("name", "")).strip() or model_id
     shared_by = str(raw_model.get("sharedBy", "")).strip()
@@ -191,7 +196,7 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "identifier": identifier,
         "name": name,
-        "url": url,
+        "url": urls,
         "author": author,
         "sharedBy": shared_by,
         "modelCategory": modelCategory,
@@ -225,8 +230,8 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "url": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
             confidence=1.0,
-            source_field="url",
-            notes=None,
+            source_field="url, mlentory_id",
+            notes="Contains platform URL and MLentory UI URL",
         ),
         "author": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
