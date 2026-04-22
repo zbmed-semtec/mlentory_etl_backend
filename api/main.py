@@ -66,17 +66,18 @@ Example:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import os
 
 from api.config import get_es_client, get_neo4j_config
 from api.routers.graph import router as graph_router
-from api.routers.models import router as models_router
 from api.routers.llm import router as llm_router
+from api.routers.models import router as models_router
+from api.routers.stella import router as stella_router
 from api.routers.stats import router as stats_router
 from api.schemas.responses import HealthResponse
 
@@ -113,8 +114,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager."""
     logger.info("Starting MLentory API")
+    if os.environ.get("USE_STELLA", "true").lower() == "true":
+        logger.info("STELLA integration enabled (USE_STELLA=true)")
+    else:
+        logger.info("STELLA integration disabled (USE_STELLA!=true)")
+
     global searchController, entityController, llmController, modelContextProcessor, platformDocsController, sqlHandler, indexHandler
-    
+
     # Get database configuration from environment variables
     # postgres_host = os.environ.get("POSTGRES_HOST", "postgres_db")
     # postgres_user = os.environ.get("POSTGRES_USER", "user")
@@ -231,6 +237,12 @@ app.include_router(
     models_router,
     prefix="/api/v1",
     tags=["models"],
+)
+
+app.include_router(
+    stella_router,
+    prefix="/api/v1",
+    tags=["stella"],
 )
 
 app.include_router(
