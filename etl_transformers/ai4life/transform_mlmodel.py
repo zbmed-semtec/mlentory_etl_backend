@@ -10,7 +10,6 @@ a dictionary with the mapped fields plus extraction metadata for provenance trac
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Dict, Any, Optional
 import logging
@@ -18,6 +17,7 @@ from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 import pycountry
 import json
 from typing import Any, List, Dict
+from etl_transformers.common.utils import extract_normalized_doi, build_identifier
 from schemas.fair4ml import MLModel, ExtractionMetadata
 
 
@@ -157,11 +157,11 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     url = str(raw_model.get("url", "")).strip()
     mlentory_id = str(raw_model.get("mlentory_id", "")).strip()
 
-    identifier: List[str] = []
-    if url:
-        identifier.append(url)
-    if mlentory_id:
-        identifier.append(mlentory_id)
+    doi = extract_normalized_doi(
+        raw_record=raw_model,
+        candidate_fields=("doi", "DOI", "referencePublication", "reference_publication"),
+    )
+    identifier: List[str] = build_identifier(doi=doi, mlentory_id=mlentory_id)
 
     name = str(raw_model.get("name", "")).strip() or model_id
     shared_by = str(raw_model.get("sharedBy", "")).strip()
@@ -213,8 +213,8 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "identifier": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
             confidence=1.0,
-            source_field="url, mlentory_id",
-            notes=None,
+            source_field="doi, referencePublication, mlentory_id",
+            notes="Contains only DOI (if present) and mlentory_id",
         ),
         "name": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
