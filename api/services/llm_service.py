@@ -105,7 +105,7 @@ class LLMService:
         try:
             self.embeddings = HuggingFaceEmbeddings(
                 model_name=self.embedding_model_name,
-                model_kwargs={"device": "cpu"},
+                model_kwargs={"device": "cuda"},
             )
             logger.info(f"Initialized embeddings with model: {self.embedding_model_name}")
         except Exception as e:

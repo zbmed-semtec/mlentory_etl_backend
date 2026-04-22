@@ -177,6 +177,13 @@ services:
       - ./api:/app/api
       - ./etl_loaders:/app/etl_loaders
       - ./schemas:/app/schemas
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
     networks:
       - mlentory-network
     depends_on:
