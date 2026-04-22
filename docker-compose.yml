@@ -37,6 +37,38 @@ services:
       retries: 3
       start_period: 40s
 
+  # Add vLLM service for high-performance LLM inference
+  vllm:
+    container_name: vllm
+    hostname: vllm
+    image: vllm/vllm-openai:latest
+    ports:
+      - "8003:8000"  # Map container port 8000 to host port 8003
+    volumes:
+      - ../deploy/vllm_models:/root/.cache/huggingface  # Cache for model storage
+    networks:
+      - mlentory-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
+    environment:
+      - VLLM_MODEL=${VLLM_MODEL:-google/gemma-3-4b-it}  # Default model
+      - VLLM_HOST=0.0.0.0
+      - VLLM_PORT=8000
+      - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
+    command: ["--model", "${VLLM_MODEL:-google/gemma-3-4b-it}", "--host", "0.0.0.0", "--port", "8000"]
+    # healthcheck:
+    #   test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 20
+    #   start_period: 600s
+    restart: unless-stopped
+
   elasticsearch:
     profiles: ["etl", "api", "complete", "mcp"]
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.2
