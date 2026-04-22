@@ -14,6 +14,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from api.config import get_es_client, get_es_config
+from api.schemas.responses import FacetValue, VectorModelListItem
 from api.services.faceted_search import FacetedSearchMixin
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,8 @@ class VectorSearchService(FacetedSearchMixin):
                 "models": [],
                 "total": 0,
                 "page": page,
-                "limit": limit,
+                "page_size": limit,
+                "filters": filters or {},
                 "facets": {},
                 "facet_config": {},
                 "error": "sentence-transformers not installed in API container",
@@ -163,26 +165,57 @@ class VectorSearchService(FacetedSearchMixin):
         total_raw = (resp.get("hits") or {}).get("total", 0)
         total = int(total_raw.get("value", 0) if isinstance(total_raw, dict) else total_raw)
 
-        models: List[Dict[str, Any]] = []
+        models: List[VectorModelListItem] = []
         for hit in hits:
             src = hit.get("_source", {}) or {}
             raw_score = float(hit.get("_score") or 0.0)  # cosineSimilarity+1 ∈ [0,2]
-            src["score"] = raw_score / 2.0
-            models.append(src)
+            normalized_score = raw_score / 2.0
+            db_identifier = src.get("db_identifier") or []
+            if isinstance(db_identifier, str):
+                db_identifier = [db_identifier]
 
-        facet_results: Dict[str, List[Dict[str, Any]]] = {}
+            mlentory_id = next(
+                (
+                    _id
+                    for _id in db_identifier
+                    if isinstance(_id, str)
+                    and _id.startswith("https://w3id.org/mlentory/mlentory_graph/")
+                ),
+                "-1",
+            )
+
+            models.append(
+                VectorModelListItem(
+                    db_identifier=db_identifier,
+                    mlentory_id=str(mlentory_id),
+                    name=src.get("name") or "",
+                    description=src.get("description"),
+                    score=normalized_score,
+                    searchable_text=src.get("searchable_text"),
+                    sharedBy=src.get("shared_by"),
+                    license=src.get("license"),
+                    mlTask=src.get("ml_tasks") or [],
+                    keywords=src.get("keywords") or [],
+                    datasets=src.get("datasets") or [],
+                    platform=src.get("platform") or "Unknown",
+                )
+            )
+
+        facet_results: Dict[str, List[FacetValue]] = {}
         aggs_data = resp.get("aggregations") or {}
         for facet in facets:
             key = f"{facet}_facet"
             buckets = (aggs_data.get(key) or {}).get("buckets") or []
-            facet_results[facet] = [{"value": str(b.get("key")), "count": int(b.get("doc_count", 0))} for b in buckets]
+            facet_results[facet] = [
+                FacetValue(value=str(b.get("key")), count=int(b.get("doc_count", 0))) for b in buckets
+            ]
 
         return {
-            "query": query,
-            "page": page,
-            "limit": limit,
-            "models": models,
             "total": total,
+            "page": page,
+            "page_size": limit,
+            "models": models,
+            "filters": filters,
             "facets": facet_results,
             "facet_config": {k: v for k, v in facet_config.items() if k in facets},
         }

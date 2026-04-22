@@ -249,9 +249,9 @@ services:
       INTERLEAVE: "True"
       BULK_INDEX: "False"
       DELETE_SENT_SESSION: "True"
-      INTERVAL_DB_CHECK: 3
-      SESSION_EXPIRATION: 6
-      SESSION_KILL: 120
+      INTERVAL_DB_CHECK: 10
+      SESSION_EXPIRATION: 3600
+      SESSION_KILL: 7200
       SENDFEEDBACK: "True"
 
       # Systems
@@ -326,7 +326,7 @@ services:
 
   stella-mlentory-experiment:
     profiles: ["stella"]
-    image: thestellaproject/mlentory-base:latest
+    image: thestellaproject/mlentory-experiment:latest
     container_name: mlentory-experiment
     networks:
       - mlentory-network

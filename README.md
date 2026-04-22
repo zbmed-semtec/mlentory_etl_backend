@@ -152,6 +152,59 @@ Key configurations:
 - `DAGSTER_HOME` - Dagster workspace location
 - `DATA_DIR` - Data storage directory
 
+## 🧪 STELLA Evaluation (Optional)
+
+This repository can be run with the **STELLA evaluation framework** to support interleaved A/B ranking and
+feedback collection for search experiments.
+
+### Start STELLA services
+
+The `docker-compose.yml` includes a `stella` profile that starts:
+- `stella-app` (proxy + interleaving + session/feedback handling)
+- `stella-server` (experiment tracking backend)
+- system containers (baseline/experimental rankers)
+
+Using the Makefile:
+
+```bash
+# Start STELLA services
+sudo make stella-up
+
+# Initialize STELLA databases (run once)
+sudo make stella-init
+
+# Stop STELLA services
+sudo make stella-down
+```
+
+Using Docker Compose directly:
+
+```bash
+# Start the full stack (ETL + API + STELLA)
+docker compose --profile=complete --profile=stella up -d
+
+# Or start only STELLA services
+docker compose --profile=stella up -d
+```
+
+Default ports (see `docker-compose.yml`):
+- STELLA App: `http://localhost:${STELLA_APP_PORT:-8080}`
+- STELLA Server: `http://localhost:${STELLA_SERVER_PORT:-8004}`
+
+### API endpoints used by STELLA
+
+This API exposes STELLA-specific endpoints under `/api/v1/stella`:
+- `GET /api/v1/stella/search_with_stella`: forwards search to STELLA proxy (ranking/interleaving)
+- `POST /api/v1/stella/stella_feedback`: forwards click feedback payloads to STELLA
+
+### Environment variables
+
+Common configuration knobs:
+- `USE_STELLA=true`: enable STELLA endpoints
+- `STELLA_PROXY_API` (default `http://stella-app:8005/proxy`): proxy base used by `search_with_stella`
+- `BACKEND_BASE_URL` (default `mlentory-api:8000/api/v1/models`): base URL forwarded to ranker containers
+- `STELLA_APP_API` (default `http://stella-app:8005/stella/api/v1`): base URL used for feedback forwarding
+
 ## 🧪 Testing
 
 ```bash

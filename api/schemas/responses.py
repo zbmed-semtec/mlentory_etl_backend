@@ -61,6 +61,16 @@ class ModelListItem(BaseModel):
     platform: str = Field(description="Platform where model is hosted (e.g., 'Hugging Face')")
 
 
+class VectorModelListItem(ModelListItem):
+    """Model list item returned by vector search endpoints."""
+
+    score: float = Field(description="Vector similarity score normalized to 0..1")
+    searchable_text: Optional[str] = Field(
+        description="Text used to generate the model embedding.",
+        default=None,
+    )
+
+
 class ModelDetail(MLModel):
     """Extended model information with related entities from Neo4j."""
 
@@ -116,6 +126,12 @@ class FacetedSearchResponse(BaseModel):
     filters: Dict[str, List[str]] = Field(description="Applied filters", default_factory=dict)
     facets: Dict[str, List[FacetValue]] = Field(description="Facet aggregations with counts", default_factory=dict)
     facet_config: Dict[str, FacetConfig] = Field(description="Configuration for requested facets", default_factory=dict)
+
+
+class VectorFacetedSearchResponse(FacetedSearchResponse):
+    """Faceted search response for vector endpoints (models include `score` + `searchable_text`)."""
+
+    models: List[VectorModelListItem] = Field(description="List of models for current page")
 
 
 class FacetValuesResponse(BaseModel):
