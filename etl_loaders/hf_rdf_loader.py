@@ -90,6 +90,8 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         "https://w3id.org/codemeta/referencePublication",
         # License
         "https://schema.org/license",
+        # Hosting catalog/source website
+        "https://schema.org/source",
         # Keywords
         "https://schema.org/keywords",
         # In Language
@@ -528,6 +530,153 @@ def build_and_persist_licenses_rdf(
 
     return {
         "licenses_processed": len(licenses),
+        "triples_added": total_triples,
+        "errors": errors,
+        "ttl_path": ttl_path,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def mint_website_subject(website_data: Dict[str, Any]) -> str:
+    """
+    Mint a subject IRI for a Schema.org WebSite entity.
+    """
+    return LoadHelpers.mint_subject_generic(
+        entity=website_data,
+        kind="website",
+        identifier_predicate="https://schema.org/identifier",
+        url_predicate="https://schema.org/url",
+        mlentory_graph_prefix="https://w3id.org/mlentory/mlentory_graph/",
+    )
+
+
+def build_website_triples(graph: Graph, website_data: Dict[str, Any]) -> int:
+    """
+    Build RDF triples for a Schema.org WebSite.
+    """
+    triples_before = len(graph)
+
+    subject_iri = mint_website_subject(website_data)
+    subject = URIRef(subject_iri)
+
+    # rdf:type
+    graph.add((subject, namespaces["rdf"].type, namespaces["schema"].WebSite))
+
+    string_properties_lst = [
+        "https://schema.org/identifier",
+        "https://schema.org/name",
+        "https://schema.org/url",
+        "https://schema.org/sameAs",
+        "https://schema.org/description",
+        "https://schema.org/alternateName",
+    ]
+    for string_property in string_properties_lst:
+        add_literal_or_iri(
+            graph,
+            subject,
+            string_property,
+            website_data.get(string_property),
+            datatype=XSD.string,
+        )
+
+    triples_added = len(graph) - triples_before
+    return triples_added
+
+
+def build_and_persist_sources_rdf(
+    json_path: str,
+    config: Neo4jStoreConfig,
+    output_ttl_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build RDF triples from normalized source websites and persist to Neo4j.
+    """
+    json_file = Path(json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized sources file not found: {json_path}")
+
+    logger.info("Loading normalized sources from %s", json_path)
+    with open(json_file, "r", encoding="utf-8") as f:
+        sources = json.load(f)
+
+    if not isinstance(sources, list):
+        raise ValueError(f"Expected list of sources, got {type(sources)}")
+
+    logger.info("Loaded %s sources", len(sources))
+
+    logger.info("Opening RDF graph with Neo4j backend...")
+    graph = open_graph(config=config)
+
+    total_triples = 0
+    errors = 0
+    graph_closed = False
+    subject_uris = []
+
+    try:
+        for idx, source_entry in enumerate(sources):
+            try:
+                subject_uri = mint_website_subject(source_entry)
+                subject_uris.append(subject_uri)
+                triples_added = build_website_triples(graph, source_entry)
+                total_triples += triples_added
+
+                if (idx + 1) % 50 == 0:
+                    logger.info(
+                        "Processed %s/%s sources, added %s triples",
+                        idx + 1,
+                        len(sources),
+                        total_triples,
+                    )
+            except Exception as exc:
+                errors += 1
+                identifier = source_entry.get(
+                    "https://schema.org/identifier", f"unknown_{idx}"
+                )
+                logger.error(
+                    "Error building triples for source %s: %s",
+                    identifier,
+                    exc,
+                    exc_info=True,
+                )
+                logger.error("Stack trace: %s", traceback.format_exc())
+
+        logger.info(
+            "Finished building source triples: %s triples for %s sources (%s errors)",
+            total_triples,
+            len(sources),
+            errors,
+        )
+
+        ttl_path = None
+        if output_ttl_path:
+            ttl_file = Path(output_ttl_path)
+            ttl_file.parent.mkdir(parents=True, exist_ok=True)
+            logger.info("Flushing graph writes before TTL export...")
+            graph.close(True)
+            graph_closed = True
+
+            if subject_uris:
+                logger.info(
+                    "Exporting %s source subjects to Turtle via neosemantics: %s",
+                    len(subject_uris),
+                    output_ttl_path,
+                )
+                export_graph_neosemantics_batched(
+                    subject_uris=subject_uris, file_path=str(ttl_file), format="Turtle"
+                )
+                ttl_path = str(ttl_file)
+                logger.info("Saved source Turtle file: %s", ttl_path)
+            else:
+                logger.warning("No source subjects to export, skipping TTL generation")
+
+    finally:
+        if not graph_closed:
+            logger.info("Closing graph and flushing commits to Neo4j...")
+            graph.close(True)
+            logger.info("Graph closed, commits flushed")
+
+    return {
+        "sources_processed": len(sources),
         "triples_added": total_triples,
         "errors": errors,
         "ttl_path": ttl_path,

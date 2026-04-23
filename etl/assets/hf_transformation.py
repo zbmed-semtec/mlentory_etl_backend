@@ -98,6 +98,22 @@ def _load_entity_records(json_path: str, entity_label: str) -> Optional[List[Dic
     return records
 
 
+def _hf_catalog_website_mlentory_iris() -> List[str]:
+    """
+    mlentory IRIs for the Hugging Face catalog WebSite (one node, same on every model).
+
+    Same payload as extract-time ``sources.json`` via :meth:`HFHelper.raw_hf_catalog_website_records`.
+    """
+    uri_prefix = "https://w3id.org/mlentory/mlentory_graph/"
+    rows = HFHelper.raw_hf_catalog_website_records()
+    if not rows:
+        return []
+    identifiers = rows[0].get("https://schema.org/identifier") or []
+    if not isinstance(identifiers, list):
+        return []
+    return [u for u in identifiers if isinstance(u, str) and u.startswith(uri_prefix)]
+
+
 def _write_normalization_results(
     entity_label: str,
     normalized_folder: str,
@@ -166,6 +182,48 @@ def hf_normalized_run_folder(models_data: Tuple[str, str]) -> Tuple[str, str]:
     
     logger.info(f"Created normalized run folder: {normalized_run_folder}")
     return (str(raw_data_json_path), str(normalized_run_folder))
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={"run_folder_data": AssetIn("hf_normalized_run_folder")},
+    tags={"pipeline": "hf_etl", "stage": "transform"},
+)
+def hf_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
+    """
+    Bring the Hugging Face catalog ``WebSite`` from raw extract into this run's
+    normalized folder.
+
+    **Why:** Extraction already wrote ``1_raw/hf/<run>/sources.json``. Transform
+    keeps a copy under ``2_normalized/hf/<run>/sources.json`` so downstream
+    assets can read one folder for all normalized entity files (same idea as
+    ``licenses.json`` later in the pipeline).
+
+    **What:** If the raw file exists, copy its JSON; otherwise build the same
+    payload via :meth:`HFHelper.raw_hf_catalog_website_records` so older raw
+    runs still work.
+    """
+    raw_models_path, normalized_folder = run_folder_data
+    raw_run = Path(raw_models_path).parent
+    raw_sources = raw_run / "sources.json"
+    out_path = Path(normalized_folder) / "sources.json"
+
+    if raw_sources.exists():
+        with open(raw_sources, "r", encoding="utf-8") as file_handle:
+            payload = json.load(file_handle)
+        logger.info("Loaded HF catalog sources from raw run: %s", raw_sources)
+    else:
+        logger.warning(
+            "Raw sources.json missing at %s; using HFHelper catalog payload",
+            raw_sources,
+        )
+        payload = HFHelper.raw_hf_catalog_website_records()
+
+    with open(out_path, "w", encoding="utf-8") as file_handle:
+        json.dump(payload, file_handle, indent=2, ensure_ascii=False, default=_json_default)
+
+    logger.info("Wrote normalized HF sources to %s", out_path)
+    return str(out_path)
 
 
 @asset(
@@ -288,6 +346,8 @@ def hf_entity_linking(
     """
     _, normalized_folder = run_folder_data
 
+    hf_catalog_website_mlentory_iris = _hf_catalog_website_mlentory_iris()
+
     # Extract the model-entity mappings from the tuples
     model_datasets = datasets_mapping[0]
     model_articles = articles_mapping[0]
@@ -311,6 +371,7 @@ def hf_entity_linking(
             "base_models": [HFHelper.generate_mlentory_entity_hash_id('Model', x) for x in model_base_models[model_id]],
             "languages": [HFHelper.generate_mlentory_entity_hash_id('Language', x) for x in model_languages[model_id]],
             "tasks": [HFHelper.generate_mlentory_entity_hash_id('Task', x) for x in model_tasks[model_id]],
+            "sources": list(hf_catalog_website_mlentory_iris),
         }
 
         entity_linking[model_id] = model_entities
@@ -333,6 +394,7 @@ def hf_entity_linking(
         "languages_json": AssetIn("hf_languages_normalized"),
         "models_json": AssetIn("hf_models_normalized"),
         "tasks_json": AssetIn("hf_tasks_normalized"),
+        "sources_json": AssetIn("hf_sources_normalized"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
     tags={"pipeline": "hf_etl", "stage": "transform"}
@@ -345,6 +407,7 @@ def hf_create_translation_mapping(
     models_json: Tuple[str, str],
     languages_json: str,
     tasks_json: str,
+    sources_json: str,
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -358,6 +421,7 @@ def hf_create_translation_mapping(
         models_json: Tuple of (models_json_path, normalized_folder).
         languages_json: Path to enriched languages JSON file.
         tasks_json: Path to enriched tasks JSON file.
+        sources_json: Path to normalized HF sources JSON file.
         run_folder_data: Tuple of (models_json_path, normalized_folder).
 
     Returns:
@@ -405,6 +469,10 @@ def hf_create_translation_mapping(
         {
             "label": "tasks",
             "path": tasks_json,
+        },
+        {
+            "label": "sources",
+            "path": sources_json,
         },
     ]
 
@@ -576,6 +644,7 @@ def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]],
 
                 # Add enriched datasets, articles, keywords, licenses
                 merged["license"] = model_entities["licenses"][0] if len(model_entities["licenses"]) > 0 else None
+                merged["source"] = model_entities["sources"][0] if len(model_entities["sources"]) > 0 else None
                 merged["trainedOn"] = model_entities["datasets"]
                 merged["testedOn"] = model_entities["datasets"]
                 merged["validatedOn"] = model_entities["datasets"]

@@ -73,6 +73,32 @@ def hf_run_folder() -> str:
 @asset(
     group_name="hf",
     ins={"run_folder": AssetIn("hf_run_folder")},
+    tags={"pipeline": "hf_etl", "stage": "extract"},
+)
+def hf_raw_catalog_sources(run_folder: str) -> str:
+    """
+    Write the canonical Hugging Face catalog ``WebSite`` to the raw run folder.
+
+    Produces ``sources.json`` (one row) with ``mlentory_id`` and schema.org fields
+    so downstream transform/load can align ``MLModel.source`` with extraction.
+
+    Args:
+        run_folder: Path from ``hf_run_folder`` (``/data/1_raw/hf/<run>/``).
+
+    Returns:
+        Absolute path to ``sources.json``.
+    """
+    out_path = Path(run_folder) / "sources.json"
+    payload = HFHelper.raw_hf_catalog_website_records()
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    logger.info("Wrote HF catalog sources to %s", out_path)
+    return str(out_path)
+
+
+@asset(
+    group_name="hf",
+    ins={"run_folder": AssetIn("hf_run_folder")},
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_raw_models_latest(run_folder: str) -> Tuple[Optional[pd.DataFrame], str]:

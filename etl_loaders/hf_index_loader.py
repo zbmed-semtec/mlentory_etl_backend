@@ -35,7 +35,7 @@ class HFModelDocument(Document):
     ml_tasks = Keyword(multi=True)
     keywords = Keyword(multi=True)
     datasets = Keyword(multi=True)
-    platform = Keyword()
+    source = Keyword()
 
     class Index:
         # Default name; actual index is set from env via HF_MODELS_INDEX
@@ -78,6 +78,7 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
 
     ml_tasks = model.get("https://w3id.org/fair4ml/mlTask") or []
     keywords = model.get("https://schema.org/keywords") or []
+    source_iri = model.get("https://schema.org/source")
     
     
     dataset_fields = [
@@ -108,7 +109,7 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
     ml_tasks = [translation_mapping.get(ml_task, ml_task) for ml_task in ml_tasks]
     keywords = [translation_mapping.get(keyword, keyword) for keyword in keywords]
     license_value = translation_mapping.get(license_value, license_value)
-
+    source_name = translation_mapping.get(source_iri, source_iri)
     doc = HFModelDocument(
         db_identifier=[str(id) for id in identifier],
         name=str(name) if name is not None else "",
@@ -118,7 +119,7 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
         ml_tasks=_extract_list(ml_tasks),
         keywords=_extract_list(keywords),
         datasets=_extract_list(datasets),
-        platform="Hugging Face",
+        source=str(source_name) if source_name is not None else "Unknown",
         meta={"id": [str(id) for id in identifier]},
     )
 

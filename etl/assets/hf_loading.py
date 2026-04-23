@@ -26,6 +26,7 @@ from etl_loaders.hf_rdf_loader import (
     build_and_persist_models_rdf,
     build_and_persist_articles_rdf,
     build_and_persist_licenses_rdf,
+    build_and_persist_sources_rdf,
     build_and_persist_datasets_rdf,
     build_and_persist_tasks_rdf,
     build_and_persist_languages_rdf,
@@ -562,6 +563,89 @@ def hf_load_licenses_to_neo4j(
     with open(rdf_report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     logger.info(f"Licenses load report also saved to: {rdf_report_path}")
+
+    return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "sources_normalized": AssetIn("hf_sources_normalized"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"},
+)
+def hf_load_sources_to_neo4j(
+    sources_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized source websites as RDF triples into Neo4j.
+
+    Args:
+        sources_normalized: Path to normalized sources JSON (sources.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no sources
+    """
+    if not sources_normalized or sources_normalized == "":
+        logger.info("No sources to load (empty input)")
+        return ("", "")
+
+    sources_path = Path(sources_normalized)
+    if not sources_path.exists():
+        logger.warning(f"Sources JSON not found: {sources_normalized}")
+        return ("", "")
+
+    normalized_folder = str(sources_path.parent)
+
+    logger.info(f"Loading RDF from normalized sources: {sources_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "hf"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Source RDF outputs will be saved to: {rdf_run_folder}")
+
+    ttl_path = rdf_run_folder / "sources.ttl"
+
+    logger.info("Building and persisting RDF triples for sources...")
+    load_stats = build_and_persist_sources_rdf(
+        json_path=sources_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+
+    logger.info(
+        "RDF loading complete: %s sources, %s triples, %s errors",
+        load_stats["sources_processed"],
+        load_stats["triples_added"],
+        load_stats["errors"],
+    )
+
+    report = {
+        "input_file": sources_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "sources_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Sources load report also saved to: {rdf_report_path}")
 
     return (str(rdf_report_path), normalized_folder)
 
