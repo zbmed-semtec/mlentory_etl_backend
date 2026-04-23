@@ -102,7 +102,14 @@ class MLModel(BaseModel):
         description="Person or Organization who shared the model online (fair4ml:sharedBy)",
         alias="https://w3id.org/fair4ml/sharedBy"
     )
-    
+    source: Optional[str] = Field(
+        default=None,
+        description=(
+            "IRI of the schema:WebSite for the catalog or platform that hosts this model (schema:source)"
+        ),
+        alias="https://schema.org/source",
+    )
+
     # ========== Temporal Information (schema.org) ==========
     dateCreated: Optional[datetime] = Field(
         default=None,
