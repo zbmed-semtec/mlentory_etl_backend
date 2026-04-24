@@ -46,6 +46,26 @@ mcp-down: ## Stop MCP services
 	sudo docker compose --profile=mcp down 
 	@echo "$(GREEN)Services stopped!$(NC)"
 
+stella-up: ## Start STELLA services
+	@echo "$(BLUE)Starting STELLA services...$(NC)"
+	sudo docker compose --profile=stella up -d
+	@echo "$(GREEN)STELLA services started!$(NC)"
+	@echo "STELLA App: http://localhost:8080"
+	@echo "STELLA Server: http://localhost:8004"
+
+stella-init: ## Initialize STELLA services
+	@echo "$(BLUE)Initializing STELLA services...$(NC)"
+	sudo docker exec -it stella-app flask init-db
+	sudo docker exec -it stella-app flask seed-db
+	sudo docker exec -it stella-server flask init-db
+	sudo docker exec -it stella-server flask seed-db
+	@echo "$(GREEN)STELLA services initialized!$(NC)"
+
+stella-down: ## Stop STELLA services
+	@echo "$(BLUE)Stopping STELLA services...$(NC)"
+	sudo docker compose --profile=stella down
+	@echo "$(GREEN)STELLA services stopped!$(NC)"
+
 restart: down up ## Restart all services
 
 logs: ## View logs from all services
@@ -62,12 +82,12 @@ logs-elasticsearch: ## View Elasticsearch logs
 
 build: ## Build Docker images
 	@echo "$(BLUE)Building Docker images...$(NC)"
-	docker compose build
+	docker compose --profile=complete build
 	@echo "$(GREEN)Build complete!$(NC)"
 
 rebuild: ## Rebuild Docker images without cache
 	@echo "$(BLUE)Rebuilding Docker images...$(NC)"
-	docker compose build --no-cache
+	docker compose --profile=complete build --no-cache
 	@echo "$(GREEN)Rebuild complete!$(NC)"
 
 ##@ Data & Cleanup

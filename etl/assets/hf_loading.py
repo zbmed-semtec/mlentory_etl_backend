@@ -10,14 +10,15 @@ Pipeline:
 """
 
 from __future__ import annotations
-
+import os
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
-
+from elasticsearch_dsl import connections
 from dagster import AssetIn, asset
+from etl_loaders.elasticsearch_store import ElasticsearchConfig, create_elasticsearch_client, clean_index
+from etl_loaders.hf_index_loader import HFModelDocument, build_hf_model_document, check_elasticsearch_connection
 
 from etl.config import get_general_config
 
@@ -82,8 +83,8 @@ def hf_rdf_store_ready() -> Dict[str, Any]:
             multithreading=True,
             max_workers=4,
         )
-        # Initialize/ensure n10s according to environment flag
-        reset_flag = os.getenv("N10S_RESET_ON_CONFIG_CHANGE", "false").lower() == "true"
+        # Initialize/ensure n10s according to configuration
+        reset_flag = get_general_config().n10s_reset_on_config_change
         desired_cfg = {"keepCustomDataTypes": True, "handleVocabUris": "SHORTEN"}
 
         if get_general_config().clean_neo4j_database:
@@ -339,6 +340,10 @@ def hf_export_metadata_json(
 
     logger.info(f"Exporting metadata JSON from models loaded in: {models_report_path}")
     logger.info(f"Neo4j store status: {store_ready['status']}")
+    
+    if not get_general_config().save_loaded_extraction_metadata_file:
+        logger.info("Skipping metadata export according to general configuration...")
+        return ""
 
     # Create RDF output directory parallel to normalized
     normalized_path = Path(normalized_folder)
@@ -905,3 +910,622 @@ def hf_load_keywords_to_neo4j(
 
     return (str(rdf_report_path), normalized_folder)
 
+
+
+
+####################################################################################################
+@asset(
+    group_name="ai4life_loading",
+    tags={"pipeline": "ai4life_etl", "stage": "load"}
+)
+def ai4life_rdf_store_ready() -> Dict[str, Any]:
+    """
+    Verify Neo4j RDF store is configured and ready.
+    
+    Loads configuration from environment variables and validates connectivity.
+    Returns a config marker that downstream assets can depend on.
+    
+    Returns:
+        Dict with store readiness status and config info
+        
+    Raises:
+        ValueError: If required env vars are missing
+        ConnectionError: If Neo4j is not reachable
+    """
+    logger.info("Checking Neo4j RDF store readiness...")
+    
+    try:
+        # Read env for reporting
+        env_cfg = Neo4jConfig.from_env()
+        # Build store config (may not expose uri/database attributes)
+        _ = get_neo4j_store_config_from_env(
+            batching=True,
+            batch_size=200,
+            multithreading=True,
+            max_workers=4,
+        )
+        # Initialize/ensure n10s according to configuration
+        reset_flag = get_general_config().n10s_reset_on_config_change
+        desired_cfg = {"keepCustomDataTypes": True, "handleVocabUris": "SHORTEN"}
+
+        if get_general_config().clean_neo4j_database:
+            logger.warning("Cleaning Neo4j database according to general configuration...")
+            reset_database(drop_config=False)
+        else:
+            logger.info("Keeping Neo4j database according to general configuration...")
+        
+        
+        if reset_flag:
+            logger.warning("N10S_RESET_ON_CONFIG_CHANGE=true → resetting database and re-initializing n10s")
+            reset_database(drop_config=True)
+            init_neosemantics(desired_cfg)
+        else:
+            current_cfg = get_neosemantics_config()
+            if not current_cfg:
+                init_neosemantics(desired_cfg)
+            else:
+                logger.info("n10s has existing configuration; skipping re-init on non-empty graph")
+        ensure_default_prefixes()
+        
+        logger.info(f"Neo4j RDF store configured: uri={env_cfg.uri}, database={env_cfg.database}")
+        
+        return {
+            "status": "ready",
+            "uri": env_cfg.uri,
+            "database": env_cfg.database,
+            "batching": True,
+            "batch_size": 5000,
+            "multithreading": True,
+            "max_workers": 4,
+        }
+        
+    except ValueError as e:
+        logger.error(f"Neo4j configuration error: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error checking Neo4j store: {e}", exc_info=True)
+        raise
+
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
+        "normalized_models": AssetIn("ai4life_model_normalized"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"},
+)
+def ai4life_load_models_to_neo4j(
+    normalized_models: str,          
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized AI4Life models as RDF triples into Neo4j.
+
+    Args:
+        normalized_models: Path to mlmodels.json
+        store_ready: Store readiness status from ai4life_rdf_store_ready
+
+    Returns:
+        Tuple of (load_report_path, normalized_folder)
+    """
+    mlmodels_json_path = normalized_models
+    normalized_folder = str(Path(mlmodels_json_path).parent)  # <-- derive folder from file path
+
+    logger.info(f"Loading RDF from normalized models: {mlmodels_json_path}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    if not Path(mlmodels_json_path).exists():
+        raise FileNotFoundError(f"mlmodels.json not found: {mlmodels_json_path}")
+
+    # Get Neo4j store config
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    # Create RDF output directory parallel to normalized
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "ai4life"  # /data/3_rdf/ai4life
+    rdf_run_folder = rdf_base / normalized_path.name                       # Same run ID as normalized
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"RDF outputs will be saved to: {rdf_run_folder}")
+
+    # Output Turtle file path
+    ttl_path = rdf_run_folder / "mlmodels.ttl"
+
+    # Build and persist RDF
+    logger.info("Building and persisting RDF triples...")
+    load_stats = build_and_persist_models_rdf(
+        json_path=mlmodels_json_path,
+        config=config,
+        output_ttl_path=str(ttl_path),
+        batch_size=50,
+    )
+
+    logger.info(
+        f"RDF loading complete: {load_stats.get('models_processed')} models, "
+        f"{load_stats.get('triples_added')} triples, {load_stats.get('errors')} errors"
+    )
+
+    # Write load report to RDF folder
+    report = {
+        "input_file": mlmodels_json_path,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready.get("uri"),
+        "neo4j_database": store_ready.get("database"),
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "mlmodels_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"Models load report saved to: {rdf_report_path}")
+
+    return (str(rdf_report_path), normalized_folder)
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
+        "licenses_normalized": AssetIn("ai4life_licenses_normalized"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"}
+)
+def ai4life_load_licenses_to_neo4j(
+    licenses_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized licenses as RDF triples into Neo4j.
+    
+    Builds RDF triples from Schema.org CreativeWork entities and persists them
+    to Neo4j using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        licenses_normalized: Path to normalized licenses JSON (licenses.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no licenses
+    """
+    if not licenses_normalized or licenses_normalized == "":
+        logger.info("No licenses to load (empty input)")
+        return ("", "")
+
+    licenses_path = Path(licenses_normalized)
+    if not licenses_path.exists():
+        logger.warning(f"Licenses JSON not found: {licenses_normalized}")
+        return ("", "")
+
+    normalized_folder = str(licenses_path.parent)
+
+    logger.info(f"Loading RDF from normalized licenses: {licenses_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "ai4life"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"License RDF outputs will be saved to: {rdf_run_folder}")
+
+    ttl_path = rdf_run_folder / "licenses.ttl"
+
+    logger.info("Building and persisting RDF triples for licenses...")
+    load_stats = build_and_persist_licenses_rdf(
+        json_path=licenses_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+
+    logger.info(
+        "RDF loading complete: %s licenses, %s triples, %s errors",
+        load_stats["licenses_processed"],
+        load_stats["triples_added"],
+        load_stats["errors"],
+    )
+
+    report = {
+        "input_file": licenses_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "licenses_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Licenses load report also saved to: {rdf_report_path}")
+
+    return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
+        "keywords_normalized": AssetIn("ai4life_keywords_normalized"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"}
+)
+def ai4life_load_keywords_to_neo4j(
+    keywords_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized DefinedTerm keywords as RDF triples into Neo4j.
+    
+    Builds RDF triples from Schema.org DefinedTerm entities (keywords) and persists
+    them to Neo4j using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        keywords_normalized: Path to normalized keywords JSON (keywords.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no keywords
+    """
+    if not keywords_normalized or keywords_normalized == "":
+        logger.info("No keywords to load (empty input)")
+        return ("", "")
+
+    keywords_path = Path(keywords_normalized)
+    if not keywords_path.exists():
+        logger.warning(f"Keywords JSON not found: {keywords_normalized}")
+        return ("", "")
+
+    normalized_folder = str(keywords_path.parent)
+
+    logger.info(f"Loading RDF from normalized keywords: {keywords_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "ai4life"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Keyword RDF outputs will be saved to: {rdf_run_folder}")
+
+    ttl_path = rdf_run_folder / "keywords.ttl"
+
+    logger.info("Building and persisting RDF triples for keywords...")
+    load_stats = build_and_persist_defined_terms_rdf(
+        json_path=keywords_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+        entity_label="keywords",
+    )
+
+    logger.info(
+        "RDF loading complete: %s keywords, %s triples, %s errors",
+        load_stats["keywords_processed"],
+        load_stats["triples_added"],
+        load_stats["errors"],
+    )
+
+    report = {
+        "input_file": keywords_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "keywords_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Keywords load report also saved to: {rdf_report_path}")
+
+    return (str(rdf_report_path), normalized_folder)
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
+        "datasets_normalized": AssetIn("ai4life_datasets_normalized"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"}
+)
+def ai4life_load_datasets_to_neo4j(
+    datasets_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized Croissant datasets as RDF triples into Neo4j.
+    
+    Builds RDF triples from Croissant Dataset entities (schema:Dataset) and persists
+    them to Neo4j using rdflib-neo4j. Also saves a Turtle (.ttl) file for reference.
+    
+    Args:
+        datasets_normalized: Path to normalized datasets JSON (datasets.json)
+        store_ready: Store readiness status from hf_rdf_store_ready
+        
+    Returns:
+        Tuple of (load_report_path, normalized_folder) or ("", "") if no datasets
+    """
+    if not datasets_normalized or datasets_normalized == "":
+        logger.info("No datasets to load (empty input)")
+        return ("", "")
+
+    datasets_path = Path(datasets_normalized)
+    if not datasets_path.exists():
+        logger.warning(f"Datasets JSON not found: {datasets_normalized}")
+        return ("", "")
+
+    normalized_folder = str(datasets_path.parent)
+
+    logger.info(f"Loading RDF from normalized datasets: {datasets_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "ai4life"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Dataset RDF outputs will be saved to: {rdf_run_folder}")
+
+    ttl_path = rdf_run_folder / "datasets.ttl"
+
+    logger.info("Building and persisting RDF triples for datasets...")
+    load_stats = build_and_persist_datasets_rdf(
+        json_path=datasets_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+
+    logger.info(
+        "RDF loading complete: %s datasets, %s triples, %s errors",
+        load_stats["datasets_processed"],
+        load_stats["triples_added"],
+        load_stats["errors"],
+    )
+
+    report = {
+        "input_file": datasets_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "datasets_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info(f"Datasets load report also saved to: {rdf_report_path}")
+
+    return (str(rdf_report_path), normalized_folder)
+
+from typing import Any, Dict, Tuple
+import json
+from pathlib import Path
+from dagster import asset, AssetIn
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
+        "models_loaded": AssetIn("ai4life_load_models_to_neo4j"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"},
+)
+def ai4life_export_metadata_json(
+    models_loaded: Tuple[str, str],
+    store_ready: Dict[str, Any],
+) -> str:
+    models_report_path, normalized_folder = models_loaded
+
+    logger.info("Exporting metadata JSON from models loaded in: %s", models_report_path)
+    logger.info("Neo4j store status: %s", store_ready.get("status"))
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "ai4life"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    json_path = rdf_run_folder / "metadata.json"
+    rdf_report_path = rdf_run_folder / "metadata_export_report.json"
+
+    enabled = bool(get_general_config().save_loaded_extraction_metadata_file)
+    logger.info("save_loaded_extraction_metadata_file=%s", enabled)
+    logger.info("Metadata JSON outputs will be saved to: %s", rdf_run_folder)
+
+    # If disabled, still write a report so the user sees an output file
+    if not enabled:
+        report = {
+            "status": "skipped",
+            "reason": "save_loaded_extraction_metadata_file is disabled in general config",
+            "models_report_input": models_report_path,
+            "rdf_folder": str(rdf_run_folder),
+            "json_file": str(json_path),
+            "neo4j_uri": store_ready.get("uri"),
+            "neo4j_database": store_ready.get("database"),
+        }
+        with open(rdf_report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        logger.info("Metadata export skipped. Report saved to: %s", rdf_report_path)
+        return str(rdf_report_path)
+
+    # Export metadata as JSON
+    logger.info("Exporting metadata property graph as Neo4j JSON...")
+    export_stats = export_metadata_graph_json(output_json_path=str(json_path))
+
+    report = {
+        "status": "ok",
+        "models_report_input": models_report_path,
+        "rdf_folder": str(rdf_run_folder),
+        "json_file": str(json_path),
+        "neo4j_uri": store_ready.get("uri"),
+        "neo4j_database": store_ready.get("database"),
+        **export_stats,
+    }
+
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    logger.info("Metadata export report saved to: %s", rdf_report_path)
+    return str(rdf_report_path)
+
+
+
+######################################################################
+@asset(
+    group_name="ai4life_loading",
+    tags={"pipeline": "ai4life_etl", "stage": "index"},
+)
+def ai4life_elasticsearch_ready() -> Dict[str, Any]:
+    """
+    Verify Elasticsearch is configured and ready for AI4Life indexing.
+
+    Reuses HF `check_elasticsearch_connection` for cluster health,
+    but returns `ai4life_models_index` for downstream assets.
+    """
+    logger.info("Checking Elasticsearch readiness (AI4Life)...")
+
+    status = check_elasticsearch_connection()
+
+    # AI4Life index name (separate from HF)
+    ai4life_index = os.getenv("ELASTIC_AI4LIFE_MODELS_INDEX", "ai4life_models")
+    status["ai4life_models_index"] = ai4life_index
+
+    if get_general_config().clean_elasticsearch_index:
+        logger.warning("Cleaning AI4Life Elasticsearch index according to general configuration...")
+        cfg = ElasticsearchConfig.from_env()
+        clean_index(ai4life_index, cfg=cfg)
+
+    logger.info(
+        "Elasticsearch ready: cluster=%s, status=%s, nodes=%s, ai4life_index=%s",
+        status.get("cluster_name"),
+        status.get("cluster_status"),
+        status.get("number_of_nodes"),
+        status.get("ai4life_models_index"),
+    )
+    return status
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
+        "normalized_models": AssetIn("ai4life_model_normalized"),          # returns str path to mlmodels.json
+        "translation_mapping": AssetIn("ai4life_create_translation_mapping"),
+        "es_ready": AssetIn("ai4life_elasticsearch_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "index"},
+)
+def ai4life_index_models_elasticsearch(
+    normalized_models: str,     # <-- IMPORTANT: string path, not Tuple[str, str]
+    translation_mapping: str,
+    es_ready: Dict[str, Any],
+) -> str:
+    """
+    Index AI4Life models into Elasticsearch using the existing HFModelDocument.
+
+    - Uses AI4Life index name (ELASTIC_AI4LIFE_MODELS_INDEX or default ai4life_models)
+    - Overrides doc.platform to "AI4Life"
+    - Writes report into /data/3_rdf/ai4life/<run_id>/elasticsearch_report.json
+    """
+    mlmodels_json_path = normalized_models
+    normalized_folder = str(Path(mlmodels_json_path).parent)
+
+    rdf_base_folder = Path(normalized_folder).parent.parent.parent / "3_rdf" / "ai4life"
+    rdf_run_folder = rdf_base_folder / Path(normalized_folder).name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    logger.info(
+        "Indexing normalized AI4Life models into Elasticsearch from %s (normalized_folder=%s)",
+        mlmodels_json_path,
+        normalized_folder,
+    )
+
+    json_file = Path(mlmodels_json_path)
+    if not json_file.exists():
+        raise FileNotFoundError(f"Normalized models file not found: {mlmodels_json_path}")
+
+    with open(json_file, "r", encoding="utf-8") as f:
+        models = json.load(f)
+    if not isinstance(models, list):
+        raise ValueError(f"Expected list of models, got {type(models).__name__}")
+
+    with open(translation_mapping, "r", encoding="utf-8") as f:
+        translation_map = json.load(f)
+    if not isinstance(translation_map, dict):
+        raise ValueError(f"Expected dict translation mapping, got {type(translation_map).__name__}")
+
+    # ES client
+    cfg = ElasticsearchConfig.from_env()
+    es_client = create_elasticsearch_client(cfg)
+    connections.add_connection("default", es_client)
+
+    # AI4Life index name
+    index_name = es_ready.get("ai4life_models_index") or os.getenv("ELASTIC_AI4LIFE_MODELS_INDEX", "ai4life_models")
+
+    # Create index + mapping using HFModelDocument (reused)
+    HFModelDocument.init(index=index_name, using=es_client)
+
+    indexed = 0
+    errors = 0
+
+    for idx, model in enumerate(models):
+        try:
+            # reuse HF builder (translation + extracting trainedOn/keywords/tasks/license)
+            doc = build_hf_model_document(model, index_name, translation_map)
+
+            # critical overrides for AI4Life
+            doc.meta.index = index_name
+            doc.platform = "AI4Life"
+
+            doc.save(using=es_client, refresh=False)
+            indexed += 1
+        except Exception as exc:
+            errors += 1
+            identifier = model.get("https://schema.org/identifier", f"unknown_{idx}")
+            logger.error("Error indexing AI4Life model %s: %s", identifier, exc, exc_info=True)
+
+        if (idx + 1) % 100 == 0:
+            logger.info("Indexed %d/%d AI4Life models", idx + 1, len(models))
+
+    stats = {
+        "models_indexed": indexed,
+        "errors": errors,
+        "index": index_name,
+        "input_file": str(json_file),
+        "normalized_folder": normalized_folder,
+        "cluster_name": es_ready.get("cluster_name"),
+        "rdf_run_folder": str(rdf_run_folder),
+    }
+
+    elasticsearch_report_path = rdf_run_folder / "elasticsearch_report.json"
+    with open(elasticsearch_report_path, "w", encoding="utf-8") as f:
+        json.dump(stats, f, indent=2, ensure_ascii=False)
+
+    logger.info("Elasticsearch report saved to: %s", elasticsearch_report_path)
+    return str(elasticsearch_report_path)

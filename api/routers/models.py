@@ -35,9 +35,14 @@ from api.schemas.responses import (
     ModelDetail,
     ModelListItem,
     PaginatedResponse,
+    VectorFacetedSearchResponse,
 )
 from api.services.elasticsearch_service import elasticsearch_service
+from api.services.vector_search_service import vector_search_service
 from api.services.graph_service import graph_service
+from api.services.model_service import model_service
+from api.services.ro_crate_service import ro_crate_service
+from api.services.metadata_service import metadata_service
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +217,66 @@ async def search_models_with_facets(
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 
+@router.get("/models/search_with_vector", response_model=VectorFacetedSearchResponse)
+async def search_models_with_vector(
+    query: str = Query("", description="Semantic search query (encoded to vector)"),
+    filters: str = Query(
+        "{}",
+        description="JSON string of property filters (e.g., {'license': ['MIT'], 'mlTask': ['text-generation']})",
+        examples=['{"license": ["MIT"], "mlTask": ["text-generation"]}'],
+    ),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(50, ge=1, le=1000, description="Results per page (max 1000)"),
+    facets: str = Query(
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
+        description="JSON array of facet field names to aggregate",
+        examples=['["mlTask", "license", "keywords"]'],
+    ),
+    facet_size: int = Query(20, ge=1, le=100, description="Maximum values per facet (max 100)"),
+    facet_query: str = Query(
+        "{}",
+        description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
+        examples=['{"keywords": "medical"}'],
+    ),
+) -> VectorFacetedSearchResponse:
+    """
+    Vector-based semantic search using `model_vector` cosine similarity.
+
+    This mirrors the `/models/search_with_vector` endpoint from `mlentory_backend`.
+    """
+    try:
+        filter_dict = json.loads(filters) if filters else {}
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "datasets", "platform"]
+        facet_query_dict = json.loads(facet_query) if facet_query else {}
+
+        if not isinstance(filter_dict, dict):
+            raise ValueError("Filters must be a JSON object/dictionary")
+        if not isinstance(facets_list, list):
+            raise ValueError("Facets must be a JSON array/list")
+        if not isinstance(facet_query_dict, dict):
+            raise ValueError("Facet query must be a JSON object/dictionary")
+        for key, values in filter_dict.items():
+            if not isinstance(values, list):
+                raise ValueError(f"Filter values for '{key}' must be a list")
+
+        return vector_search_service.vector_search(
+            query=query,
+            filters=filter_dict,
+            limit=limit,
+            page=page,
+            facets=facets_list,
+            facet_size=facet_size,
+            facet_query=facet_query_dict,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except json.JSONDecodeError as je:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
+    except Exception as e:
+        logger.error("Error in vector search: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+
 @router.get("/models/facets/config")
 async def get_facets_configuration():
     """
@@ -359,6 +424,118 @@ async def get_facet_values(
         raise HTTPException(status_code=500, detail=f"Error retrieving facet values: {str(e)}")
 
 
+@router.get("/models/full_history_with_extraction_metadata", response_model=List[Dict[str, Any]])
+async def get_model_full_history(
+    model_id: str = Query(..., description="Model identifier (URI or ID)"),
+) -> List[Dict[str, Any]]:
+    """
+    Get full history of a model including all versions and extraction metadata.
+    
+    Returns an array of model states representing the model at different points in time,
+    sorted by modification date (newest first). Each state includes the properties
+    and extraction metadata valid at that specific time.
+    """
+    try:
+        return model_service.get_model_full_history(model_id)
+    except Exception as e:
+        logger.error(f"Error getting model history for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/models/{model_id}/with_extraction_metadata", response_model=ModelDetail)
+async def get_model_detail_with_metadata(
+    model_id: str,
+) -> ModelDetail:
+    """
+    Get detailed model information including extraction metadata.
+
+    This endpoint extends the standard model detail view by including
+    metadata about how each property was extracted (confidence, method, etc.).
+    The metadata is mapped to the corresponding field names in the response.
+    """
+    try:
+        return model_service.get_model_detail_with_metadata(model_id)
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error getting model detail with metadata for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Specific routes MUST be defined before dynamic routes
+@router.get("/models/ro-crate")
+async def get_model_ro_crate(
+    model_id: str = Query(..., description="Model ID (URI or compact ID)"),
+) -> Dict[str, Any]:
+    """
+    Get a model's RO-Crate representation.
+    
+    Generates a JSON-LD RO-Crate (Research Object Crate) representation of the ML model
+    metadata, conforming to RO-Crate specification 1.1.
+    
+    Args:
+        model_id: ID of the model to retrieve (can be full URI or compact ID)
+        
+    Returns:
+        Dictionary containing the RO-Crate JSON-LD representation
+        
+    Raises:
+        HTTPException: If model not found or other errors occur
+        
+    Example:
+        ```
+        GET /api/v1/models/ro-crate?model_id=https://w3id.org/mlentory/mlentory_graph/abc123
+        ```
+    """
+    try:
+        result = ro_crate_service.create_crate(model_id)
+        return result
+
+    except ValueError as ve:
+        logger.error(f"Model not found for RO-Crate: {model_id}")
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error generating RO-Crate for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"RO Crate error: {str(e)}")
+
+
+@router.get("/models/metadata")
+async def get_model_metadata(
+    model_id: str = Query(..., description="Model ID (URI or compact ID)"),
+) -> Dict[str, Any]:
+    """
+    Get a model's metadata in JSON-LD format.
+    
+    Returns a JSON-LD representation of the model metadata conforming to
+    schema.org MLModel vocabulary, including properties like name, description,
+    license, dates, and related metadata.
+    
+    Args:
+        model_id: ID of the model to retrieve (can be full URI or compact ID)
+        
+    Returns:
+        Dictionary containing the JSON-LD metadata representation
+        
+    Raises:
+        HTTPException: If model not found or other errors occur
+        
+    Example:
+        ```
+        GET /api/v1/models/metadata?model_id=https://w3id.org/mlentory/mlentory_graph/abc123
+        ```
+    """
+    try:
+        result = metadata_service.get_metadata(model_id)
+        return result
+
+    except ValueError as ve:
+        logger.error(f"Model not found for metadata: {model_id}")
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error getting model metadata for {model_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Metadata retrieval error: {str(e)}")
+
+
+
 # Dynamic route MUST be last - it catches all /models/{anything}
 @router.get("/models/{model_id}", response_model=ModelDetail)
 async def get_model_detail(
@@ -378,83 +555,12 @@ async def get_model_detail(
     To include related entities, specify the relationship types in `resolve_properties` or leave it empty to get all the information.
     """
     try:
-        # First get basic model info from Elasticsearch
-        
-        if not model_id.startswith("https://"):
-            model_id = f"https://w3id.org/mlentory/mlentory_graph/{model_id}"
-        
-        model = elasticsearch_service.get_model_by_id(model_id)
-        
-        if not model:
-            raise HTTPException(status_code=404, detail="Model not found")
-        
-        model_response = ModelDetail(
-            identifier=model.db_identifier,
-            name=model.name,
-            description=model.description,
-            sharedBy=model.sharedBy,
-            license=model.license,
-            mlTask=model.mlTask,
-            keywords=model.keywords,
-            platform=model.platform,
-            related_entities={}
+        return model_service.get_model_detail(
+            model_id=model_id,
+            resolve_properties=resolve_properties if resolve_properties else None
         )
-
-        # Get related entities from Neo4j using GraphService
-        # We traverse outgoing relationships matching the requested types
-        graph_data = graph_service.get_entity_graph(
-            entity_id=model_id,
-            depth=2,
-            relationships=resolve_properties,
-            direction="outgoing",
-            entity_label="MLModel",
-        )
-
-        related_entities: Dict[str, List[Dict[str, Any]]] = {}
-        
-        # Map nodes by ID for easy lookup
-        nodes_map = {n.id: n for n in graph_data.nodes}
-        start_uri = graph_data.metadata.get("start_uri")
-        
-        # Add default properties to the model response
-        logger.info("node_map: %s", nodes_map)
-        logger.info("start_uri: %s", start_uri)
-        logger.info(graph_data.nodes[0].properties)
-        logger.info("\n--------------------------------\n")
-
-        # Group neighbor nodes by relationship type
-        for edge in graph_data.edges:
-            # Only care about edges starting from our model
-            if edge.source == start_uri:
-                rel_type = edge.type
-                target_node = nodes_map.get(edge.target)
-                
-                if target_node:
-                    if rel_type not in related_entities:
-                        related_entities[rel_type] = []
-                    
-                    # Create entity dict from node properties + uri
-                    entity_dict = target_node.properties.copy()
-                    entity_dict["uri"] = target_node.id
-                    
-                    # Linking the entities to the corresponding model response property
-                    property_name = (rel_type.split("__")[1])
-                    
-                    if type(model_response.__getattribute__(property_name)) == list:
-                        if target_node.id not in model_response.__getattribute__(property_name):
-                            model_response.__setattr__(property_name, [*model_response.__getattribute__(property_name), target_node.id])
-                    else:
-                        model_response.__setattr__(property_name, target_node.id)
-                    
-                    related_entities[rel_type].append(entity_dict)
-
-        model_response.related_entities = related_entities
-        
-        
-        return model_response
-
-    except HTTPException:
-        raise
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
         logger.error(f"Error getting model detail for {model_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

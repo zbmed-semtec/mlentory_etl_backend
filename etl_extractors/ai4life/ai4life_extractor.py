@@ -1,9 +1,13 @@
 from __future__ import annotations
+from etl_extractors.ai4life.clients.models_client import AI4LifeModelClient
+from etl_extractors.ai4life.clients.datasets_client import AI4LifeDatasetsClient
+from etl_extractors.ai4life.clients.licenses_client import AI4LifeLicenseClient
+from etl_extractors.ai4life.clients.keywords_client import AI4LifeKeywordClient
 
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 
 import requests
@@ -15,41 +19,49 @@ logger = logging.getLogger(__name__)
 class AI4LifeExtractor:
     """Extractor for fetching raw model metadata from the AI4Life platform."""
 
-    def __init__(
-        self,
-        base_url: str = "https://hypha.aicell.io",
-        parent_id: str = "bioimage-io/bioimage.io",
-    ) -> None:
-        self.base_url = base_url
-        self.parent_id = parent_id
-        self.extraction_timestamp: str | None = None
-
-    def fetch_records(self, num_models: int) -> Dict[str, Any]:
+    def __init__(self, records_data = None, 
+                 models_client: Optional[AI4LifeModelClient] = None,
+                 datasets_client: Optional[AI4LifeDatasetsClient] = None,
+                 licenses_client: Optional[AI4LifeLicenseClient] = None,
+                 keywords_client: Optional[AI4LifeKeywordClient] = None) -> None:
+        self.models_client = models_client or AI4LifeModelClient(records_data)
+        self.datasets_client = datasets_client or AI4LifeDatasetsClient(records_data)
+        self.licenses_client = licenses_client or AI4LifeLicenseClient()
+        self.keywords_client = keywords_client or AI4LifeKeywordClient()
+        
+    def fetch_records(self, num_models:int, base_url:str, parent_id:str) -> Dict[str, Any]:
         """Fetch records from AI4Life API and set extraction timestamp."""
         try:
             response = requests.get(
-                f"{self.base_url}/public/services/artifact-manager/list",
-                params={"parent_id": self.parent_id, "limit": num_models},
+                f"{base_url}/public/services/artifact-manager/list",
+                params={"parent_id": parent_id, "limit": num_models},
                 timeout=15,
             )
-            self.extraction_timestamp = datetime.utcnow().isoformat()
+            extraction_timestamp = datetime.utcnow().isoformat()
             response.raise_for_status()
-            return response.json()
+            return response.json(),extraction_timestamp
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"Failed to fetch AI4Life records: {exc}") from exc
+        
+    def extract_models(self):
+        df = self.models_client.get_models_metadata()
+        return df
+    
+    def extract_specific_datasets(self, dataset_names):
+        df = self.datasets_client.get_datasets_metadata(dataset_names)
+        return df
+    
+    def extract_specific_licenses(self, license_names):
+        df = self.licenses_client.get_licenses_metadata(license_names)
+        return df
 
-    def wrap_record_with_metadata(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Wrap each field in a record with extraction metadata following OpenML pattern."""
-        wrapped: Dict[str, Any] = {}
-        for key, value in record.items():
-            wrapped[key] = [
-                {
-                    "data": value,
-                    "extraction_method": "hypha_api",
-                    "confidence": 1,
-                    "extraction_time": self.extraction_timestamp,
-                }
-            ]
-        return wrapped
+    def extract_specific_keywords(self, keyword_names):
+        df = self.keywords_client.get_keywords_metadata(keyword_names)
+        return df
+ 
+      
+    
+    
+    
 
 

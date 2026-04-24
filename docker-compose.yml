@@ -233,6 +233,184 @@ services:
     #   - host
     networks:
       - mlentory-network
+
+  # =============================================================================
+  # STELLA SERVICES
+  #=============================================================================
+
+  stella-app:
+    profiles: ["stella"]
+    image: thestellaproject/stella-app:latest
+    container_name: stella-app
+    volumes:
+      - stella_data:/data
+    expose:
+      - "8005"
+    ports:
+      - "${STELLA_APP_PORT:-8080}:8005"
+    networks:
+      - mlentory-network
+    environment:
+      FLASK_APP: app.app
+      FLASK_CONFIG: postgres
+      INTERLEAVE: "True"
+      BULK_INDEX: "False"
+      DELETE_SENT_SESSION: "True"
+      INTERVAL_DB_CHECK: 10
+      SESSION_EXPIRATION: 3600
+      SESSION_KILL: 7200
+      SENDFEEDBACK: "True"
+
+      # Systems
+      SYSTEMS_CONFIG: |
+        {
+            "mlentory_base": {"type": "ranker", "base": true, "docid": "mlentory_id", "hits_path": "$.models", "url": "http://mlentory-base:5000"},
+            "mlentory_experiment": {"type": "ranker", "docid": "mlentory_id", "hits_path": "$.models", "url": "http://mlentory-experiment:5000"}
+        }
+
+      # Stella Server
+      STELLA_SERVER_ADDRESS: ${STELLA_SERVER_ADDRESS:-http://stella-server:8000}
+      STELLA_SERVER_USER: ${STELLA_SERVER_USER:-site@stella-project.org}
+      STELLA_SERVER_PASS: ${STELLA_SERVER_PASS:-pass}
+      STELLA_SERVER_USERNAME: ${STELLA_SERVER_USERNAME:-site}
+
+      # Database
+      POSTGRES_USER: ${STELLA_POSTGRES_USER:-postgres}
+      POSTGRES_PW: ${STELLA_POSTGRES_PW:-change-me}
+      POSTGRES_DB: ${STELLA_POSTGRES_DB:-postgres}
+      POSTGRES_URL: stella-app-db:5430
+
+    command: gunicorn -w 2 --timeout 60 -b :8005 'app.app:create_app()'
+    depends_on:
+      stella-app-db:
+        condition: service_healthy
+      stella-mlentory-base:
+        condition: service_started
+      stella-mlentory-experiment:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8005/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  stella-app-db:
+    profiles: ["stella"]
+    image: postgres:16
+    container_name: stella-app-db
+    expose:
+      - "5430"
+    ports:
+      - "${STELLA_APP_DB_PORT:-5430}:5430"
+    networks:
+      - mlentory-network
+    environment:
+      - POSTGRES_USER=${STELLA_POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${STELLA_POSTGRES_PW:-change-me}
+      - POSTGRES_DB=${STELLA_POSTGRES_DB:-postgres}
+    command: -p 5430
+    volumes:
+      - stella_app_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STELLA_POSTGRES_USER:-postgres} -d ${STELLA_POSTGRES_DB:-postgres} -p 5430"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  
+  stella-mlentory-base:
+    profiles: ["stella"]
+    image: thestellaproject/mlentory-base:latest
+    container_name: mlentory-base
+    networks:
+      - mlentory-network
+    ports:
+      - "${STELLA_EXPERIMENT_PORT:-5000}:5000"
+    command: ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "app:app"]
+    restart: unless-stopped
+
+  stella-mlentory-experiment:
+    profiles: ["stella"]
+    image: thestellaproject/mlentory-experiment:latest
+    container_name: mlentory-experiment
+    networks:
+      - mlentory-network
+    ports:
+      - "${STELLA_EXPERIMENT_PORT:-5001}:5000"
+    command: ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "app:app"]
+    restart: unless-stopped
+
+  stella-server:
+    profiles: ["stella"]
+    image: thestellaproject/stella-server:latest
+    container_name: stella-server
+    volumes:
+      - stella_server_db_data:/var/lib/postgresql/data
+    expose:
+      - "8000"
+    ports:
+      - "${STELLA_SERVER_PORT:-8004}:8000"
+    networks:
+      - mlentory-network
+    environment:
+      # Config
+      FLASK_APP: app.app
+      FLASK_CONFIG: postgres
+      SECRET_KEY: ${STELLA_SERVER_SECRET_KEY:-change-me}
+      ADMIN_MAIL: ${STELLA_SERVER_ADMIN_MAIL:-admin@stella-project.org}
+      ADMIN_PASS: ${STELLA_SERVER_ADMIN_PASS:-pass}
+      SITE_MAIL: ${STELLA_SERVER_SITE_MAIL:-site@stella-project.org}
+      SITE_PASS: ${STELLA_SERVER_SITE_PASS:-pass}
+      EXPERIMENTER_MAIL: ${STELLA_SERVER_EXPERIMENTER_MAIL:-experimenter@stella-project.org}
+      EXPERIMENTER_PASS: ${STELLA_SERVER_EXPERIMENTER_PASS:-pass}
+      AUTOMATOR_GH_KEY: ${STELLA_SERVER_AUTOMATOR_GH_KEY:-}
+      # Database
+      POSTGRES_USER: ${STELLA_SERVER_POSTGRES_USER:-postgres}
+      POSTGRES_PW: ${STELLA_SERVER_POSTGRES_PW:-change-me}
+      POSTGRES_DB: ${STELLA_SERVER_POSTGRES_DB:-postgres}
+      POSTGRES_URL: stella-server-db:5432
+      STELLA_APP_ADDRESS: |
+        [
+          "http://stella-app:8005"
+        ]
+    command: gunicorn -w 2 --timeout 60 -b :8000 'app.app:create_app()'
+    depends_on:
+      stella-server-db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  stella-server-db:
+    profiles: ["stella"]
+    image: postgres:16
+    container_name: stella-server-db
+    expose:
+      - "5432"
+    ports:
+      - "${STELLA_SERVER_DB_PORT:-5433}:5432"
+    networks:
+      - mlentory-network
+    environment:
+      - POSTGRES_USER=${STELLA_SERVER_POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${STELLA_SERVER_POSTGRES_PW:-change-me}
+      - POSTGRES_DB=${STELLA_SERVER_POSTGRES_DB:-postgres}
+    command: -p 5432
+    volumes:
+      - ../../stella-mlentory/data/db-server-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STELLA_SERVER_POSTGRES_USER:-postgres} -d ${STELLA_SERVER_POSTGRES_DB:-postgres} -p 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 # =============================================================================
 # Networks
 # =============================================================================
@@ -261,4 +439,9 @@ volumes:
     name: mlentory-dagster-postgres-data
   dagster_home:
     name: mlentory-dagster-home
-
+  stella_data:
+    name: stella-data
+  stella_app_db_data:
+    name: stella-app-db-data
+  stella_server_db_data:
+    name: stella-server-db-data
