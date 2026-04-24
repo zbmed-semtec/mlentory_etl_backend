@@ -7,7 +7,7 @@ from api.utils.utils import Utils
 from api.utils.cache_manager import get_entity_cache_manager
 
 
-class EntityController:
+class EntityService:
 
     def __init__(self, sqlHandler: SQLHandler):
         self.sqlHandler = sqlHandler
@@ -27,8 +27,8 @@ class EntityController:
             Exception: If there's an error querying the database
             
         Example:
-            >>> controller = EntityController(sql_handler)
-            >>> entity = controller.get_entity_details("<https://example.org/entity/123>")
+            >>> service = EntityService(sql_handler)
+            >>> entity = service.get_entity_details("<https://example.org/entity/123>")
             >>> print(entity.get('name', ['Unknown'])[0])
         """
         entity_info = {}

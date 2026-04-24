@@ -81,26 +81,23 @@ from api.routers.stella import router as stella_router
 from api.routers.stats import router as stats_router
 from api.schemas.responses import HealthResponse
 
-#Import controllers
+#Import services
 from api.dbHandler.SQLHandler import SQLHandler
 from api.dbHandler.IndexHandler import IndexHandler
-from api.controllers.EntityController import EntityController
-from api.controllers.SearchController import SearchController
-from api.controllers.LLMController import LLMController
-from api.controllers.ModelContextProcessor import ModelContextProcessor
-from api.controllers.PlatformDocsController import PlatformDocsController
+from api.services.search_service import SearchService
+from api.services.llm_service import LLMService
+from api.services.model_context_service import ModelContextService
 
 # Import LLMRunner implementations
 from api.utils.llm_runners import LLMRunner, OllamaRunner, VLLMRunner, OpenAIRunner
 
-# Global controller instances
+# Global service instances
 sqlHandler = None
 indexHandler = None
-searchController = None
-entityController = None
-llmController = None
-modelContextProcessor = None
-platformDocsController = None
+searchService = None
+entityService = None
+llmService = None
+modelContextService = None
 
 # Configure logging
 logging.basicConfig(
@@ -119,7 +116,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("STELLA integration disabled (USE_STELLA!=true)")
 
-    global searchController, entityController, llmController, modelContextProcessor, platformDocsController, sqlHandler, indexHandler
+    global searchService, entityService, llmService, modelContextService, sqlHandler, indexHandler
 
     # Get database configuration from environment variables
     # postgres_host = os.environ.get("POSTGRES_HOST", "postgres_db")
@@ -200,16 +197,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             temperature=llm_temperature
         )
     
-    # Initialize LLMController with the configured runner
-    llmController = LLMController(
+    # Initialize LLMService with the configured runner
+    llmService = LLMService(
         llm_runner=llm_runner
     )
     
-    # Initialize ModelContextProcessor
-    modelContextProcessor = ModelContextProcessor()
-
-     # Initialize PlatformDocsController
-    # platformDocsController = PlatformDocsController(docs_base_path="../data/platform_docs")
+    # Initialize ModelContextService
+    modelContextService = ModelContextService()
 
     yield
     logger.info("Shutting down MLentory API")

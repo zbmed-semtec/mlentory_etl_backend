@@ -1,5 +1,5 @@
 """
-LLMController module for handling LLM-based question answering with context.
+LLM Service module for handling LLM-based question answering with context.
 
 This module provides functionality to answer questions using a lightweight LLM
 with context retrieval and processing via LangChain.
@@ -26,9 +26,9 @@ from api.utils.llm_runners import LLMRunner, OllamaRunner
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class LLMController:
+class LLMService:
     """
-    Controller for LLM-based question answering with context retrieval.
+    Service for LLM-based question answering with context retrieval.
     
     Uses an LLMRunner for model interaction and LangChain for context
     processing and retrieval.
@@ -47,7 +47,7 @@ class LLMController:
         retry_delay: int = 5,
     ):
         """
-        Initialize the LLM Controller.
+        Initialize the LLM Service.
         
         Args:
             llm_runner: LLMRunner instance to use for LLM operations
@@ -87,7 +87,7 @@ class LLMController:
         self._init_embeddings()
         self._init_text_splitter()
         
-        logger.info(f"LLMController initialized with runner type: {type(self.llm_runner).__name__}")
+        logger.info(f"LLMService initialized with runner type: {type(self.llm_runner).__name__}")
     
     def _init_embeddings(self) -> None:
         """
@@ -105,7 +105,7 @@ class LLMController:
         try:
             self.embeddings = HuggingFaceEmbeddings(
                 model_name=self.embedding_model_name,
-                model_kwargs={"device": "cpu"},
+                model_kwargs={"device": "cuda"},
             )
             logger.info(f"Initialized embeddings with model: {self.embedding_model_name}")
         except Exception as e:
