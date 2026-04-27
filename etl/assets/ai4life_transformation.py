@@ -292,6 +292,7 @@ def ai4life_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
         "keywords_mapping": AssetIn("ai4life_identified_keywords"),
         "licenses_mapping": AssetIn("ai4life_identified_licenses"),
         "tasks_mapping": AssetIn("ai4life_identified_tasks"),
+        "sharedby_mapping": AssetIn("ai4life_identified_sharedby"),
         "run_folder_data": AssetIn("ai4life_normalized_model_folder"),
     },
     tags={"pipeline": "ai4life_etl", "stage": "transform"}
@@ -301,10 +302,11 @@ def ai4life_entity_linking(
     keywords_mapping: Dict[str, List[str]],
     licenses_mapping: Dict[str, List[str]],
     tasks_mapping: Dict[str, List[str]],
+    sharedby_mapping: Dict[str, List[str]],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, keywords, licenses, tasks, sources}
+    Create entity linking mapping: model_id -> {datasets, keywords, licenses, tasks, sharedby, sources}
     Links identified entities with their enriched metadata.
 
     Args:
@@ -312,6 +314,7 @@ def ai4life_entity_linking(
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
         tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
+        sharedby_mapping: Tuple of ({model_id: [sharedby_entities]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
 
     Returns:
@@ -338,6 +341,7 @@ def ai4life_entity_linking(
         | set(keywords_mapping.keys())
         | set(licenses_mapping.keys())
         | set(tasks_mapping.keys())
+        | set(sharedby_mapping.keys())
     )
 
     entity_linking: Dict[str, Dict[str, List[str]]] = {}
@@ -347,6 +351,7 @@ def ai4life_entity_linking(
         keywords = keywords_mapping.get(model_id, []) or []
         licenses = licenses_mapping.get(model_id, []) or []
         tasks = tasks_mapping.get(model_id, []) or []
+        sharedby = sharedby_mapping.get(model_id, []) or []
 
         entity_linking[model_id] = {
             "datasets": [
@@ -365,6 +370,10 @@ def ai4life_entity_linking(
             "tasks": [
                 AI4LifeHelper.generate_mlentory_entity_hash_id("Task", x)
                 for x in tasks
+            ],
+            "sharedby": [
+                AI4LifeHelper.generate_mlentory_entity_hash_id("SharedBy", x)
+                for x in sharedby
             ],
             "sources": list(ai4life_catalog_source_iris),
             # "base_models": [],  # not available
@@ -388,6 +397,7 @@ def ai4life_entity_linking(
         "keywords_json": AssetIn("ai4life_keywords_normalized"),   # path to keywords.json (normalized)
         "licenses_json": AssetIn("ai4life_licenses_normalized"),   # path to licenses.json (normalized)
         "tasks_json": AssetIn("ai4life_tasks_normalized"),         # path to tasks.json (normalized)
+        "sharedby_json": AssetIn("ai4life_sharedby_normalized"),   # path to sharedby.json (normalized)
         "models_json": AssetIn("ai4life_model_normalized"),        # path to mlmodels.json (normalized)
         "sources_json": AssetIn("ai4life_sources_normalized"),     # path to sources.json (normalized)
         "run_folder_data": AssetIn("ai4life_normalized_model_folder"),  # (raw_models_json_path, normalized_folder)
@@ -400,6 +410,7 @@ def ai4life_create_translation_mapping(
     keywords_json: str,
     licenses_json: str,
     tasks_json: str,
+    sharedby_json: str,
     models_json: str,
     sources_json: str,
     run_folder_data: Tuple[str, str],
@@ -462,6 +473,7 @@ def ai4life_create_translation_mapping(
         {"label": "keywords", "path": keywords_json},
         {"label": "licenses", "path": licenses_json},
         {"label": "tasks", "path": tasks_json},
+        {"label": "sharedby", "path": sharedby_json},
         {"label": "models", "path": models_json},
         {"label": "sources", "path": sources_json},
     ]
@@ -625,11 +637,12 @@ def merge_ai4life_partial_schemas(
         merged_data.pop("_index", None)
         merged_data.pop("_error", None)
 
-        # Entity linking (AI4Life has datasets/keywords/licenses/tasks)
+        # Entity linking (AI4Life has datasets/keywords/licenses/tasks/sharedby)
         datasets = links.get("datasets") or []
         keywords = links.get("keywords") or []
         licenses = links.get("licenses") or []
         tasks = links.get("tasks") or []
+        sharedby = links.get("sharedby") or []
         sources = links.get("sources") or []
 
         # Map to FAIR4ML MLModel fields
@@ -649,6 +662,8 @@ def merge_ai4life_partial_schemas(
             merged_data["license"] = str(licenses[0])  # MLModel.license is a single string
         if tasks:
             merged_data["mlTask"] = list(tasks)
+        if sharedby:
+            merged_data["sharedBy"] = str(sharedby[0])  # MLModel.sharedBy is a single string
         if sources:
             merged_data["source"] = str(sources[0])  # MLModel.source is a single string
 
@@ -1119,6 +1134,108 @@ def ai4life_tasks_normalized(
         )
     else:
         logger.info("Normalized %d/%d tasks. No errors.", len(normalized), len(raw_tasks))
+
+    return str(out_path)
+
+
+@asset(
+    group_name="ai4life_transformation",
+    ins={
+        "sharedby_data": AssetIn("ai4life_sharedby_raw"),              # (sharedby_json_path, run_folder)
+        "run_folder_data": AssetIn("ai4life_normalized_model_folder"), # (raw_models_json_path, normalized_folder)
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "transform"},
+)
+def ai4life_sharedby_normalized(
+    sharedby_data: Tuple[str, str],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Normalize AI4Life sharedBy entities to schema.org DefinedTerm-like format and write
+    <normalized_folder>/sharedby.json with IRI keys.
+    """
+    sharedby_json_path, _raw_run_folder = sharedby_data
+    _raw_models_json_path, normalized_folder = run_folder_data
+
+    out_path = Path(normalized_folder) / "sharedby.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not sharedby_json_path:
+        logger.info("No sharedby_json_path. Writing empty sharedby.json")
+        out_path.write_text("[]", encoding="utf-8")
+        return str(out_path)
+
+    logger.info("Loading AI4Life sharedBy entities from %s", sharedby_json_path)
+    with open(sharedby_json_path, "r", encoding="utf-8") as f:
+        raw_sharedby = json.load(f)
+
+    if isinstance(raw_sharedby, dict):
+        raw_sharedby = [raw_sharedby]
+    if not isinstance(raw_sharedby, list):
+        raise ValueError(f"Expected list in {sharedby_json_path}, got {type(raw_sharedby).__name__}")
+
+    normalized: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    for idx, rec in enumerate(raw_sharedby):
+        if not isinstance(rec, dict):
+            errors.append({"_index": idx, "_error": f"record is not a dict: {type(rec).__name__}"})
+            continue
+
+        name = str(rec.get("name", "")).strip() or f"sharedby_{idx}"
+        mlentory_id = str(rec.get("mlentory_id", "")).strip() or None
+        extraction_meta = rec.get("extraction_metadata") or {}
+        if not isinstance(extraction_meta, dict):
+            extraction_meta = {}
+
+        payload: Dict[str, Any] = {
+            "identifier": [mlentory_id] if mlentory_id else [],
+            "name": name,
+            "url": None,
+            "term_code": name,
+            "description": "Entity representing who shared/published the model.",
+            "in_defined_term_set": ["https://ai4life.eurobioimaging.eu/"],
+            "extraction_metadata": extraction_meta,
+        }
+
+        try:
+            obj = DefinedTerm(**payload)
+            normalized.append(obj.model_dump(mode="json", by_alias=True))
+        except ValidationError as ve:
+            errors.append(
+                {
+                    "sharedby": name,
+                    "_index": idx,
+                    "_error": "DefinedTerm validation failed",
+                    "details": ve.errors(),
+                }
+            )
+        except Exception as e:
+            errors.append(
+                {
+                    "sharedby": name,
+                    "_index": idx,
+                    "_error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(normalized, f, indent=2, ensure_ascii=False)
+
+    if errors:
+        err_path = Path(normalized_folder) / "sharedby_normalization_errors.json"
+        with open(err_path, "w", encoding="utf-8") as f:
+            json.dump(errors, f, indent=2, ensure_ascii=False)
+        logger.warning(
+            "Normalized %d/%d sharedBy entities. Errors: %d (see %s)",
+            len(normalized),
+            len(raw_sharedby),
+            len(errors),
+            err_path,
+        )
+    else:
+        logger.info("Normalized %d/%d sharedBy entities. No errors.", len(normalized), len(raw_sharedby))
 
     return str(out_path)
 

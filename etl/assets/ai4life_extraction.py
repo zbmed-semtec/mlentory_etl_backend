@@ -333,6 +333,59 @@ def ai4life_tasks_raw(
     return (str(tasks_path), run_folder)
 
 
+@asset(
+    group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"}
+)
+def ai4life_identified_sharedby(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify sharedBy entities per model from AI4Life model metadata.
+    """
+    models_json_path, _ = models_data
+    enrichment = AI4LifeEnrichment()
+    models_df = AI4LifeHelper.load_models_dataframe(models_json_path)
+
+    model_sharedby = enrichment.identifiers["sharedby"].identify_per_model(models_df)
+    logger.info("Identified sharedBy entities for %d models", len(model_sharedby))
+    return model_sharedby
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    tags={"pipeline": "ai4life_etl"},
+    ins={
+        "raw_records": AssetIn("ai4life_raw_records"),
+        "identified_sharedby": AssetIn("ai4life_identified_sharedby"),
+    },
+)
+def ai4life_sharedby_raw(
+    raw_records: Dict[str, Any],
+    identified_sharedby: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Build sharedBy entity records and save to sharedby.json.
+    Returns (sharedby_json_path, run_folder).
+    """
+    run_folder = raw_records["run_folder"]
+    sharedby_names: Set[str] = set()
+    for _, names in identified_sharedby.items():
+        sharedby_names.update([x for x in names if x])
+
+    if not sharedby_names:
+        logger.info("No sharedBy entities to extract")
+        return ("", run_folder)
+
+    extractor = AI4LifeExtractor(records_data=raw_records["data"])
+    sharedby_df = extractor.extract_sharedby(sorted(sharedby_names))
+
+    sharedby_path = Path(run_folder) / "sharedby.json"
+    sharedby_df.to_json(str(sharedby_path), orient="records", indent=2)
+
+    logger.info("Saved %d sharedBy entities to %s", len(sharedby_df), sharedby_path)
+    return (str(sharedby_path), run_folder)
+
+
 # # @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
 # # def ai4life_applications_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
 # #     """

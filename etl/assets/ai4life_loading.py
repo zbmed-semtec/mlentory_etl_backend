@@ -409,6 +409,58 @@ def ai4life_load_tasks_to_neo4j(
 @asset(
     group_name="ai4life_loading",
     ins={
+        "sharedby_normalized": AssetIn("ai4life_sharedby_normalized"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"}
+)
+def ai4life_load_sharedby_to_neo4j(
+    sharedby_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Load normalized sharedBy entities as RDF triples into Neo4j."""
+    if not sharedby_normalized or sharedby_normalized == "":
+        logger.info("No sharedBy entities to load (empty input)")
+        return ("", "")
+    sharedby_path = Path(sharedby_normalized)
+    if not sharedby_path.exists():
+        logger.warning(f"SharedBy JSON not found: {sharedby_normalized}")
+        return ("", "")
+
+    normalized_folder = str(sharedby_path.parent)
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+    normalized_path = Path(normalized_folder)
+    rdf_run_folder = normalized_path.parent.parent.parent / "3_rdf" / "ai4life" / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+    ttl_path = rdf_run_folder / "sharedby.ttl"
+    load_stats = build_and_persist_defined_terms_rdf(
+        json_path=sharedby_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+        entity_label="sharedby",
+    )
+    report = {
+        "input_file": sharedby_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+    rdf_report_path = rdf_run_folder / "sharedby_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
         "models_loaded": AssetIn("ai4life_load_models_to_neo4j"),
         "store_ready": AssetIn("ai4life_rdf_store_ready"),
     },
@@ -479,6 +531,7 @@ def ai4life_elasticsearch_ready() -> Dict[str, Any]:
         "normalized_models": AssetIn("ai4life_model_normalized"),
         "translation_mapping": AssetIn("ai4life_create_translation_mapping"),
         "tasks_normalized": AssetIn("ai4life_tasks_normalized"),
+        "sharedby_normalized": AssetIn("ai4life_sharedby_normalized"),
         "es_ready": AssetIn("ai4life_elasticsearch_ready"),
     },
     tags={"pipeline": "ai4life_etl", "stage": "index"},
@@ -487,11 +540,14 @@ def ai4life_index_models_elasticsearch(
     normalized_models: str,
     translation_mapping: str,
     tasks_normalized: str,
+    sharedby_normalized: str,
     es_ready: Dict[str, Any],
 ) -> str:
     """Index AI4Life models into Elasticsearch (reusing HF document builder)."""
     if not tasks_normalized:
         logger.info("No AI4Life tasks normalized input provided; continuing with model indexing")
+    if not sharedby_normalized:
+        logger.info("No AI4Life sharedBy normalized input provided; continuing with model indexing")
 
     mlmodels_json_path = normalized_models
     normalized_folder = str(Path(mlmodels_json_path).parent)
