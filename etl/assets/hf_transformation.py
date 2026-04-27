@@ -5,7 +5,7 @@ Pipeline:
 1) Read raw HF models from extraction (hf_models_with_ancestors.json)
 2) Create separate assets for each property group:
    - hf_extract_basic_properties: Core identification, temporal, URLs
-   - hf_extract_keywords_language: Tags → keywords, inLanguage
+   - hf_extract_keywords_language: Tags → keywords, supportedLanguages
    - hf_extract_task_category: pipeline_tag, library_name → mlTask, modelCategory
    - hf_extract_license: License information
    - hf_extract_lineage: Base model relationships
@@ -662,7 +662,7 @@ def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]],
                 merged["referencePublication"] = model_entities["articles"]
                 merged["keywords"] = model_entities["keywords"]
                 merged["baseModel"] = model_entities["base_models"]
-                merged["inLanguage"] = model_entities["languages"]
+                merged["supportedLanguages"] = model_entities["languages"]
                 merged["mlTask"] = model_entities["tasks"]
                 merged["sharedBy"] = model_entities["sharedby"][0] if len(model_entities["sharedby"]) > 0 else merged.get("sharedBy")
                 logger.info(f"Merged schemas for model {model_id}: {merged}")

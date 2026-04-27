@@ -140,8 +140,13 @@ class MLModel(BaseModel):
     )
     inLanguage: List[str] = Field(
         default_factory=list,
-        description="Natural language(s) the model works with (schema:inLanguage)",
+        description="Natural Language used to describe model documentation/readme (schema:inLanguage)",
         alias="https://schema.org/inLanguage"
+    )
+    supportedLanguages: List[str] = Field(
+        default_factory=list,
+        description="Languages represented in model training data (fair4ml:supportedLanguages)",
+        alias="https://w3id.org/fair4ml/supportedLanguages"
     )
     license: Optional[str] = Field(
         default=None,

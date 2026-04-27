@@ -300,7 +300,7 @@ def normalize_hf_model(raw_model: Dict[str, Any]) -> MLModel:
     }
     
     # TODO: Add more mapping functions:
-    # - map_keywords_and_language(raw_model) for tags → keywords, inLanguage
+    # - map_keywords_and_language(raw_model) for tags → keywords, supportedLanguages
     # - map_task_and_category(raw_model) for pipeline_tag, library_name → mlTask, modelCategory
     # - map_license(raw_model) for license extraction
     # - map_lineage(raw_model) for base_model → baseModel

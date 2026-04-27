@@ -93,6 +93,8 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         "https://schema.org/keywords",
         # In Language
         "https://schema.org/inLanguage",
+        # Supported languages (training-language logic)
+        "https://w3id.org/fair4ml/supportedLanguages",
         # ML Task
         "https://w3id.org/fair4ml/mlTask",
         # Model Category
