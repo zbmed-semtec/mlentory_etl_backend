@@ -21,6 +21,7 @@ from etl_transformers.common.utils import (
     extract_normalized_doi,
     build_identifier,
     build_model_urls,
+    validate_optional_url,
 )
 from schemas.fair4ml import MLModel, ExtractionMetadata
 
@@ -185,7 +186,7 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     date_modified = _parse_datetime(date_modified)
 
     description = str(raw_model.get("intendedUse", "")).strip()
-    readme = str(raw_model.get("readme_file", "")).strip()
+    readme = validate_optional_url(raw_model.get("readme_file"))
     archived_at = _pick_archived_at(raw_model.get("archivedAt"), fallback=url)
 
     # Optional fields (often missing in AI4Life)

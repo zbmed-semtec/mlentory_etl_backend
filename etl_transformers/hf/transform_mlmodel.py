@@ -20,6 +20,7 @@ from etl_transformers.common.utils import (
     extract_normalized_doi,
     build_identifier,
     build_model_urls,
+    validate_optional_url,
 )
 
 from schemas.fair4ml import MLModel, ExtractionMetadata
@@ -148,7 +149,9 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     # Build HuggingFace URLs
     hf_base_url = f"https://huggingface.co/{model_id}" if model_id else None
     discussion_url = f"{hf_base_url}/discussions" if hf_base_url else None
-    readme_url = f"{hf_base_url}/blob/main/README.md" if hf_base_url else None
+    readme_url = validate_optional_url(
+        f"{hf_base_url}/blob/main/README.md" if hf_base_url else None
+    )
     
     # Extract clean description
     description = _strip_frontmatter(card) if card else None

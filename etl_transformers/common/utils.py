@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
 from typing import Any, Dict, Iterable, List, Optional
 
 
@@ -72,3 +73,26 @@ def build_model_urls(platform_url: Optional[str], mlentory_id: Optional[str]) ->
             urls.append(mlentory_ui_url)
 
     return list(dict.fromkeys(urls))
+
+
+def validate_optional_url(value: Any) -> Optional[str]:
+    """
+    Return a normalized URL string when valid, else None.
+
+    A URL is considered valid when it is a non-empty string with
+    an explicit http/https scheme and network location.
+    """
+    if not isinstance(value, str):
+        return None
+
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not parsed.netloc:
+        return None
+
+    return cleaned
