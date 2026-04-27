@@ -1,11 +1,8 @@
 """
-HuggingFace RDF Loader.
+RDF loader utilities for normalized FAIR4ML models and related entities.
 
-Builds RDF triples from normalized HF FAIR4ML models and persists them
-to Neo4j using rdflib-neo4j integration.
-
-This v1 implementation focuses on core identification, provenance, temporal,
-description, and documentation properties.
+Builds RDF triples from normalized model/entity JSON and persists them to Neo4j
+using rdflib-neo4j integration.
 """
 
 from __future__ import annotations
@@ -123,7 +120,7 @@ def build_and_persist_models_rdf(
     batch_size: int = 20,
 ) -> Dict[str, Any]:
     """
-    Build RDF triples from normalized HF models and persist to Neo4j.
+    Build RDF triples from normalized models and persist to Neo4j.
 
     Args:
         json_path: Path to normalized models JSON (mlmodels.json)
