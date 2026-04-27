@@ -291,6 +291,7 @@ def ai4life_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
         "datasets_mapping": AssetIn("ai4life_identified_datasets"),
         "keywords_mapping": AssetIn("ai4life_identified_keywords"),
         "licenses_mapping": AssetIn("ai4life_identified_licenses"),
+        "tasks_mapping": AssetIn("ai4life_identified_tasks"),
         "run_folder_data": AssetIn("ai4life_normalized_model_folder"),
     },
     tags={"pipeline": "ai4life_etl", "stage": "transform"}
@@ -299,16 +300,18 @@ def ai4life_entity_linking(
     datasets_mapping: Dict[str, List[str]],
     keywords_mapping: Dict[str, List[str]],
     licenses_mapping: Dict[str, List[str]],
+    tasks_mapping: Dict[str, List[str]],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, keywords, licenses, sources}
+    Create entity linking mapping: model_id -> {datasets, keywords, licenses, tasks, sources}
     Links identified entities with their enriched metadata.
 
     Args:
         datasets_mapping: Tuple of ({model_id: [dataset_names]}, run_folder)
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
+        tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
 
     Returns:
@@ -334,6 +337,7 @@ def ai4life_entity_linking(
         set(datasets_mapping.keys())
         | set(keywords_mapping.keys())
         | set(licenses_mapping.keys())
+        | set(tasks_mapping.keys())
     )
 
     entity_linking: Dict[str, Dict[str, List[str]]] = {}
@@ -342,6 +346,7 @@ def ai4life_entity_linking(
         datasets = datasets_mapping.get(model_id, []) or []
         keywords = keywords_mapping.get(model_id, []) or []
         licenses = licenses_mapping.get(model_id, []) or []
+        tasks = tasks_mapping.get(model_id, []) or []
 
         entity_linking[model_id] = {
             "datasets": [
@@ -357,10 +362,13 @@ def ai4life_entity_linking(
                 AI4LifeHelper.generate_mlentory_entity_hash_id("License", x)
                 for x in licenses
             ],
+            "tasks": [
+                AI4LifeHelper.generate_mlentory_entity_hash_id("Task", x)
+                for x in tasks
+            ],
             "sources": list(ai4life_catalog_source_iris),
             # "base_models": [],  # not available
             # "languages": [],    # not available
-            # "tasks": [],        # not available
         }
 
     output_path = Path(normalized_folder) / "entity_linking.json"
@@ -379,6 +387,7 @@ def ai4life_entity_linking(
         "datasets_json": AssetIn("ai4life_datasets_normalized"),   # path to datasets.json (normalized)
         "keywords_json": AssetIn("ai4life_keywords_normalized"),   # path to keywords.json (normalized)
         "licenses_json": AssetIn("ai4life_licenses_normalized"),   # path to licenses.json (normalized)
+        "tasks_json": AssetIn("ai4life_tasks_normalized"),         # path to tasks.json (normalized)
         "models_json": AssetIn("ai4life_model_normalized"),        # path to mlmodels.json (normalized)
         "sources_json": AssetIn("ai4life_sources_normalized"),     # path to sources.json (normalized)
         "run_folder_data": AssetIn("ai4life_normalized_model_folder"),  # (raw_models_json_path, normalized_folder)
@@ -390,6 +399,7 @@ def ai4life_create_translation_mapping(
     datasets_json: str,
     keywords_json: str,
     licenses_json: str,
+    tasks_json: str,
     models_json: str,
     sources_json: str,
     run_folder_data: Tuple[str, str],
@@ -451,6 +461,7 @@ def ai4life_create_translation_mapping(
         {"label": "datasets", "path": datasets_json},
         {"label": "keywords", "path": keywords_json},
         {"label": "licenses", "path": licenses_json},
+        {"label": "tasks", "path": tasks_json},
         {"label": "models", "path": models_json},
         {"label": "sources", "path": sources_json},
     ]
@@ -614,10 +625,11 @@ def merge_ai4life_partial_schemas(
         merged_data.pop("_index", None)
         merged_data.pop("_error", None)
 
-        # Entity linking (AI4Life only has datasets/keywords/licenses)
+        # Entity linking (AI4Life has datasets/keywords/licenses/tasks)
         datasets = links.get("datasets") or []
         keywords = links.get("keywords") or []
         licenses = links.get("licenses") or []
+        tasks = links.get("tasks") or []
         sources = links.get("sources") or []
 
         # Map to FAIR4ML MLModel fields
@@ -635,6 +647,8 @@ def merge_ai4life_partial_schemas(
 
         if licenses:
             merged_data["license"] = str(licenses[0])  # MLModel.license is a single string
+        if tasks:
+            merged_data["mlTask"] = list(tasks)
         if sources:
             merged_data["source"] = str(sources[0])  # MLModel.source is a single string
 
@@ -993,6 +1007,121 @@ def ai4life_keywords_normalized(
         logger.info("Normalized %d/%d keywords. No errors.", len(normalized), len(raw_keywords))
 
     return str(out_path)
+
+
+@asset(
+    group_name="ai4life_transformation",
+    ins={
+        "tasks_data": AssetIn("ai4life_tasks_raw"),                 # (tasks_json_path, run_folder)
+        "run_folder_data": AssetIn("ai4life_normalized_model_folder"),  # (raw_models_json_path, normalized_folder)
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "transform"},
+)
+def ai4life_tasks_normalized(
+    tasks_data: Tuple[str, str],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Normalize AI4Life tasks to schema.org DefinedTerm-like format and write
+    <normalized_folder>/tasks.json with IRI keys.
+    """
+    tasks_json_path, _raw_run_folder = tasks_data
+    _raw_models_json_path, normalized_folder = run_folder_data
+
+    out_path = Path(normalized_folder) / "tasks.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not tasks_json_path:
+        logger.info("No tasks_json_path. Writing empty tasks.json")
+        out_path.write_text("[]", encoding="utf-8")
+        return str(out_path)
+
+    logger.info("Loading AI4Life tasks from %s", tasks_json_path)
+    with open(tasks_json_path, "r", encoding="utf-8") as f:
+        raw_tasks = json.load(f)
+
+    if isinstance(raw_tasks, dict):
+        raw_tasks = [raw_tasks]
+
+    if not isinstance(raw_tasks, list):
+        raise ValueError(f"Expected list in {tasks_json_path}, got {type(raw_tasks).__name__}")
+
+    normalized: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    for idx, rec in enumerate(raw_tasks):
+        if not isinstance(rec, dict):
+            errors.append({"_index": idx, "_error": f"record is not a dict: {type(rec).__name__}"})
+            continue
+
+        task_name = str(rec.get("name") or rec.get("task") or "").strip() or f"task_{idx}"
+        mlentory_id = str(rec.get("mlentory_id", "")).strip() or None
+
+        identifiers: List[str] = []
+        if mlentory_id:
+            identifiers.append(mlentory_id)
+        raw_task_url = rec.get("url")
+        if isinstance(raw_task_url, str):
+            candidate_url = raw_task_url.strip()
+            task_url = candidate_url if candidate_url and candidate_url.lower() != "none" else None
+        else:
+            task_url = None
+        if task_url:
+            identifiers.append(task_url)
+
+        extraction_meta = rec.get("extraction_metadata") or {}
+        if not isinstance(extraction_meta, dict):
+            extraction_meta = {}
+
+        payload: Dict[str, Any] = {
+            "identifier": identifiers,
+            "name": task_name,
+            "url": task_url,
+            "term_code": task_name,
+            "extraction_metadata": extraction_meta,
+        }
+
+        try:
+            obj = DefinedTerm(**payload)
+            normalized.append(obj.model_dump(mode="json", by_alias=True))
+        except ValidationError as ve:
+            errors.append(
+                {
+                    "task": task_name,
+                    "_index": idx,
+                    "_error": "DefinedTerm validation failed",
+                    "details": ve.errors(),
+                }
+            )
+        except Exception as e:
+            errors.append(
+                {
+                    "task": task_name,
+                    "_index": idx,
+                    "_error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(normalized, f, indent=2, ensure_ascii=False)
+
+    if errors:
+        err_path = Path(normalized_folder) / "tasks_normalization_errors.json"
+        with open(err_path, "w", encoding="utf-8") as f:
+            json.dump(errors, f, indent=2, ensure_ascii=False)
+        logger.warning(
+            "Normalized %d/%d tasks. Errors: %d (see %s)",
+            len(normalized),
+            len(raw_tasks),
+            len(errors),
+            err_path,
+        )
+    else:
+        logger.info("Normalized %d/%d tasks. No errors.", len(normalized), len(raw_tasks))
+
+    return str(out_path)
+
 
 @asset(
     group_name="ai4life_transformation",

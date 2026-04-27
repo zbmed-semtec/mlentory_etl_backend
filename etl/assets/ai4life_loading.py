@@ -22,6 +22,7 @@ from etl_loaders.rdf_loader import (
     build_and_persist_sources_rdf,
     build_and_persist_datasets_rdf,
     build_and_persist_defined_terms_rdf,
+    build_and_persist_tasks_rdf,
 )
 from etl_loaders.metadata_graph import export_metadata_graph_json
 from etl_loaders.rdf_store import (
@@ -357,6 +358,57 @@ def ai4life_load_datasets_to_neo4j(
 @asset(
     group_name="ai4life_loading",
     ins={
+        "tasks_normalized": AssetIn("ai4life_tasks_normalized"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"}
+)
+def ai4life_load_tasks_to_neo4j(
+    tasks_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Load normalized tasks as RDF triples into Neo4j."""
+    if not tasks_normalized or tasks_normalized == "":
+        logger.info("No tasks to load (empty input)")
+        return ("", "")
+    tasks_path = Path(tasks_normalized)
+    if not tasks_path.exists():
+        logger.warning(f"Tasks JSON not found: {tasks_normalized}")
+        return ("", "")
+
+    normalized_folder = str(tasks_path.parent)
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+    normalized_path = Path(normalized_folder)
+    rdf_run_folder = normalized_path.parent.parent.parent / "3_rdf" / "ai4life" / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+    ttl_path = rdf_run_folder / "tasks.ttl"
+    load_stats = build_and_persist_tasks_rdf(
+        json_path=tasks_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+    report = {
+        "input_file": tasks_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+    rdf_report_path = rdf_run_folder / "tasks_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
         "models_loaded": AssetIn("ai4life_load_models_to_neo4j"),
         "store_ready": AssetIn("ai4life_rdf_store_ready"),
     },
@@ -426,6 +478,7 @@ def ai4life_elasticsearch_ready() -> Dict[str, Any]:
     ins={
         "normalized_models": AssetIn("ai4life_model_normalized"),
         "translation_mapping": AssetIn("ai4life_create_translation_mapping"),
+        "tasks_normalized": AssetIn("ai4life_tasks_normalized"),
         "es_ready": AssetIn("ai4life_elasticsearch_ready"),
     },
     tags={"pipeline": "ai4life_etl", "stage": "index"},
@@ -433,9 +486,13 @@ def ai4life_elasticsearch_ready() -> Dict[str, Any]:
 def ai4life_index_models_elasticsearch(
     normalized_models: str,
     translation_mapping: str,
+    tasks_normalized: str,
     es_ready: Dict[str, Any],
 ) -> str:
     """Index AI4Life models into Elasticsearch (reusing HF document builder)."""
+    if not tasks_normalized:
+        logger.info("No AI4Life tasks normalized input provided; continuing with model indexing")
+
     mlmodels_json_path = normalized_models
     normalized_folder = str(Path(mlmodels_json_path).parent)
     rdf_run_folder = Path(normalized_folder).parent.parent.parent / "3_rdf" / "ai4life" / Path(normalized_folder).name

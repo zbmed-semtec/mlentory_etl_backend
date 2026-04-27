@@ -3,6 +3,7 @@ from etl_extractors.ai4life.clients.models_client import AI4LifeModelClient
 from etl_extractors.ai4life.clients.datasets_client import AI4LifeDatasetsClient
 from etl_extractors.ai4life.clients.licenses_client import AI4LifeLicenseClient
 from etl_extractors.ai4life.clients.keywords_client import AI4LifeKeywordClient
+from etl_extractors.ai4life.clients.tasks_client import AI4LifeTasksClient
 
 import json
 from pathlib import Path
@@ -23,11 +24,13 @@ class AI4LifeExtractor:
                  models_client: Optional[AI4LifeModelClient] = None,
                  datasets_client: Optional[AI4LifeDatasetsClient] = None,
                  licenses_client: Optional[AI4LifeLicenseClient] = None,
-                 keywords_client: Optional[AI4LifeKeywordClient] = None) -> None:
+                 keywords_client: Optional[AI4LifeKeywordClient] = None,
+                 tasks_client: Optional[AI4LifeTasksClient] = None) -> None:
         self.models_client = models_client or AI4LifeModelClient(records_data)
         self.datasets_client = datasets_client or AI4LifeDatasetsClient(records_data)
         self.licenses_client = licenses_client or AI4LifeLicenseClient()
         self.keywords_client = keywords_client or AI4LifeKeywordClient()
+        self.tasks_client = tasks_client or AI4LifeTasksClient()
         
     def fetch_records(self, num_models:int, base_url:str, parent_id:str) -> Dict[str, Any]:
         """Fetch records from AI4Life API and set extraction timestamp."""
@@ -57,6 +60,10 @@ class AI4LifeExtractor:
 
     def extract_specific_keywords(self, keyword_names):
         df = self.keywords_client.get_keywords_metadata(keyword_names)
+        return df
+
+    def extract_tasks(self, task_names):
+        df = self.tasks_client.get_tasks_metadata(task_names)
         return df
  
       

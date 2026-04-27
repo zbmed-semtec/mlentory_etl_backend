@@ -273,6 +273,66 @@ def ai4life_keywords_raw(
     return (str(keywords_path), run_folder)
 
 
+@asset(
+    group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"}
+)
+def ai4life_identified_tasks(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify ML task references per model from AI4Life model metadata.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Dict of {model_id: [task_names]}
+    """
+    models_json_path, _ = models_data
+    enrichment = AI4LifeEnrichment()
+    models_df = AI4LifeHelper.load_models_dataframe(models_json_path)
+
+    model_tasks = enrichment.identifiers["tasks"].identify_per_model(models_df)
+    logger.info("Identified tasks for %d models", len(model_tasks))
+    return model_tasks
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    tags={"pipeline": "ai4life_etl"},
+    ins={
+        "raw_records": AssetIn("ai4life_raw_records"),
+        "identified_tasks": AssetIn("ai4life_identified_tasks"),
+    },
+)
+def ai4life_tasks_raw(
+    raw_records: Dict[str, Any],
+    identified_tasks: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Build task entity records from identified AI4Life tasks and save to tasks.json.
+    Returns (tasks_json_path, run_folder).
+    """
+    run_folder = raw_records["run_folder"]
+
+    task_names: Set[str] = set()
+    for _, task_list in identified_tasks.items():
+        task_names.update([x for x in task_list if x])
+
+    if not task_names:
+        logger.info("No tasks to extract")
+        return ("", run_folder)
+
+    extractor = AI4LifeExtractor(records_data=raw_records["data"])
+    tasks_df = extractor.extract_tasks(sorted(task_names))
+
+    tasks_path = Path(run_folder) / "tasks.json"
+    tasks_df.to_json(str(tasks_path), orient="records", indent=2)
+
+    logger.info("Saved %d tasks to %s", len(tasks_df), tasks_path)
+    return (str(tasks_path), run_folder)
+
+
 # # @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})
 # # def ai4life_applications_raw(raw_data: Tuple[List[Dict[str, Any]], str, AI4LifeExtractor]) -> Tuple[str, str]:
 # #     """
