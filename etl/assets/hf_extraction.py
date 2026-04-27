@@ -899,3 +899,66 @@ def hf_enriched_tasks(tasks_data: Tuple[Dict[str, List[str]], str]) -> str:
 
     logger.info("Tasks saved to %s", final_path)
     return str(final_path)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_identified_sharedby(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
+    """
+    Identify sharedBy entities (publishers/owners) referenced by each model.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Tuple of ({model_id: [sharedby_names]}, run_folder)
+    """
+    models_json_path, run_folder = models_data
+    enrichment = HFEnrichment()
+    models_df = HFHelper.load_models_dataframe(models_json_path)
+
+    model_sharedby = enrichment.identifiers["sharedby"].identify_per_model(models_df)
+    logger.info("Identified sharedBy entities for %d models", len(model_sharedby))
+    return (model_sharedby, run_folder)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"sharedby_data": AssetIn("hf_identified_sharedby")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_enriched_sharedby(sharedby_data: Tuple[Dict[str, List[str]], str]) -> str:
+    """
+    Build metadata records for identified sharedBy entities.
+
+    Args:
+        sharedby_data: Tuple of ({model_id: [sharedby_names]}, run_folder)
+
+    Returns:
+        Path to the saved sharedBy JSON file.
+    """
+    model_sharedby_dict, run_folder = sharedby_data
+    names: Set[str] = set()
+
+    for sharedby_values in model_sharedby_dict.values():
+        names.update(filter(None, sharedby_values))
+
+    if not names:
+        logger.info("No sharedBy entities to extract")
+        return ""
+
+    extractor = HFExtractor()
+    output_root = Path(run_folder).parent.parent
+    _, json_path = extractor.extract_sharedby(
+        names=sorted(names),
+        output_root=output_root,
+    )
+
+    final_path = Path(run_folder) / "sharedby.json"
+    Path(json_path).rename(final_path)
+
+    logger.info("SharedBy entities saved to %s", final_path)
+    return str(final_path)

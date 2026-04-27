@@ -993,3 +993,70 @@ def hf_load_keywords_to_neo4j(
     logger.info(f"Keywords load report also saved to: {rdf_report_path}")
 
     return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="hf_loading",
+    ins={
+        "sharedby_normalized": AssetIn("hf_sharedby_normalized"),
+        "store_ready": AssetIn("hf_rdf_store_ready"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "load"}
+)
+def hf_load_sharedby_to_neo4j(
+    sharedby_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    Load normalized sharedBy entities (DefinedTerm) as RDF triples into Neo4j.
+    """
+    if not sharedby_normalized or sharedby_normalized == "":
+        logger.info("No sharedBy entities to load (empty input)")
+        return ("", "")
+
+    sharedby_path = Path(sharedby_normalized)
+    if not sharedby_path.exists():
+        logger.warning(f"SharedBy JSON not found: {sharedby_normalized}")
+        return ("", "")
+
+    normalized_folder = str(sharedby_path.parent)
+
+    logger.info(f"Loading RDF from normalized sharedBy: {sharedby_normalized}")
+    logger.info(f"Neo4j store status: {store_ready['status']}")
+
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+
+    normalized_path = Path(normalized_folder)
+    rdf_base = normalized_path.parent.parent.parent / "3_rdf" / "hf"
+    rdf_run_folder = rdf_base / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+
+    ttl_path = rdf_run_folder / "sharedby.ttl"
+
+    load_stats = build_and_persist_defined_terms_rdf(
+        json_path=sharedby_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+        entity_label="sharedby",
+    )
+
+    report = {
+        "input_file": sharedby_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+
+    rdf_report_path = rdf_run_folder / "sharedby_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"SharedBy load report also saved to: {rdf_report_path}")
+    return (str(rdf_report_path), normalized_folder)

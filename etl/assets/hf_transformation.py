@@ -313,6 +313,7 @@ def hf_extract_basic_properties(
         "base_models_mapping": AssetIn("hf_identified_base_models"),
         "languages_mapping": AssetIn("hf_identified_languages"),
         "tasks_mapping": AssetIn("hf_identified_tasks"),
+        "sharedby_mapping": AssetIn("hf_identified_sharedby"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
     tags={"pipeline": "hf_etl", "stage": "transform"}
@@ -325,10 +326,11 @@ def hf_entity_linking(
     base_models_mapping: Tuple[Dict[str, List[str]], str],
     languages_mapping: Tuple[Dict[str, List[str]], str],
     tasks_mapping: Tuple[Dict[str, List[str]], str],
+    sharedby_mapping: Tuple[Dict[str, List[str]], str],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, articles, keywords, licenses, base_models, languages, tasks}
+    Create entity linking mapping: model_id -> {datasets, articles, keywords, licenses, base_models, languages, tasks, sharedby}
     Links identified entities with their enriched metadata.
 
     Args:
@@ -356,6 +358,7 @@ def hf_entity_linking(
     model_base_models = base_models_mapping[0]
     model_languages = languages_mapping[0]
     model_tasks = tasks_mapping[0]
+    model_sharedby = sharedby_mapping[0]
     # Create the final linking structure
     entity_linking = {}
 
@@ -371,6 +374,7 @@ def hf_entity_linking(
             "base_models": [HFHelper.generate_mlentory_entity_hash_id('Model', x) for x in model_base_models[model_id]],
             "languages": [HFHelper.generate_mlentory_entity_hash_id('Language', x) for x in model_languages[model_id]],
             "tasks": [HFHelper.generate_mlentory_entity_hash_id('Task', x) for x in model_tasks[model_id]],
+            "sharedby": [HFHelper.generate_mlentory_entity_hash_id('SharedBy', x) for x in model_sharedby.get(model_id, [])],
             "sources": list(hf_catalog_website_mlentory_iris),
         }
 
@@ -394,6 +398,7 @@ def hf_entity_linking(
         "languages_json": AssetIn("hf_languages_normalized"),
         "models_json": AssetIn("hf_models_normalized"),
         "tasks_json": AssetIn("hf_tasks_normalized"),
+        "sharedby_json": AssetIn("hf_sharedby_normalized"),
         "sources_json": AssetIn("hf_sources_normalized"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
@@ -407,6 +412,7 @@ def hf_create_translation_mapping(
     models_json: Tuple[str, str],
     languages_json: str,
     tasks_json: str,
+    sharedby_json: str,
     sources_json: str,
     run_folder_data: Tuple[str, str],
 ) -> str:
@@ -469,6 +475,10 @@ def hf_create_translation_mapping(
         {
             "label": "tasks",
             "path": tasks_json,
+        },
+        {
+            "label": "sharedby",
+            "path": sharedby_json,
         },
         {
             "label": "sources",
@@ -654,6 +664,7 @@ def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]],
                 merged["baseModel"] = model_entities["base_models"]
                 merged["inLanguage"] = model_entities["languages"]
                 merged["mlTask"] = model_entities["tasks"]
+                merged["sharedBy"] = model_entities["sharedby"][0] if len(model_entities["sharedby"]) > 0 else merged.get("sharedBy")
                 logger.info(f"Merged schemas for model {model_id}: {merged}")
             
             merged_schemas.append(merged)
@@ -1338,6 +1349,82 @@ def hf_tasks_normalized(
         entity_label="tasks",
         normalized_folder=normalized_folder,
         normalized_records=normalized_tasks,
+        validation_errors=validation_errors,
+    )
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "sharedby_json": AssetIn("hf_enriched_sharedby"),
+        "run_folder": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "transform"}
+)
+def hf_sharedby_normalized(
+    sharedby_json: str,
+    run_folder: Tuple[str, str],
+) -> str:
+    """
+    Normalize HF sharedBy metadata to Schema.org DefinedTerm format.
+
+    Args:
+        sharedby_json: Path to enriched sharedBy JSON file
+        run_folder: Tuple of (raw_data_json_path, normalized_folder)
+
+    Returns:
+        Path to normalized sharedBy JSON file
+    """
+    _, normalized_folder = run_folder
+
+    raw_sharedby = _load_entity_records(sharedby_json, "sharedby")
+    if raw_sharedby is None:
+        return ""
+
+    normalized_records: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+
+    for idx, rec in enumerate(raw_sharedby):
+        name = str(rec.get("name", "")).strip() or f"sharedby_{idx}"
+        mlentory_id = rec.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
+            "SharedBy", name
+        )
+
+        try:
+            identifiers = [mlentory_id]
+            payload: Dict[str, Any] = {
+                "identifier": identifiers,
+                "name": name,
+                "url": None,
+                "termCode": name,
+                "description": "Entity representing who shared/published the model.",
+                "inDefinedTermSet": ["https://huggingface.co"],
+                "extraction_metadata": rec.get("extraction_metadata", {}),
+            }
+
+            normalized = DefinedTerm(**payload)
+            normalized_records.append(normalized.model_dump(mode="json", by_alias=True))
+        except ValidationError as exc:
+            validation_errors.append(
+                {
+                    "name": name,
+                    "error": str(exc),
+                    "raw_data": rec,
+                }
+            )
+        except Exception as exc:
+            validation_errors.append(
+                {
+                    "name": name,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    return _write_normalization_results(
+        entity_label="sharedby",
+        normalized_folder=normalized_folder,
+        normalized_records=normalized_records,
         validation_errors=validation_errors,
     )
 

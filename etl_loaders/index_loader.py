@@ -109,6 +109,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     ml_tasks = [translation_mapping.get(ml_task, ml_task) for ml_task in ml_tasks]
     keywords = [translation_mapping.get(keyword, keyword) for keyword in keywords]
     license_value = translation_mapping.get(license_value, license_value)
+    shared_by = translation_mapping.get(shared_by, shared_by)
     source_name = translation_mapping.get(source_iri, source_iri)
     doc = ModelDocument(
         db_identifier=[str(id) for id in identifier],

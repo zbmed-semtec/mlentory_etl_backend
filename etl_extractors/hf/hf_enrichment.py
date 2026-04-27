@@ -24,6 +24,7 @@ from .entity_identifiers import (
     ChunkIdentifier,
     LicenseIdentifier,
     TaskIdentifier,
+    SharedByIdentifier,
     CitationIdentifier,
     ModelSizeIdentifier
 )
@@ -61,6 +62,7 @@ class HFEnrichment:
             "licenses": LicenseIdentifier(),
             "languages": LanguageIdentifier(),
             "tasks": TaskIdentifier(),
+            "sharedby": SharedByIdentifier(),
             "citation": CitationIdentifier(),
             "modelsize": ModelSizeIdentifier()
         }
