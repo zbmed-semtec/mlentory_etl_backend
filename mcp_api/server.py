@@ -173,7 +173,7 @@ def get_ml_model_detail(
                           - "schema__author": Author details
                           - "fair4ml__trainedOn": Training datasets
                           - "fair4ml__evaluatedOn": Evaluation datasets
-                          - "fair4ml__fineTunedFrom": Base model information
+                          - "fair4ml__baseModel": Base model information
                           - "codemeta__referencePublication": Related papers
 
     Returns:
@@ -204,7 +204,7 @@ def get_ml_model_detail(
             resolve_properties=[
                 "schema__license",
                 "fair4ml__trainedOn",
-                "fair4ml__fineTunedFrom",
+                "fair4ml__baseModel",
                 "codemeta__referencePublication"
             ]
         )

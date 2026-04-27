@@ -651,7 +651,7 @@ def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]],
                 merged["evaluatedOn"] = model_entities["datasets"]
                 merged["referencePublication"] = model_entities["articles"]
                 merged["keywords"] = model_entities["keywords"]
-                merged["fineTunedFrom"] = model_entities["base_models"]
+                merged["baseModel"] = model_entities["base_models"]
                 merged["inLanguage"] = model_entities["languages"]
                 merged["mlTask"] = model_entities["tasks"]
                 logger.info(f"Merged schemas for model {model_id}: {merged}")

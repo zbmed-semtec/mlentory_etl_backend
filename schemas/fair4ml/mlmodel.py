@@ -168,10 +168,10 @@ class MLModel(BaseModel):
     )
     
     # ========== Model Lineage (fair4ml) ==========
-    fineTunedFrom: Optional[List[str]] = Field(
+    baseModel: Optional[List[str]] = Field(
         default_factory=list,
-        description="Identifier of the base model this was fine-tuned from (fair4ml:fineTunedFrom)",
-        alias="https://w3id.org/fair4ml/fineTunedFrom"
+        description="Identifier of the base model this model was derived from (fair4ml:baseModel)",
+        alias="https://w3id.org/fair4ml/baseModel"
     )
     
     # ========== Usage & Code (fair4ml) ==========
