@@ -37,6 +37,26 @@ def ai4life_run_folder() -> str:
     return str(run_folder)
 
 
+@asset(
+    group_name="ai4life_extraction",
+    tags={"pipeline": "ai4life_etl"},
+    ins={"run_folder": AssetIn("ai4life_run_folder")},
+)
+def ai4life_raw_catalog_sources(run_folder: str) -> str:
+    """
+    Write the canonical AI4Life catalog ``WebSite`` to the raw run folder.
+
+    Produces ``sources.json`` (one row) with ``mlentory_id`` and schema.org fields
+    so downstream transform/load can align ``MLModel.source`` with extraction.
+    """
+    out_path = Path(run_folder) / "sources.json"
+    payload = AI4LifeHelper.raw_ai4life_catalog_website_records()
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    logger.info("Wrote AI4Life catalog sources to %s", out_path)
+    return str(out_path)
+
+
 @asset(group_name="ai4life_extraction", tags={"pipeline": "ai4life_etl"}, ins={"run_folder": AssetIn("ai4life_run_folder")})
 def ai4life_raw_records(run_folder: str) -> Dict[str, Any]:
     """

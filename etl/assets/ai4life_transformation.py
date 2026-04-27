@@ -252,6 +252,39 @@ def ai4life_extract_basic_properties(models_data: Tuple[str, str]) -> str:
     logger.info("Saved basic properties to %s", output_path)
     return str(output_path)
 
+
+@asset(
+    group_name="ai4life_transformation",
+    ins={"run_folder_data": AssetIn("ai4life_normalized_model_folder")},
+    tags={"pipeline": "ai4life_etl", "stage": "transform"},
+)
+def ai4life_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
+    """
+    Bring the AI4Life catalog ``WebSite`` from raw extract into this run's
+    normalized folder as ``sources.json``.
+    """
+    raw_models_path, normalized_folder = run_folder_data
+    raw_run = Path(raw_models_path).parent
+    raw_sources = raw_run / "sources.json"
+    out_path = Path(normalized_folder) / "sources.json"
+
+    if raw_sources.exists():
+        with open(raw_sources, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        logger.info("Loaded AI4Life catalog sources from raw run: %s", raw_sources)
+    else:
+        logger.warning(
+            "Raw sources.json missing at %s; using AI4LifeHelper catalog payload",
+            raw_sources,
+        )
+        payload = AI4LifeHelper.raw_ai4life_catalog_website_records()
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False, default=_json_default)
+
+    logger.info("Wrote normalized AI4Life sources to %s", out_path)
+    return str(out_path)
+
 @asset(
     group_name="ai4life_transformation",
     ins={
@@ -269,7 +302,7 @@ def ai4life_entity_linking(
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, keywords, licenses}
+    Create entity linking mapping: model_id -> {datasets, keywords, licenses, sources}
     Links identified entities with their enriched metadata.
 
     Args:
@@ -282,6 +315,19 @@ def ai4life_entity_linking(
         Path to saved entity linking JSON file
     """
     _, normalized_folder = run_folder_data
+    ai4life_catalog_source_iris: List[str] = []
+    for row in AI4LifeHelper.raw_ai4life_catalog_website_records():
+        ids = row.get("https://schema.org/identifier") or []
+        if not isinstance(ids, list):
+            continue
+        ai4life_catalog_source_iris = [
+            u
+            for u in ids
+            if isinstance(u, str)
+            and u.startswith("https://w3id.org/mlentory/mlentory_graph/")
+        ]
+        if ai4life_catalog_source_iris:
+            break
 
         # union of ids so you don't KeyError if a model appears in only one mapping
     all_model_ids = (
@@ -310,7 +356,8 @@ def ai4life_entity_linking(
             "licenses": [
                 AI4LifeHelper.generate_mlentory_entity_hash_id("License", x)
                 for x in licenses
-            ]
+            ],
+            "sources": list(ai4life_catalog_source_iris),
             # "base_models": [],  # not available
             # "languages": [],    # not available
             # "tasks": [],        # not available
@@ -333,6 +380,7 @@ def ai4life_entity_linking(
         "keywords_json": AssetIn("ai4life_keywords_normalized"),   # path to keywords.json (normalized)
         "licenses_json": AssetIn("ai4life_licenses_normalized"),   # path to licenses.json (normalized)
         "models_json": AssetIn("ai4life_model_normalized"),        # path to mlmodels.json (normalized)
+        "sources_json": AssetIn("ai4life_sources_normalized"),     # path to sources.json (normalized)
         "run_folder_data": AssetIn("ai4life_normalized_model_folder"),  # (raw_models_json_path, normalized_folder)
     },
     tags={"pipeline": "ai4life_etl", "stage": "transform"},
@@ -343,6 +391,7 @@ def ai4life_create_translation_mapping(
     keywords_json: str,
     licenses_json: str,
     models_json: str,
+    sources_json: str,
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -403,6 +452,7 @@ def ai4life_create_translation_mapping(
         {"label": "keywords", "path": keywords_json},
         {"label": "licenses", "path": licenses_json},
         {"label": "models", "path": models_json},
+        {"label": "sources", "path": sources_json},
     ]
 
     for cfg in entity_configs:
@@ -568,6 +618,7 @@ def merge_ai4life_partial_schemas(
         datasets = links.get("datasets") or []
         keywords = links.get("keywords") or []
         licenses = links.get("licenses") or []
+        sources = links.get("sources") or []
 
         # Map to FAIR4ML MLModel fields
         if datasets:
@@ -584,6 +635,8 @@ def merge_ai4life_partial_schemas(
 
         if licenses:
             merged_data["license"] = str(licenses[0])  # MLModel.license is a single string
+        if sources:
+            merged_data["source"] = str(sources[0])  # MLModel.source is a single string
 
         # Minimal required fields
         if not merged_data.get("name"):
