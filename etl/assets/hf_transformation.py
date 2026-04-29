@@ -312,6 +312,7 @@ def hf_extract_basic_properties(
         "licenses_mapping": AssetIn("hf_identified_licenses"),
         "base_models_mapping": AssetIn("hf_identified_base_models"),
         "languages_mapping": AssetIn("hf_identified_languages"),
+        "readme_languages_mapping": AssetIn("hf_detected_readme_languages"),
         "tasks_mapping": AssetIn("hf_identified_tasks"),
         "sharedby_mapping": AssetIn("hf_identified_sharedby"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
@@ -325,20 +326,24 @@ def hf_entity_linking(
     licenses_mapping: Tuple[Dict[str, List[str]], str],
     base_models_mapping: Tuple[Dict[str, List[str]], str],
     languages_mapping: Tuple[Dict[str, List[str]], str],
+    readme_languages_mapping: Tuple[Dict[str, List[str]], str],
     tasks_mapping: Tuple[Dict[str, List[str]], str],
     sharedby_mapping: Tuple[Dict[str, List[str]], str],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, articles, keywords, licenses, base_models, languages, tasks, sharedby}
-    Links identified entities with their enriched metadata.
+    Build model_id -> linked MLentory IRIs for datasets, keywords, languages, tasks, etc.
+
+    ``languages`` maps tag-derived codes to Language IRIs (supportedLanguages).
+    ``inLanguage`` maps Lingua + pycountry-normalized readme languages to the same IRIs.
 
     Args:
         datasets_mapping: Tuple of ({model_id: [dataset_names]}, run_folder)
         articles_mapping: Tuple of ({model_id: [arxiv_ids]}, run_folder)
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
-        languages_mapping: Tuple of ({model_id: [language_ids]}, run_folder)
+        languages_mapping: Tuple of ({model_id: [language codes from tags]}, run_folder)
+        readme_languages_mapping: Tuple of ({model_id: [canonical ISO codes]}, run_folder)
         tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
         base_models_mapping: Tuple of ({model_id: [base_model_ids]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
@@ -346,7 +351,7 @@ def hf_entity_linking(
     Returns:
         Path to saved entity linking JSON file
     """
-    _, normalized_folder = run_folder_data
+    models_json_path, normalized_folder = run_folder_data
 
     hf_catalog_website_mlentory_iris = _hf_catalog_website_mlentory_iris()
 
@@ -357,24 +362,62 @@ def hf_entity_linking(
     model_licenses = licenses_mapping[0]
     model_base_models = base_models_mapping[0]
     model_languages = languages_mapping[0]
+    model_readme_languages = readme_languages_mapping[0]
     model_tasks = tasks_mapping[0]
     model_sharedby = sharedby_mapping[0]
-    # Create the final linking structure
-    entity_linking = {}
 
-    logger.info(f"base models: {model_base_models}")
-    logger.info(f"base models: {model_base_models.keys()}")
-    
-    for model_id in model_datasets.keys():
+    with open(models_json_path, "r", encoding="utf-8") as file_handle:
+        raw_models = json.load(file_handle)
+    if not isinstance(raw_models, list):
+        logger.warning("Expected list of models at %s", models_json_path)
+        model_ids_ordered: List[str] = []
+    else:
+        model_ids_ordered = [
+            mid for mid in (row.get("modelId") for row in raw_models) if mid
+        ]
+
+    entity_linking: Dict[str, Dict[str, Any]] = {}
+
+    logger.info("Building entity linking for %s models", len(model_ids_ordered))
+
+    for model_id in model_ids_ordered:
         model_entities = {
-            "datasets": [HFHelper.generate_mlentory_entity_hash_id('Dataset', x) for x in model_datasets[model_id]],
-            "articles": [HFHelper.generate_mlentory_entity_hash_id('Article', x) for x in model_articles[model_id]],
-            "keywords": [HFHelper.generate_mlentory_entity_hash_id('Keyword', x) for x in model_keywords[model_id]],
-            "licenses": [HFHelper.generate_mlentory_entity_hash_id('License', x) for x in model_licenses[model_id]],
-            "base_models": [HFHelper.generate_mlentory_entity_hash_id('Model', x) for x in model_base_models[model_id]],
-            "languages": [HFHelper.generate_mlentory_entity_hash_id('Language', x) for x in model_languages[model_id]],
-            "tasks": [HFHelper.generate_mlentory_entity_hash_id('Task', x) for x in model_tasks[model_id]],
-            "sharedby": [HFHelper.generate_mlentory_entity_hash_id('SharedBy', x) for x in model_sharedby.get(model_id, [])],
+            "datasets": [
+                HFHelper.generate_mlentory_entity_hash_id("Dataset", x)
+                for x in model_datasets.get(model_id, [])
+            ],
+            "articles": [
+                HFHelper.generate_mlentory_entity_hash_id("Article", x)
+                for x in model_articles.get(model_id, [])
+            ],
+            "keywords": [
+                HFHelper.generate_mlentory_entity_hash_id("Keyword", x)
+                for x in model_keywords.get(model_id, [])
+            ],
+            "licenses": [
+                HFHelper.generate_mlentory_entity_hash_id("License", x)
+                for x in model_licenses.get(model_id, [])
+            ],
+            "base_models": [
+                HFHelper.generate_mlentory_entity_hash_id("Model", x)
+                for x in model_base_models.get(model_id, [])
+            ],
+            "languages": [
+                HFHelper.generate_mlentory_entity_hash_id("Language", x)
+                for x in model_languages.get(model_id, [])
+            ],
+            "inLanguage": [
+                HFHelper.generate_mlentory_entity_hash_id("Language", x)
+                for x in model_readme_languages.get(model_id, [])
+            ],
+            "tasks": [
+                HFHelper.generate_mlentory_entity_hash_id("Task", x)
+                for x in model_tasks.get(model_id, [])
+            ],
+            "sharedby": [
+                HFHelper.generate_mlentory_entity_hash_id("SharedBy", x)
+                for x in model_sharedby.get(model_id, [])
+            ],
             "sources": list(hf_catalog_website_mlentory_iris),
         }
 
@@ -663,6 +706,7 @@ def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]],
                 merged["keywords"] = model_entities["keywords"]
                 merged["baseModel"] = model_entities["base_models"]
                 merged["supportedLanguages"] = model_entities["languages"]
+                merged["inLanguage"] = model_entities.get("inLanguage", [])
                 merged["mlTask"] = model_entities["tasks"]
                 merged["sharedBy"] = model_entities["sharedby"][0] if len(model_entities["sharedby"]) > 0 else merged.get("sharedBy")
                 logger.info(f"Merged schemas for model {model_id}: {merged}")

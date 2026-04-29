@@ -83,7 +83,7 @@ class MetadataService:
         # Properties to extract from entity history
         metadata_properties = [
             "coprightHolder", "funding", "archivedAt",
-            "supportedLanguages", "url", "citation",
+            "supportedLanguages", "inLanguage", "url", "citation",
             "conditionsOfAccess", "contributor", "maintainer",
             "version"
         ]

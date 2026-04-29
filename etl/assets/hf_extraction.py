@@ -788,10 +788,49 @@ def hf_identified_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, Lis
 
 @asset(
     group_name="hf_enrichment",
-    ins={"languages_data": AssetIn("hf_identified_languages")},
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl", "stage": "extract"},
+)
+def hf_detected_readme_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
+    """
+    Detect documentation languages per model from model card markdown (schema:inLanguage).
+
+    Uses Lingua on stripped README/card text. May return multiple ISO codes when
+    several languages exceed the confidence threshold.
+    """
+    from etl_extractors.hf.readme_language_detector import detect_readme_language_codes
+
+    models_json_path, run_folder = models_data
+
+    with open(models_json_path, "r", encoding="utf-8") as f:
+        raw_models = json.load(f)
+    if not isinstance(raw_models, list):
+        logger.warning("Expected list of models at %s", models_json_path)
+        return ({}, run_folder)
+
+    per_model: Dict[str, List[str]] = {}
+    for raw in raw_models:
+        model_id = raw.get("modelId")
+        if not model_id:
+            continue
+        per_model[model_id] = detect_readme_language_codes(raw.get("card", "") or "")
+
+    logger.info("Detected readme languages for %s models", len(per_model))
+    return (per_model, run_folder)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={
+        "languages_data": AssetIn("hf_identified_languages"),
+        "readme_languages_data": AssetIn("hf_detected_readme_languages"),
+    },
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
-def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> str:
+def hf_enriched_languages(
+    languages_data: Tuple[Dict[str, List[str]], str],
+    readme_languages_data: Tuple[Dict[str, List[str]], str],
+) -> str:
     """
     Enrich language codes referenced by models using the pycountry dataset.
 
@@ -803,9 +842,12 @@ def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> s
     """
 
     model_languages_dict, run_folder = languages_data
+    readme_languages_dict, _ = readme_languages_data
     language_codes: Set[str] = set()
 
     for languages in model_languages_dict.values():
+        language_codes.update(filter(None, languages))
+    for languages in readme_languages_dict.values():
         language_codes.update(filter(None, languages))
 
     if not language_codes:

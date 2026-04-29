@@ -105,4 +105,26 @@ class HFLanguagesClient:
 
         return None
 
+    def normalize_language_code(self, code: str) -> Optional[str]:
+        """
+        Return a canonical ISO code string aligned with enrichment and hashing.
+
+        Prefer ISO 639-1 (alpha-2); otherwise ISO 639-3 (alpha-3), lowercased.
+        Used for tag-derived languages and Lingua-detected readme languages alike.
+
+        Args:
+            code: Raw language tag or code (e.g. ``en``, ``ENG``, ``en-US``).
+
+        Returns:
+            Normalized code when pycountry resolves it; otherwise ``None``.
+        """
+        language = self._lookup_language((code or "").strip())
+        if language is None:
+            return None
+        if getattr(language, "alpha_2", None):
+            return language.alpha_2.lower()
+        if getattr(language, "alpha_3", None):
+            return language.alpha_3.lower()
+        return None
+
 
