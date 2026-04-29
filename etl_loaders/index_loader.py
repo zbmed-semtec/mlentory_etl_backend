@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class ModelDocument(Document):
     """Minimal model document for search indexing."""
 
-    db_identifier = Keyword(multi=True)
+    db_identifier = Keyword()
     name = Text(fields={"raw": Keyword()})
     description = Text()
     shared_by = Keyword()
@@ -57,6 +57,12 @@ def _extract_list(value: Any) -> List[str]:
     return [str(value)]
 
 
+def _extract_w3id_identifiers(value: Any) -> List[str]:
+    """Normalize identifier values and keep only w3id URIs."""
+    identifiers = _extract_list(value)
+    return [identifier for identifier in identifiers if identifier.startswith("https://w3id.org/")]
+
+
 def build_model_document(model: Dict[str, Any], index_name: str, translation_mapping: Dict[str, str]) -> ModelDocument:
     """
     Create `ModelDocument` from a normalized FAIR4ML model dict.
@@ -71,6 +77,11 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     """
     
     identifier = model.get("https://schema.org/identifier") or LoadHelpers.mint_subject(model)
+    normalized_identifiers = _extract_list(identifier)
+    w3id_identifiers = _extract_w3id_identifiers(identifier)
+    doc_id = w3id_identifiers[0] if w3id_identifiers else (
+        normalized_identifiers[0] if normalized_identifiers else LoadHelpers.mint_subject(model)
+    )
     name = model.get("https://schema.org/name")
     description = model.get("https://schema.org/description")
     shared_by = model.get("https://w3id.org/fair4ml/sharedBy")
@@ -123,7 +134,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     source_name = translation_mapping.get(source_iri, source_iri)
     in_language = [translation_mapping.get(lang, lang) for lang in in_language]
     doc = ModelDocument(
-        db_identifier=[str(id) for id in identifier],
+        db_identifier=w3id_identifiers,
         name=str(name) if name is not None else "",
         description=str(description) if description is not None else "",
         shared_by=str(shared_by) if shared_by is not None else "Unknown",
@@ -137,7 +148,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         datecreated=datecreated,
         datemodified=datemodified,
         inLanguage=_extract_list(in_language),
-        meta={"id": [str(id) for id in identifier]},
+        meta={"id": str(doc_id)},
     )
 
     # Ensure index name is bound correctly
