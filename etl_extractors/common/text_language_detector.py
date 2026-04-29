@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import pycountry
 
@@ -107,6 +107,24 @@ def detect_language_codes(
 
     Returns canonical ISO codes ordered by descending confidence.
     """
+    predictions = detect_language_predictions(
+        text=text,
+        min_confidence=min_confidence,
+        max_languages=max_languages,
+    )
+    return [prediction["code"] for prediction in predictions]
+
+
+def detect_language_predictions(
+    text: str,
+    min_confidence: float = 0.75,
+    max_languages: int = 5,
+) -> List[Dict[str, Any]]:
+    """
+    Detect language predictions and include confidence scores from Lingua.
+
+    Returns canonical ISO language codes ordered by descending confidence.
+    """
     body = (text or "").strip()
     if not body:
         return []
@@ -126,7 +144,7 @@ def detect_language_codes(
     scored.sort(key=lambda pair: pair[1], reverse=True)
 
     seen: Set[str] = set()
-    results: List[str] = []
+    results: List[Dict[str, Any]] = []
     for confidence_value, score in scored:
         if score < min_confidence:
             continue
@@ -141,14 +159,11 @@ def detect_language_codes(
             if canonical:
                 break
 
-        if not canonical:
+        if not canonical or canonical in seen:
             continue
 
-        if canonical in seen:
-            continue
         seen.add(canonical)
-        results.append(canonical)
-
+        results.append({"code": canonical, "confidence": float(score)})
         if len(results) >= max_languages:
             break
 

@@ -17,6 +17,7 @@ from typing import Tuple, List, Dict, Any, Set
 import json
 import logging
 import pandas as pd
+import pycountry
 from dagster import asset, AssetIn
 from etl_extractors.ai4life.ai4life_enrichment import AI4LifeEnrichment
 from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
@@ -356,11 +357,11 @@ def ai4life_identified_sharedby(models_data: Tuple[str, str]) -> Dict[str, List[
     ins={"models_data": AssetIn("ai4life_models_raw")},
     tags={"pipeline": "ai4life_etl", "stage": "extract"},
 )
-def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[Dict[str, Any]]]:
     """
     Detect documentation/description languages per model for schema:inLanguage.
     """
-    from etl_extractors.common.text_language_detector import detect_language_codes
+    from etl_extractors.common.text_language_detector import detect_language_predictions
 
     models_json_path, _ = models_data
     with open(models_json_path, "r", encoding="utf-8") as file_handle:
@@ -370,7 +371,7 @@ def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[
         logger.warning("Expected list of models at %s", models_json_path)
         return {}
 
-    detected: Dict[str, List[str]] = {}
+    detected: Dict[str, List[Dict[str, Any]]] = {}
     for idx, raw_model in enumerate(raw_models):
         if not isinstance(raw_model, dict):
             continue
@@ -381,7 +382,7 @@ def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[
             str(raw_model.get("intendedUse", "")).strip(),
             str(raw_model.get("name", "")).strip(),
         ]
-        detected[model_id] = detect_language_codes(
+        detected[model_id] = detect_language_predictions(
             "\n\n".join([part for part in text_parts if part]),
             min_confidence=0.75,
             max_languages=5,
@@ -389,6 +390,67 @@ def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[
 
     logger.info("Detected inLanguage values for %d AI4Life models", len(detected))
     return detected
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    ins={
+        "models_data": AssetIn("ai4life_models_raw"),
+        "inlanguage_mapping": AssetIn("ai4life_detected_inlanguage"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "extract"},
+)
+def ai4life_languages_raw(
+    models_data: Tuple[str, str],
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
+) -> str:
+    """
+    Persist detected language metadata to raw run folder as ``languages.json``.
+
+    This mirrors HF extraction behavior so language artifacts are available under
+    ``/data/1_raw/ai4life/<run>/`` before transformation.
+    """
+    _, run_folder = models_data
+
+    per_code_confidence: Dict[str, float] = {}
+    for predictions in (inlanguage_mapping or {}).values():
+        for prediction in (predictions or []):
+            if not isinstance(prediction, dict):
+                continue
+            code = str(prediction.get("code", "")).strip().lower()
+            if not code:
+                continue
+            confidence = float(prediction.get("confidence", 0.0) or 0.0)
+            per_code_confidence[code] = max(per_code_confidence.get(code, 0.0), confidence)
+
+    records: List[Dict[str, Any]] = []
+    for code in sorted(per_code_confidence.keys()):
+        language = pycountry.languages.get(alpha_2=code) or pycountry.languages.get(alpha_3=code)
+        records.append(
+            {
+                "code": code,
+                "alpha_2": getattr(language, "alpha_2", None) if language else None,
+                "alpha_3": getattr(language, "alpha_3", None) if language else None,
+                "name": getattr(language, "name", None) if language else code,
+                "scope": getattr(language, "scope", None) if language else None,
+                "type": getattr(language, "type", None) if language else None,
+                "mlentory_id": AI4LifeHelper.generate_mlentory_entity_hash_id("Language", code),
+                "enriched": language is not None,
+                "entity_type": "Language",
+                "platform": "AI4Life",
+                "extraction_metadata": {
+                    "extraction_method": "lingua-language-detector+pycountry",
+                    "confidence": per_code_confidence[code],
+                },
+            }
+        )
+
+    out_path = Path(run_folder) / "languages.json"
+    with open(out_path, "w", encoding="utf-8") as file_handle:
+        json.dump(records, file_handle, indent=2, ensure_ascii=False)
+
+    logger.info("Saved %d AI4Life languages to %s", len(records), out_path)
+    return str(out_path)
 
 
 @asset(

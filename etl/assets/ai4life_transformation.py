@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Any, Optional, Callable
 import logging
 import pandas as pd
+import pycountry
 from pydantic import BaseModel, ValidationError
 from dagster import asset, AssetIn
 from etl_extractors.hf import HFHelper
@@ -304,7 +305,7 @@ def ai4life_entity_linking(
     licenses_mapping: Dict[str, List[str]],
     tasks_mapping: Dict[str, List[str]],
     sharedby_mapping: Dict[str, List[str]],
-    inlanguage_mapping: Dict[str, List[str]],
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -355,7 +356,12 @@ def ai4life_entity_linking(
         licenses = licenses_mapping.get(model_id, []) or []
         tasks = tasks_mapping.get(model_id, []) or []
         sharedby = sharedby_mapping.get(model_id, []) or []
-        inlanguage = inlanguage_mapping.get(model_id, []) or []
+        inlanguage_predictions = inlanguage_mapping.get(model_id, []) or []
+        inlanguage_codes = [
+            str(prediction.get("code")).strip()
+            for prediction in inlanguage_predictions
+            if isinstance(prediction, dict) and str(prediction.get("code", "")).strip()
+        ]
 
         entity_linking[model_id] = {
             "datasets": [
@@ -381,7 +387,7 @@ def ai4life_entity_linking(
             ],
             "inLanguage": [
                 AI4LifeHelper.generate_mlentory_entity_hash_id("Language", x)
-                for x in inlanguage
+                for x in inlanguage_codes
             ],
             "sources": list(ai4life_catalog_source_iris),
             # "base_models": [],  # not available
@@ -523,7 +529,7 @@ def ai4life_create_translation_mapping(
     tags={"pipeline": "ai4life_etl", "stage": "transform"},
 )
 def ai4life_languages_normalized(
-    inlanguage_mapping: Dict[str, List[str]],
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -536,30 +542,61 @@ def ai4life_languages_normalized(
     output_path = Path(normalized_folder) / "languages.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    unique_codes = sorted(
-        {
-            str(code).strip()
-            for codes in (inlanguage_mapping or {}).values()
-            for code in (codes or [])
-            if isinstance(code, str) and str(code).strip()
-        }
-    )
-
     normalized_languages: List[Dict[str, Any]] = []
     validation_errors: List[Dict[str, Any]] = []
+    per_code_confidence: Dict[str, float] = {}
+    for model_predictions in (inlanguage_mapping or {}).values():
+        for prediction in (model_predictions or []):
+            if not isinstance(prediction, dict):
+                continue
+            normalized_code = str(prediction.get("code", "")).strip()
+            if not normalized_code:
+                continue
+            confidence = float(prediction.get("confidence", 0.0) or 0.0)
+            per_code_confidence[normalized_code] = max(
+                per_code_confidence.get(normalized_code, 0.0),
+                confidence,
+            )
+
+    unique_codes = sorted(per_code_confidence.keys())
 
     for idx, code in enumerate(unique_codes):
         try:
+            language_ref = pycountry.languages.get(alpha_2=code.lower())
+            if language_ref is None:
+                language_ref = pycountry.languages.get(alpha_3=code.lower())
+
+            normalized_name = getattr(language_ref, "name", None) or code
+            alternate_names: List[str] = []
+            alpha_2 = getattr(language_ref, "alpha_2", None)
+            alpha_3 = getattr(language_ref, "alpha_3", None)
+            if isinstance(alpha_2, str) and alpha_2.strip():
+                alternate_names.append(alpha_2.lower())
+            if isinstance(alpha_3, str) and alpha_3.strip() and alpha_3.lower() not in alternate_names:
+                alternate_names.append(alpha_3.lower())
+            if not alternate_names:
+                alternate_names = [code]
+
+            scope = getattr(language_ref, "scope", None)
+            lang_type = getattr(language_ref, "type", None)
+            description = None
+            if scope or lang_type:
+                parts = []
+                if scope:
+                    parts.append(str(scope))
+                if lang_type:
+                    parts.append(str(lang_type))
+                description = f"ISO language ({', '.join(parts)})"
+
             language = Language(
                 identifier=[AI4LifeHelper.generate_mlentory_entity_hash_id("Language", code)],
-                name=code,
+                name=str(normalized_name),
                 url=None,
-                alternateName=[code],
+                alternateName=alternate_names,
+                description=description,
                 extraction_metadata={
-                    "extraction_method": "description_language_detector",
-                    "confidence": 0.75,
-                    "source_identifier": code,
-                    "source_name": code,
+                    "extraction_method": "lingua-language-detector+pycountry",
+                    "confidence": per_code_confidence.get(code, 0.0),
                 },
             )
             normalized_languages.append(language.model_dump(mode="json", by_alias=True))

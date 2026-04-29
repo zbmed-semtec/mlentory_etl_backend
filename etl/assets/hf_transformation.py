@@ -326,7 +326,7 @@ def hf_entity_linking(
     licenses_mapping: Tuple[Dict[str, List[str]], str],
     base_models_mapping: Tuple[Dict[str, List[str]], str],
     languages_mapping: Tuple[Dict[str, List[str]], str],
-    readme_languages_mapping: Tuple[Dict[str, List[str]], str],
+    readme_languages_mapping: Tuple[Dict[str, List[Dict[str, object]]], str],
     tasks_mapping: Tuple[Dict[str, List[str]], str],
     sharedby_mapping: Tuple[Dict[str, List[str]], str],
     run_folder_data: Tuple[str, str],
@@ -343,7 +343,7 @@ def hf_entity_linking(
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
         languages_mapping: Tuple of ({model_id: [language codes from tags]}, run_folder)
-        readme_languages_mapping: Tuple of ({model_id: [canonical ISO codes]}, run_folder)
+        readme_languages_mapping: Tuple of ({model_id: [{code, confidence}]}, run_folder)
         tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
         base_models_mapping: Tuple of ({model_id: [base_model_ids]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
@@ -408,7 +408,11 @@ def hf_entity_linking(
             ],
             "inLanguage": [
                 HFHelper.generate_mlentory_entity_hash_id("Language", x)
-                for x in model_readme_languages.get(model_id, [])
+                for x in [
+                    str(prediction.get("code")).strip()
+                    for prediction in (model_readme_languages.get(model_id, []) or [])
+                    if isinstance(prediction, dict) and str(prediction.get("code", "")).strip()
+                ]
             ],
             "tasks": [
                 HFHelper.generate_mlentory_entity_hash_id("Task", x)
