@@ -23,6 +23,7 @@ from etl_loaders.rdf_loader import (
     build_and_persist_datasets_rdf,
     build_and_persist_defined_terms_rdf,
     build_and_persist_tasks_rdf,
+    build_and_persist_languages_rdf,
 )
 from etl_loaders.metadata_graph import export_metadata_graph_json
 from etl_loaders.rdf_store import (
@@ -401,6 +402,57 @@ def ai4life_load_tasks_to_neo4j(
         **load_stats,
     }
     rdf_report_path = rdf_run_folder / "tasks_load_report.json"
+    with open(rdf_report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    return (str(rdf_report_path), normalized_folder)
+
+
+@asset(
+    group_name="ai4life_loading",
+    ins={
+        "languages_normalized": AssetIn("ai4life_languages_normalized"),
+        "store_ready": AssetIn("ai4life_rdf_store_ready"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "load"}
+)
+def ai4life_load_languages_to_neo4j(
+    languages_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Load normalized languages as RDF triples into Neo4j."""
+    if not languages_normalized or languages_normalized == "":
+        logger.info("No languages to load (empty input)")
+        return ("", "")
+    languages_path = Path(languages_normalized)
+    if not languages_path.exists():
+        logger.warning(f"Languages JSON not found: {languages_normalized}")
+        return ("", "")
+
+    normalized_folder = str(languages_path.parent)
+    config = get_neo4j_store_config_from_env(
+        batching=store_ready.get("batching", True),
+        batch_size=store_ready.get("batch_size", 5000),
+        multithreading=store_ready.get("multithreading", True),
+        max_workers=store_ready.get("max_workers", 4),
+    )
+    normalized_path = Path(normalized_folder)
+    rdf_run_folder = normalized_path.parent.parent.parent / "3_rdf" / "ai4life" / normalized_path.name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
+    ttl_path = rdf_run_folder / "languages.ttl"
+    load_stats = build_and_persist_languages_rdf(
+        json_path=languages_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+    report = {
+        "input_file": languages_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+    rdf_report_path = rdf_run_folder / "languages_load_report.json"
     with open(rdf_report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     return (str(rdf_report_path), normalized_folder)

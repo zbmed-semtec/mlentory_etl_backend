@@ -798,7 +798,10 @@ def hf_detected_readme_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str
     Uses Lingua on stripped README/card text. May return multiple ISO codes when
     several languages exceed the confidence threshold.
     """
-    from etl_extractors.hf.readme_language_detector import detect_readme_language_codes
+    from etl_extractors.common.text_language_detector import (
+        detect_language_codes,
+        strip_markdown_frontmatter,
+    )
 
     models_json_path, run_folder = models_data
 
@@ -813,7 +816,12 @@ def hf_detected_readme_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str
         model_id = raw.get("modelId")
         if not model_id:
             continue
-        per_model[model_id] = detect_readme_language_codes(raw.get("card", "") or "")
+        card_text = strip_markdown_frontmatter(raw.get("card", "") or "")
+        per_model[model_id] = detect_language_codes(
+            card_text,
+            min_confidence=0.75,
+            max_languages=5,
+        )
 
     logger.info("Detected readme languages for %s models", len(per_model))
     return (per_model, run_folder)

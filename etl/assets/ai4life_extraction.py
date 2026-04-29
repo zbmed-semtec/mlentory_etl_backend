@@ -353,6 +353,46 @@ def ai4life_identified_sharedby(models_data: Tuple[str, str]) -> Dict[str, List[
 
 @asset(
     group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"},
+)
+def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Detect documentation/description languages per model for schema:inLanguage.
+    """
+    from etl_extractors.common.text_language_detector import detect_language_codes
+
+    models_json_path, _ = models_data
+    with open(models_json_path, "r", encoding="utf-8") as file_handle:
+        raw_models = json.load(file_handle)
+
+    if not isinstance(raw_models, list):
+        logger.warning("Expected list of models at %s", models_json_path)
+        return {}
+
+    detected: Dict[str, List[str]] = {}
+    for idx, raw_model in enumerate(raw_models):
+        if not isinstance(raw_model, dict):
+            continue
+
+        model_id = str(raw_model.get("modelId", "")).strip() or f"unknown_{idx}"
+        text_parts = [
+            str(raw_model.get("description", "")).strip(),
+            str(raw_model.get("intendedUse", "")).strip(),
+            str(raw_model.get("name", "")).strip(),
+        ]
+        detected[model_id] = detect_language_codes(
+            "\n\n".join([part for part in text_parts if part]),
+            min_confidence=0.75,
+            max_languages=5,
+        )
+
+    logger.info("Detected inLanguage values for %d AI4Life models", len(detected))
+    return detected
+
+
+@asset(
+    group_name="ai4life_enrichment",
     tags={"pipeline": "ai4life_etl"},
     ins={
         "raw_records": AssetIn("ai4life_raw_records"),

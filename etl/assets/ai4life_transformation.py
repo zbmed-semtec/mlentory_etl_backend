@@ -293,6 +293,7 @@ def ai4life_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
         "licenses_mapping": AssetIn("ai4life_identified_licenses"),
         "tasks_mapping": AssetIn("ai4life_identified_tasks"),
         "sharedby_mapping": AssetIn("ai4life_identified_sharedby"),
+        "inlanguage_mapping": AssetIn("ai4life_detected_inlanguage"),
         "run_folder_data": AssetIn("ai4life_normalized_model_folder"),
     },
     tags={"pipeline": "ai4life_etl", "stage": "transform"}
@@ -303,10 +304,11 @@ def ai4life_entity_linking(
     licenses_mapping: Dict[str, List[str]],
     tasks_mapping: Dict[str, List[str]],
     sharedby_mapping: Dict[str, List[str]],
+    inlanguage_mapping: Dict[str, List[str]],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, keywords, licenses, tasks, sharedby, sources}
+    Create entity linking mapping: model_id -> {datasets, keywords, licenses, tasks, sharedby, inLanguage, sources}
     Links identified entities with their enriched metadata.
 
     Args:
@@ -342,6 +344,7 @@ def ai4life_entity_linking(
         | set(licenses_mapping.keys())
         | set(tasks_mapping.keys())
         | set(sharedby_mapping.keys())
+        | set(inlanguage_mapping.keys())
     )
 
     entity_linking: Dict[str, Dict[str, List[str]]] = {}
@@ -352,6 +355,7 @@ def ai4life_entity_linking(
         licenses = licenses_mapping.get(model_id, []) or []
         tasks = tasks_mapping.get(model_id, []) or []
         sharedby = sharedby_mapping.get(model_id, []) or []
+        inlanguage = inlanguage_mapping.get(model_id, []) or []
 
         entity_linking[model_id] = {
             "datasets": [
@@ -375,6 +379,10 @@ def ai4life_entity_linking(
                 AI4LifeHelper.generate_mlentory_entity_hash_id("SharedBy", x)
                 for x in sharedby
             ],
+            "inLanguage": [
+                AI4LifeHelper.generate_mlentory_entity_hash_id("Language", x)
+                for x in inlanguage
+            ],
             "sources": list(ai4life_catalog_source_iris),
             # "base_models": [],  # not available
             # "languages": [],    # not available
@@ -396,6 +404,7 @@ def ai4life_entity_linking(
         "datasets_json": AssetIn("ai4life_datasets_normalized"),   # path to datasets.json (normalized)
         "keywords_json": AssetIn("ai4life_keywords_normalized"),   # path to keywords.json (normalized)
         "licenses_json": AssetIn("ai4life_licenses_normalized"),   # path to licenses.json (normalized)
+        "inlanguage_json": AssetIn("ai4life_languages_normalized"),
         "tasks_json": AssetIn("ai4life_tasks_normalized"),         # path to tasks.json (normalized)
         "sharedby_json": AssetIn("ai4life_sharedby_normalized"),   # path to sharedby.json (normalized)
         "models_json": AssetIn("ai4life_model_normalized"),        # path to mlmodels.json (normalized)
@@ -409,6 +418,7 @@ def ai4life_create_translation_mapping(
     datasets_json: str,
     keywords_json: str,
     licenses_json: str,
+    inlanguage_json: str,
     tasks_json: str,
     sharedby_json: str,
     models_json: str,
@@ -472,6 +482,7 @@ def ai4life_create_translation_mapping(
         {"label": "datasets", "path": datasets_json},
         {"label": "keywords", "path": keywords_json},
         {"label": "licenses", "path": licenses_json},
+        {"label": "inlanguage", "path": inlanguage_json},
         {"label": "tasks", "path": tasks_json},
         {"label": "sharedby", "path": sharedby_json},
         {"label": "models", "path": models_json},
@@ -500,6 +511,86 @@ def ai4life_create_translation_mapping(
         json.dump(out_map, f, indent=2, ensure_ascii=False)
 
     logger.info("Saved translation mapping (%d entries) to %s", len(out_map), output_path)
+    return str(output_path)
+
+
+@asset(
+    group_name="ai4life_transformation",
+    ins={
+        "inlanguage_mapping": AssetIn("ai4life_detected_inlanguage"),
+        "run_folder_data": AssetIn("ai4life_normalized_model_folder"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "transform"},
+)
+def ai4life_languages_normalized(
+    inlanguage_mapping: Dict[str, List[str]],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Materialize detected AI4Life inLanguage codes into normalized Language entities.
+
+    Writes ``languages.json`` into the run's normalized folder so AI4Life outputs
+    are aligned with the HF pipeline artifact layout.
+    """
+    _, normalized_folder = run_folder_data
+    output_path = Path(normalized_folder) / "languages.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    unique_codes = sorted(
+        {
+            str(code).strip()
+            for codes in (inlanguage_mapping or {}).values()
+            for code in (codes or [])
+            if isinstance(code, str) and str(code).strip()
+        }
+    )
+
+    normalized_languages: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+
+    for idx, code in enumerate(unique_codes):
+        try:
+            language = Language(
+                identifier=[AI4LifeHelper.generate_mlentory_entity_hash_id("Language", code)],
+                name=code,
+                url=None,
+                alternateName=[code],
+                extraction_metadata={
+                    "extraction_method": "description_language_detector",
+                    "confidence": 0.75,
+                    "source_identifier": code,
+                    "source_name": code,
+                },
+            )
+            normalized_languages.append(language.model_dump(mode="json", by_alias=True))
+        except Exception as exc:
+            validation_errors.append(
+                {
+                    "_index": idx,
+                    "language_code": code,
+                    "_error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    with open(output_path, "w", encoding="utf-8") as file_handle:
+        json.dump(normalized_languages, file_handle, indent=2, ensure_ascii=False)
+
+    if validation_errors:
+        errors_path = Path(normalized_folder) / "languages_normalization_errors.json"
+        with open(errors_path, "w", encoding="utf-8") as file_handle:
+            json.dump(validation_errors, file_handle, indent=2, ensure_ascii=False)
+        logger.warning(
+            "Normalized %d/%d languages with %d errors (see %s)",
+            len(normalized_languages),
+            len(unique_codes),
+            len(validation_errors),
+            errors_path,
+        )
+    else:
+        logger.info("Normalized %d/%d languages. No errors.", len(normalized_languages), len(unique_codes))
+
+    logger.info("Wrote normalized AI4Life languages to %s", output_path)
     return str(output_path)
 
 
@@ -643,6 +734,7 @@ def merge_ai4life_partial_schemas(
         licenses = links.get("licenses") or []
         tasks = links.get("tasks") or []
         sharedby = links.get("sharedby") or []
+        inlanguage = links.get("inLanguage") or []
         sources = links.get("sources") or []
 
         # Map to FAIR4ML MLModel fields
@@ -664,6 +756,8 @@ def merge_ai4life_partial_schemas(
             merged_data["mlTask"] = list(tasks)
         if sharedby:
             merged_data["sharedBy"] = str(sharedby[0])  # MLModel.sharedBy is a single string
+        if inlanguage:
+            merged_data["inLanguage"] = list(inlanguage)
         if sources:
             merged_data["source"] = str(sources[0])  # MLModel.source is a single string
 

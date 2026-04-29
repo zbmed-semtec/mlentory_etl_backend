@@ -1,22 +1,20 @@
-"""Tests for readme / model-card language detection helpers."""
+"""Tests for shared text language detection helpers."""
 
 import pytest
 
-from etl_extractors.hf.readme_language_detector import (
-    README_LANGUAGE_MAX,
-    README_LANGUAGE_MIN_CONFIDENCE,
-    detect_readme_language_codes,
-    strip_model_card_frontmatter,
+from etl_extractors.common.text_language_detector import (
+    detect_language_codes,
+    strip_markdown_frontmatter,
 )
 
 
 def test_strip_model_card_frontmatter_removes_yaml_block():
     text = "---\nlicense: apache-2.0\n---\n\n# Title\n\nHello world."
-    assert strip_model_card_frontmatter(text).startswith("# Title")
+    assert strip_markdown_frontmatter(text).startswith("# Title")
 
 
 def test_strip_model_card_frontmatter_empty():
-    assert strip_model_card_frontmatter("") == ""
+    assert strip_markdown_frontmatter("") == ""
 
 
 def test_detect_readme_language_codes_english_sentence():
@@ -25,18 +23,18 @@ def test_detect_readme_language_codes_english_sentence():
         "This model performs natural language understanding tasks on English text "
         "for classification and regression benchmarks."
     )
-    codes = detect_readme_language_codes(text)
+    codes = detect_language_codes(text, min_confidence=0.75, max_languages=5)
     assert "en" in codes
-    assert len(codes) <= README_LANGUAGE_MAX
+    assert len(codes) <= 5
 
 
 def test_detect_readme_language_codes_short_text_still_runs():
     pytest.importorskip("lingua")
-    codes = detect_readme_language_codes("Hello world.")
+    codes = detect_language_codes("Hello world.", min_confidence=0.75, max_languages=5)
     assert isinstance(codes, list)
-    assert len(codes) <= README_LANGUAGE_MAX
+    assert len(codes) <= 5
 
 
 def test_constants_document_thresholds():
-    assert README_LANGUAGE_MIN_CONFIDENCE == 0.75
-    assert README_LANGUAGE_MAX == 5
+    codes = detect_language_codes("English text", min_confidence=0.75, max_languages=5)
+    assert isinstance(codes, list)
