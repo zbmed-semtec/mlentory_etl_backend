@@ -17,6 +17,7 @@ from typing import Tuple, List, Dict, Any, Set
 import json
 import logging
 import pandas as pd
+import pycountry
 from dagster import asset, AssetIn
 from etl_extractors.ai4life.ai4life_enrichment import AI4LifeEnrichment
 from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
@@ -35,6 +36,26 @@ def ai4life_run_folder() -> str:
     run_folder.mkdir(parents=True, exist_ok=True)
     logger.info("Created AI4Life run folder: %s", run_folder)
     return str(run_folder)
+
+
+@asset(
+    group_name="ai4life_extraction",
+    tags={"pipeline": "ai4life_etl"},
+    ins={"run_folder": AssetIn("ai4life_run_folder")},
+)
+def ai4life_raw_catalog_sources(run_folder: str) -> str:
+    """
+    Write the canonical AI4Life catalog ``WebSite`` to the raw run folder.
+
+    Produces ``sources.json`` (one row) with ``mlentory_id`` and schema.org fields
+    so downstream transform/load can align ``MLModel.source`` with extraction.
+    """
+    out_path = Path(run_folder) / "sources.json"
+    payload = AI4LifeHelper.raw_ai4life_catalog_website_records()
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    logger.info("Wrote AI4Life catalog sources to %s", out_path)
+    return str(out_path)
 
 
 @asset(group_name="ai4life_extraction", tags={"pipeline": "ai4life_etl"}, ins={"run_folder": AssetIn("ai4life_run_folder")})
@@ -251,6 +272,220 @@ def ai4life_keywords_raw(
 
     logger.info("Saved %d keywords to %s", len(keywords_df), keywords_path)
     return (str(keywords_path), run_folder)
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"}
+)
+def ai4life_identified_tasks(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify ML task references per model from AI4Life model metadata.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Dict of {model_id: [task_names]}
+    """
+    models_json_path, _ = models_data
+    enrichment = AI4LifeEnrichment()
+    models_df = AI4LifeHelper.load_models_dataframe(models_json_path)
+
+    model_tasks = enrichment.identifiers["tasks"].identify_per_model(models_df)
+    logger.info("Identified tasks for %d models", len(model_tasks))
+    return model_tasks
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    tags={"pipeline": "ai4life_etl"},
+    ins={
+        "raw_records": AssetIn("ai4life_raw_records"),
+        "identified_tasks": AssetIn("ai4life_identified_tasks"),
+    },
+)
+def ai4life_tasks_raw(
+    raw_records: Dict[str, Any],
+    identified_tasks: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Build task entity records from identified AI4Life tasks and save to tasks.json.
+    Returns (tasks_json_path, run_folder).
+    """
+    run_folder = raw_records["run_folder"]
+
+    task_names: Set[str] = set()
+    for _, task_list in identified_tasks.items():
+        task_names.update([x for x in task_list if x])
+
+    if not task_names:
+        logger.info("No tasks to extract")
+        return ("", run_folder)
+
+    extractor = AI4LifeExtractor(records_data=raw_records["data"])
+    tasks_df = extractor.extract_tasks(sorted(task_names))
+
+    tasks_path = Path(run_folder) / "tasks.json"
+    tasks_df.to_json(str(tasks_path), orient="records", indent=2)
+
+    logger.info("Saved %d tasks to %s", len(tasks_df), tasks_path)
+    return (str(tasks_path), run_folder)
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"}
+)
+def ai4life_identified_sharedby(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify sharedBy entities per model from AI4Life model metadata.
+    """
+    models_json_path, _ = models_data
+    enrichment = AI4LifeEnrichment()
+    models_df = AI4LifeHelper.load_models_dataframe(models_json_path)
+
+    model_sharedby = enrichment.identifiers["sharedby"].identify_per_model(models_df)
+    logger.info("Identified sharedBy entities for %d models", len(model_sharedby))
+    return model_sharedby
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    ins={"models_data": AssetIn("ai4life_models_raw")},
+    tags={"pipeline": "ai4life_etl", "stage": "extract"},
+)
+def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Detect documentation/description languages per model for schema:inLanguage.
+    """
+    from etl_extractors.common.text_language_detector import detect_language_predictions
+
+    models_json_path, _ = models_data
+    with open(models_json_path, "r", encoding="utf-8") as file_handle:
+        raw_models = json.load(file_handle)
+
+    if not isinstance(raw_models, list):
+        logger.warning("Expected list of models at %s", models_json_path)
+        return {}
+
+    detected: Dict[str, List[Dict[str, Any]]] = {}
+    for idx, raw_model in enumerate(raw_models):
+        if not isinstance(raw_model, dict):
+            continue
+
+        model_id = str(raw_model.get("modelId", "")).strip() or f"unknown_{idx}"
+        text_parts = [
+            str(raw_model.get("description", "")).strip(),
+            str(raw_model.get("intendedUse", "")).strip(),
+            str(raw_model.get("name", "")).strip(),
+        ]
+        detected[model_id] = detect_language_predictions(
+            "\n\n".join([part for part in text_parts if part]),
+            min_confidence=0.75,
+            max_languages=5,
+        )
+
+    logger.info("Detected inLanguage values for %d AI4Life models", len(detected))
+    return detected
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    ins={
+        "models_data": AssetIn("ai4life_models_raw"),
+        "inlanguage_mapping": AssetIn("ai4life_detected_inlanguage"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "extract"},
+)
+def ai4life_languages_raw(
+    models_data: Tuple[str, str],
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
+) -> str:
+    """
+    Persist detected language metadata to raw run folder as ``languages.json``.
+
+    This mirrors HF extraction behavior so language artifacts are available under
+    ``/data/1_raw/ai4life/<run>/`` before transformation.
+    """
+    _, run_folder = models_data
+
+    per_code_confidence: Dict[str, float] = {}
+    for predictions in (inlanguage_mapping or {}).values():
+        for prediction in (predictions or []):
+            if not isinstance(prediction, dict):
+                continue
+            code = str(prediction.get("code", "")).strip().lower()
+            if not code:
+                continue
+            confidence = float(prediction.get("confidence", 0.0) or 0.0)
+            per_code_confidence[code] = max(per_code_confidence.get(code, 0.0), confidence)
+
+    records: List[Dict[str, Any]] = []
+    for code in sorted(per_code_confidence.keys()):
+        language = pycountry.languages.get(alpha_2=code) or pycountry.languages.get(alpha_3=code)
+        records.append(
+            {
+                "code": code,
+                "alpha_2": getattr(language, "alpha_2", None) if language else None,
+                "alpha_3": getattr(language, "alpha_3", None) if language else None,
+                "name": getattr(language, "name", None) if language else code,
+                "scope": getattr(language, "scope", None) if language else None,
+                "type": getattr(language, "type", None) if language else None,
+                "mlentory_id": AI4LifeHelper.generate_mlentory_entity_hash_id("Language", code),
+                "enriched": language is not None,
+                "entity_type": "Language",
+                "platform": "AI4Life",
+                "extraction_metadata": {
+                    "extraction_method": "lingua-language-detector+pycountry",
+                    "confidence": per_code_confidence[code],
+                },
+            }
+        )
+
+    out_path = Path(run_folder) / "languages.json"
+    with open(out_path, "w", encoding="utf-8") as file_handle:
+        json.dump(records, file_handle, indent=2, ensure_ascii=False)
+
+    logger.info("Saved %d AI4Life languages to %s", len(records), out_path)
+    return str(out_path)
+
+
+@asset(
+    group_name="ai4life_enrichment",
+    tags={"pipeline": "ai4life_etl"},
+    ins={
+        "raw_records": AssetIn("ai4life_raw_records"),
+        "identified_sharedby": AssetIn("ai4life_identified_sharedby"),
+    },
+)
+def ai4life_sharedby_raw(
+    raw_records: Dict[str, Any],
+    identified_sharedby: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Build sharedBy entity records and save to sharedby.json.
+    Returns (sharedby_json_path, run_folder).
+    """
+    run_folder = raw_records["run_folder"]
+    sharedby_names: Set[str] = set()
+    for _, names in identified_sharedby.items():
+        sharedby_names.update([x for x in names if x])
+
+    if not sharedby_names:
+        logger.info("No sharedBy entities to extract")
+        return ("", run_folder)
+
+    extractor = AI4LifeExtractor(records_data=raw_records["data"])
+    sharedby_df = extractor.extract_sharedby(sorted(sharedby_names))
+
+    sharedby_path = Path(run_folder) / "sharedby.json"
+    sharedby_df.to_json(str(sharedby_path), orient="records", indent=2)
+
+    logger.info("Saved %d sharedBy entities to %s", len(sharedby_df), sharedby_path)
+    return (str(sharedby_path), run_folder)
 
 
 # # @asset(group_name="ai4life", tags={"pipeline": "ai4life_etl"}, ins={"raw_data": AssetIn("ai4life_raw_records")})

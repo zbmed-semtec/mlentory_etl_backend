@@ -1,8 +1,8 @@
 """
-HuggingFace Elasticsearch Index Loader.
+Elasticsearch index loader utilities for normalized FAIR4ML models.
 
-This module defines a basic Elasticsearch DSL `Document` for HF models and
-utilities to index normalized FAIR4ML HF models into Elasticsearch.
+This module defines a reusable Elasticsearch DSL ``ModelDocument`` and helper
+functions for indexing models from multiple sources (e.g., HF, AI4Life).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from elasticsearch_dsl import Document, Keyword, Text, connections
+from elasticsearch_dsl import Date, Document, Keyword, Text, connections
 
 from etl_loaders.elasticsearch_store import (
     ElasticsearchConfig,
@@ -24,10 +24,10 @@ from etl_loaders.load_helpers import LoadHelpers
 logger = logging.getLogger(__name__)
 
 
-class HFModelDocument(Document):
-    """Minimal HF model document for search indexing."""
+class ModelDocument(Document):
+    """Minimal model document for search indexing."""
 
-    db_identifier = Keyword(multi=True)
+    db_identifier = Keyword()
     name = Text(fields={"raw": Keyword()})
     description = Text()
     shared_by = Keyword()
@@ -35,10 +35,15 @@ class HFModelDocument(Document):
     ml_tasks = Keyword(multi=True)
     keywords = Keyword(multi=True)
     datasets = Keyword(multi=True)
-    platform = Keyword()
+    source = Keyword()
+    url = Keyword(multi=True)
+    readme = Keyword()
+    datecreated = Date()
+    datemodified = Date()
+    inLanguage = Keyword(multi=True)
 
     class Index:
-        # Default name; actual index is set from env via HF_MODELS_INDEX
+        # Default name; actual index is configured by caller/env.
         name = "hf_models"
         settings = {"number_of_shards": 1, "number_of_replicas": 0}
 
@@ -52,9 +57,15 @@ def _extract_list(value: Any) -> List[str]:
     return [str(value)]
 
 
-def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_mapping: Dict[str, str]) -> HFModelDocument:
+def _extract_w3id_identifiers(value: Any) -> List[str]:
+    """Normalize identifier values and keep only w3id URIs."""
+    identifiers = _extract_list(value)
+    return [identifier for identifier in identifiers if identifier.startswith("https://w3id.org/")]
+
+
+def build_model_document(model: Dict[str, Any], index_name: str, translation_mapping: Dict[str, str]) -> ModelDocument:
     """
-    Create `HFModelDocument` from a normalized FAIR4ML model dict.
+    Create `ModelDocument` from a normalized FAIR4ML model dict.
     
     Args:
         model: Normalized FAIR4ML model dict.
@@ -62,10 +73,15 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
         translation_mapping: Dictionary of URIs to human readable names.
 
     Returns:
-        `HFModelDocument` object.
+        `ModelDocument` object.
     """
     
     identifier = model.get("https://schema.org/identifier") or LoadHelpers.mint_subject(model)
+    normalized_identifiers = _extract_list(identifier)
+    w3id_identifiers = _extract_w3id_identifiers(identifier)
+    doc_id = w3id_identifiers[0] if w3id_identifiers else (
+        normalized_identifiers[0] if normalized_identifiers else LoadHelpers.mint_subject(model)
+    )
     name = model.get("https://schema.org/name")
     description = model.get("https://schema.org/description")
     shared_by = model.get("https://w3id.org/fair4ml/sharedBy")
@@ -78,6 +94,12 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
 
     ml_tasks = model.get("https://w3id.org/fair4ml/mlTask") or []
     keywords = model.get("https://schema.org/keywords") or []
+    source_iri = model.get("https://schema.org/source")
+    url = model.get("https://schema.org/url") or []
+    readme = model.get("https://w3id.org/codemeta/readme")
+    datecreated = model.get("https://schema.org/dateCreated")
+    datemodified = model.get("https://schema.org/dateModified")
+    in_language = model.get("https://schema.org/inLanguage") or []
     
     
     dataset_fields = [
@@ -101,16 +123,18 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
                 datasets_set.add(str(values))
     datasets = list(datasets_set)
     
-    logger.debug(f"Datasets!!!!!!!!!!!!!!:\n {datasets}")
+    logger.debug("Resolved model dataset links: %s", datasets)
     
     # Translate entities to human readable names
     datasets = [translation_mapping.get(dataset, dataset) for dataset in datasets]
     ml_tasks = [translation_mapping.get(ml_task, ml_task) for ml_task in ml_tasks]
     keywords = [translation_mapping.get(keyword, keyword) for keyword in keywords]
     license_value = translation_mapping.get(license_value, license_value)
-
-    doc = HFModelDocument(
-        db_identifier=[str(id) for id in identifier],
+    shared_by = translation_mapping.get(shared_by, shared_by)
+    source_name = translation_mapping.get(source_iri, source_iri)
+    in_language = [translation_mapping.get(lang, lang) for lang in in_language]
+    doc = ModelDocument(
+        db_identifier=w3id_identifiers,
         name=str(name) if name is not None else "",
         description=str(description) if description is not None else "",
         shared_by=str(shared_by) if shared_by is not None else "Unknown",
@@ -118,8 +142,13 @@ def build_hf_model_document(model: Dict[str, Any], index_name: str, translation_
         ml_tasks=_extract_list(ml_tasks),
         keywords=_extract_list(keywords),
         datasets=_extract_list(datasets),
-        platform="Hugging Face",
-        meta={"id": [str(id) for id in identifier]},
+        source=str(source_name) if source_name is not None else "Unknown",
+        url=_extract_list(url),
+        readme=str(readme) if readme is not None else "",
+        datecreated=datecreated,
+        datemodified=datemodified,
+        inLanguage=_extract_list(in_language),
+        meta={"id": str(doc_id)},
     )
 
     # Ensure index name is bound correctly
@@ -132,7 +161,7 @@ def index_hf_models(
     translation_mapping_path: str,
     es_config: Optional[ElasticsearchConfig] = None,
 ) -> Dict[str, Any]:
-    """Index normalized HF models into Elasticsearch.
+    """Index normalized models into Elasticsearch.
 
     Args:
         json_path: Path to normalized models JSON (mlmodels.json).
@@ -147,14 +176,14 @@ def index_hf_models(
     if not json_file.exists():
         raise FileNotFoundError(f"Normalized models file not found for ES indexing: {json_path}")
 
-    logger.info("Loading normalized HF models from %s for Elasticsearch indexing", json_path)
+    logger.info("Loading normalized models from %s for Elasticsearch indexing", json_path)
     with open(json_file, "r", encoding="utf-8") as f:
         models = json.load(f)
     
     if not isinstance(models, list):
         raise ValueError(f"Expected list of models, got {type(models)}")
 
-    logger.info("Loaded %s normalized HF models", len(models))
+    logger.info("Loaded %s normalized models", len(models))
     
     logger.info("Loading translation mapping from %s", translation_mapping_path)
     with open(translation_mapping_path, "r", encoding="utf-8") as f:
@@ -171,32 +200,32 @@ def index_hf_models(
     connections.add_connection("default", es_client)
 
     # Ensure index and mapping exist
-    logger.info("Ensuring HF models index exists: %s", config.hf_models_index)
-    HFModelDocument.init(index=config.hf_models_index, using=es_client)
+    logger.info("Ensuring models index exists: %s", config.hf_models_index)
+    ModelDocument.init(index=config.hf_models_index, using=es_client)
 
     indexed = 0
     errors = 0
 
     for idx, model in enumerate(models):
         try:
-            doc = build_hf_model_document(model, config.hf_models_index, translation_mapping)
+            doc = build_model_document(model, config.hf_models_index, translation_mapping)
             doc.save(using=es_client, refresh=False)
             indexed += 1
         except Exception as exc:
             errors += 1
             identifier = model.get("https://schema.org/identifier", f"unknown_{idx}")
             logger.error(
-                "Error indexing HF model %s into Elasticsearch: %s",
+                "Error indexing model %s into Elasticsearch: %s",
                 identifier,
                 exc,
                 exc_info=True,
             )
 
         if (idx + 1) % 100 == 0:
-            logger.info("Indexed %s/%s HF models into Elasticsearch", idx + 1, len(models))
+            logger.info("Indexed %s/%s models into Elasticsearch", idx + 1, len(models))
 
     logger.info(
-        "Completed HF Elasticsearch indexing: %s indexed, %s errors, index=%s",
+        "Completed Elasticsearch indexing: %s indexed, %s errors, index=%s",
         indexed,
         errors,
         config.hf_models_index,
@@ -240,9 +269,9 @@ def _get_names_from_uris(models: List[Dict[str, Any]]) -> Dict[str, str]:
 def clean_hf_models_index(
     es_config: Optional[ElasticsearchConfig] = None,
 ) -> Dict[str, Any]:
-    """Clean the Hugging Face models Elasticsearch index.
+    """Clean the configured models Elasticsearch index.
 
-    This removes all documents from the HF models index configured via
+    This removes all documents from the models index configured via
     ``ELASTIC_HF_MODELS_INDEX`` while keeping the index and its mappings.
     """
     config = es_config or ElasticsearchConfig.from_env()

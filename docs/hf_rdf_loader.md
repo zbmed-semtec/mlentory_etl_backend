@@ -312,12 +312,12 @@ graph.close(True)
 
 Run unit tests:
 ```bash
-pytest tests/loaders/test_hf_rdf_loader.py -v
+pytest tests/loaders/test_rdf_loader.py -v
 ```
 
 Run integration tests (requires Neo4j):
 ```bash
-pytest tests/loaders/test_hf_rdf_loader.py -v -m integration
+pytest tests/loaders/test_rdf_loader.py -v -m integration
 ```
 
 ## Future Enhancements (v2+)

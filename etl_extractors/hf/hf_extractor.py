@@ -15,6 +15,7 @@ from .clients import (
     HFKeywordClient,
     HFLanguagesClient,
     HFTasksClient,
+    HFSharedByClient,
 )
 
 
@@ -37,6 +38,7 @@ class HFExtractor:
         keyword_client: Optional[HFKeywordClient] = None,
         languages_client: Optional[HFLanguagesClient] = None,
         tasks_client: Optional[HFTasksClient] = None,
+        sharedby_client: Optional[HFSharedByClient] = None,
     ) -> None:
         self.models_client = models_client or HFModelsClient()
         self.datasets_client = datasets_client or HFDatasetsClient()
@@ -45,6 +47,7 @@ class HFExtractor:
         self.keyword_client = keyword_client or HFKeywordClient()
         self.languages_client = languages_client or HFLanguagesClient()
         self.tasks_client = tasks_client or HFTasksClient()
+        self.sharedby_client = sharedby_client or HFSharedByClient()
 
     def extract_models(
         self,
@@ -124,10 +127,16 @@ class HFExtractor:
     def extract_languages(
         self,
         language_codes: List[str],
+        language_confidences: Optional[Dict[str, float]] = None,
+        language_extraction_methods: Optional[Dict[str, str]] = None,
         save_csv: bool = False,
         output_root: Path | None = None,
     ) -> (pd.DataFrame, Path):
-        df = self.languages_client.get_languages_metadata(language_codes=language_codes)
+        df = self.languages_client.get_languages_metadata(
+            language_codes=language_codes,
+            language_confidences=language_confidences,
+            language_extraction_methods=language_extraction_methods,
+        )
         json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="languages")
         return df, json_path
 
@@ -138,6 +147,16 @@ class HFExtractor:
     ) -> (pd.DataFrame, Path):
         df = self.tasks_client.get_tasks_metadata()
         json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="tasks")
+        return df, json_path
+
+    def extract_sharedby(
+        self,
+        names: List[str],
+        save_csv: bool = False,
+        output_root: Path | None = None,
+    ) -> (pd.DataFrame, Path):
+        df = self.sharedby_client.get_sharedby_metadata(names=names)
+        json_path = self.save_dataframe_to_json(df, output_root=output_root, save_csv=save_csv, suffix="sharedby")
         return df, json_path
     
     def save_dataframe_to_json(self, df: pd.DataFrame, output_root: Path | None = None, save_csv: bool = False, suffix: str = "hf_models") -> Path:

@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Set, Tuple, List, Optional, Dict
+from typing import Any, Set, Tuple, List, Optional, Dict
 import logging
 
 import pandas as pd
@@ -68,6 +68,32 @@ def hf_run_folder() -> str:
     
     logger.info(f"Created run folder: {run_folder}")
     return str(run_folder)
+
+
+@asset(
+    group_name="hf",
+    ins={"run_folder": AssetIn("hf_run_folder")},
+    tags={"pipeline": "hf_etl", "stage": "extract"},
+)
+def hf_raw_catalog_sources(run_folder: str) -> str:
+    """
+    Write the canonical Hugging Face catalog ``WebSite`` to the raw run folder.
+
+    Produces ``sources.json`` (one row) with ``mlentory_id`` and schema.org fields
+    so downstream transform/load can align ``MLModel.source`` with extraction.
+
+    Args:
+        run_folder: Path from ``hf_run_folder`` (``/data/1_raw/hf/<run>/``).
+
+    Returns:
+        Absolute path to ``sources.json``.
+    """
+    out_path = Path(run_folder) / "sources.json"
+    payload = HFHelper.raw_hf_catalog_website_records()
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    logger.info("Wrote HF catalog sources to %s", out_path)
+    return str(out_path)
 
 
 @asset(
@@ -762,10 +788,57 @@ def hf_identified_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, Lis
 
 @asset(
     group_name="hf_enrichment",
-    ins={"languages_data": AssetIn("hf_identified_languages")},
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl", "stage": "extract"},
+)
+def hf_detected_readme_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[Dict[str, object]]], str]:
+    """
+    Detect documentation languages per model from model card markdown (schema:inLanguage).
+
+    Uses Lingua on stripped README/card text. May return multiple ISO codes when
+    several languages exceed the confidence threshold.
+    """
+    from etl_extractors.common.text_language_detector import (
+        detect_language_predictions,
+        strip_markdown_frontmatter,
+    )
+
+    models_json_path, run_folder = models_data
+
+    with open(models_json_path, "r", encoding="utf-8") as f:
+        raw_models = json.load(f)
+    if not isinstance(raw_models, list):
+        logger.warning("Expected list of models at %s", models_json_path)
+        return ({}, run_folder)
+
+    per_model: Dict[str, List[Dict[str, object]]] = {}
+    for raw in raw_models:
+        model_id = raw.get("modelId")
+        if not model_id:
+            continue
+        card_text = strip_markdown_frontmatter(raw.get("card", "") or "")
+        per_model[model_id] = detect_language_predictions(
+            card_text,
+            min_confidence=0.75,
+            max_languages=5,
+        )
+
+    logger.info("Detected readme languages for %s models", len(per_model))
+    return (per_model, run_folder)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={
+        "languages_data": AssetIn("hf_identified_languages"),
+        "readme_languages_data": AssetIn("hf_detected_readme_languages"),
+    },
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
-def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> str:
+def hf_enriched_languages(
+    languages_data: Tuple[Dict[str, List[str]], str],
+    readme_languages_data: Tuple[Dict[str, List[Dict[str, object]]], str],
+) -> str:
     """
     Enrich language codes referenced by models using the pycountry dataset.
 
@@ -777,10 +850,32 @@ def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> s
     """
 
     model_languages_dict, run_folder = languages_data
+    readme_languages_dict, _ = readme_languages_data
     language_codes: Set[str] = set()
+    language_confidences: Dict[str, float] = {}
+    language_extraction_methods: Dict[str, str] = {}
 
     for languages in model_languages_dict.values():
-        language_codes.update(filter(None, languages))
+        for code in filter(None, languages):
+            code_norm = str(code).strip()
+            if not code_norm:
+                continue
+            language_codes.add(code_norm)
+            # supportedLanguages from HF tags/API -> pycountry baseline metadata
+            language_extraction_methods.setdefault(code_norm, "pycountry")
+    for predictions in readme_languages_dict.values():
+        for prediction in (predictions or []):
+            if not isinstance(prediction, dict):
+                continue
+            code_norm = str(prediction.get("code", "")).strip()
+            if not code_norm:
+                continue
+            language_codes.add(code_norm)
+            confidence = float(prediction.get("confidence", 0.0) or 0.0)
+            prev = language_confidences.get(code_norm, 0.0)
+            language_confidences[code_norm] = max(prev, confidence)
+            # inLanguage detected by Lingua then normalized by pycountry
+            language_extraction_methods[code_norm] = "lingua-language-detector+pycountry"
 
     if not language_codes:
         logger.info("No languages to extract")
@@ -792,6 +887,8 @@ def hf_enriched_languages(languages_data: Tuple[Dict[str, List[str]], str]) -> s
     output_root = Path(run_folder).parent.parent  # Go up to /data
     _, json_path = extractor.extract_languages(
         language_codes=sorted(language_codes),
+        language_confidences=language_confidences,
+        language_extraction_methods=language_extraction_methods,
         output_root=output_root,
     )
 
@@ -872,4 +969,67 @@ def hf_enriched_tasks(tasks_data: Tuple[Dict[str, List[str]], str]) -> str:
     Path(raw_path).unlink(missing_ok=True)
 
     logger.info("Tasks saved to %s", final_path)
+    return str(final_path)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"models_data": AssetIn("hf_add_ancestor_models")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_identified_sharedby(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
+    """
+    Identify sharedBy entities (publishers/owners) referenced by each model.
+
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+
+    Returns:
+        Tuple of ({model_id: [sharedby_names]}, run_folder)
+    """
+    models_json_path, run_folder = models_data
+    enrichment = HFEnrichment()
+    models_df = HFHelper.load_models_dataframe(models_json_path)
+
+    model_sharedby = enrichment.identifiers["sharedby"].identify_per_model(models_df)
+    logger.info("Identified sharedBy entities for %d models", len(model_sharedby))
+    return (model_sharedby, run_folder)
+
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"sharedby_data": AssetIn("hf_identified_sharedby")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_enriched_sharedby(sharedby_data: Tuple[Dict[str, List[str]], str]) -> str:
+    """
+    Build metadata records for identified sharedBy entities.
+
+    Args:
+        sharedby_data: Tuple of ({model_id: [sharedby_names]}, run_folder)
+
+    Returns:
+        Path to the saved sharedBy JSON file.
+    """
+    model_sharedby_dict, run_folder = sharedby_data
+    names: Set[str] = set()
+
+    for sharedby_values in model_sharedby_dict.values():
+        names.update(filter(None, sharedby_values))
+
+    if not names:
+        logger.info("No sharedBy entities to extract")
+        return ""
+
+    extractor = HFExtractor()
+    output_root = Path(run_folder).parent.parent
+    _, json_path = extractor.extract_sharedby(
+        names=sorted(names),
+        output_root=output_root,
+    )
+
+    final_path = Path(run_folder) / "sharedby.json"
+    Path(json_path).rename(final_path)
+
+    logger.info("SharedBy entities saved to %s", final_path)
     return str(final_path)

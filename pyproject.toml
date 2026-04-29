@@ -58,6 +58,7 @@ langchain-core= "0.3.34"
 langchain-openai = "0.3.5"
 SPARQLWrapper = "^2.0.0"
 faiss-cpu = "^1.7.4"
+lingua-language-detector = ">=1.4.2,<2"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

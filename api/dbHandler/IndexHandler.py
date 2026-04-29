@@ -228,7 +228,7 @@ class IndexHandler:
                 index_model_entity.relatedDatasets.update(value)
             elif "keywords" in key:
                 index_model_entity.keywords.extend(value)
-            elif "fineTunedFrom" in key:
+            elif "baseModel" in key:
                 index_model_entity.baseModels.extend(value)
             elif "dateCreated" in key:
                 index_model_entity.dateCreated = value[0]
@@ -285,7 +285,7 @@ class IndexHandler:
                 index_model_entity.relatedDatasets.update(value)
             elif "keywords" in key:
                 index_model_entity.keywords.extend(value)
-            elif "fineTunedFrom" in key:
+            elif "baseModel" in key:
                 index_model_entity.baseModels.extend(value)
             elif "dateCreated" in key:
                 index_model_entity.dateCreated = value[0]

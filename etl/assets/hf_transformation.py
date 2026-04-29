@@ -5,7 +5,7 @@ Pipeline:
 1) Read raw HF models from extraction (hf_models_with_ancestors.json)
 2) Create separate assets for each property group:
    - hf_extract_basic_properties: Core identification, temporal, URLs
-   - hf_extract_keywords_language: Tags → keywords, inLanguage
+   - hf_extract_keywords_language: Tags → keywords, supportedLanguages
    - hf_extract_task_category: pipeline_tag, library_name → mlTask, modelCategory
    - hf_extract_license: License information
    - hf_extract_lineage: Base model relationships
@@ -98,6 +98,22 @@ def _load_entity_records(json_path: str, entity_label: str) -> Optional[List[Dic
     return records
 
 
+def _hf_catalog_website_mlentory_iris() -> List[str]:
+    """
+    mlentory IRIs for the Hugging Face catalog WebSite (one node, same on every model).
+
+    Same payload as extract-time ``sources.json`` via :meth:`HFHelper.raw_hf_catalog_website_records`.
+    """
+    uri_prefix = "https://w3id.org/mlentory/mlentory_graph/"
+    rows = HFHelper.raw_hf_catalog_website_records()
+    if not rows:
+        return []
+    identifiers = rows[0].get("https://schema.org/identifier") or []
+    if not isinstance(identifiers, list):
+        return []
+    return [u for u in identifiers if isinstance(u, str) and u.startswith(uri_prefix)]
+
+
 def _write_normalization_results(
     entity_label: str,
     normalized_folder: str,
@@ -166,6 +182,48 @@ def hf_normalized_run_folder(models_data: Tuple[str, str]) -> Tuple[str, str]:
     
     logger.info(f"Created normalized run folder: {normalized_run_folder}")
     return (str(raw_data_json_path), str(normalized_run_folder))
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={"run_folder_data": AssetIn("hf_normalized_run_folder")},
+    tags={"pipeline": "hf_etl", "stage": "transform"},
+)
+def hf_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
+    """
+    Bring the Hugging Face catalog ``WebSite`` from raw extract into this run's
+    normalized folder.
+
+    **Why:** Extraction already wrote ``1_raw/hf/<run>/sources.json``. Transform
+    keeps a copy under ``2_normalized/hf/<run>/sources.json`` so downstream
+    assets can read one folder for all normalized entity files (same idea as
+    ``licenses.json`` later in the pipeline).
+
+    **What:** If the raw file exists, copy its JSON; otherwise build the same
+    payload via :meth:`HFHelper.raw_hf_catalog_website_records` so older raw
+    runs still work.
+    """
+    raw_models_path, normalized_folder = run_folder_data
+    raw_run = Path(raw_models_path).parent
+    raw_sources = raw_run / "sources.json"
+    out_path = Path(normalized_folder) / "sources.json"
+
+    if raw_sources.exists():
+        with open(raw_sources, "r", encoding="utf-8") as file_handle:
+            payload = json.load(file_handle)
+        logger.info("Loaded HF catalog sources from raw run: %s", raw_sources)
+    else:
+        logger.warning(
+            "Raw sources.json missing at %s; using HFHelper catalog payload",
+            raw_sources,
+        )
+        payload = HFHelper.raw_hf_catalog_website_records()
+
+    with open(out_path, "w", encoding="utf-8") as file_handle:
+        json.dump(payload, file_handle, indent=2, ensure_ascii=False, default=_json_default)
+
+    logger.info("Wrote normalized HF sources to %s", out_path)
+    return str(out_path)
 
 
 @asset(
@@ -254,7 +312,9 @@ def hf_extract_basic_properties(
         "licenses_mapping": AssetIn("hf_identified_licenses"),
         "base_models_mapping": AssetIn("hf_identified_base_models"),
         "languages_mapping": AssetIn("hf_identified_languages"),
+        "readme_languages_mapping": AssetIn("hf_detected_readme_languages"),
         "tasks_mapping": AssetIn("hf_identified_tasks"),
+        "sharedby_mapping": AssetIn("hf_identified_sharedby"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
     tags={"pipeline": "hf_etl", "stage": "transform"}
@@ -266,19 +326,24 @@ def hf_entity_linking(
     licenses_mapping: Tuple[Dict[str, List[str]], str],
     base_models_mapping: Tuple[Dict[str, List[str]], str],
     languages_mapping: Tuple[Dict[str, List[str]], str],
+    readme_languages_mapping: Tuple[Dict[str, List[Dict[str, object]]], str],
     tasks_mapping: Tuple[Dict[str, List[str]], str],
+    sharedby_mapping: Tuple[Dict[str, List[str]], str],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, articles, keywords, licenses, base_models, languages, tasks}
-    Links identified entities with their enriched metadata.
+    Build model_id -> linked MLentory IRIs for datasets, keywords, languages, tasks, etc.
+
+    ``languages`` maps tag-derived codes to Language IRIs (supportedLanguages).
+    ``inLanguage`` maps Lingua + pycountry-normalized readme languages to the same IRIs.
 
     Args:
         datasets_mapping: Tuple of ({model_id: [dataset_names]}, run_folder)
         articles_mapping: Tuple of ({model_id: [arxiv_ids]}, run_folder)
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
-        languages_mapping: Tuple of ({model_id: [language_ids]}, run_folder)
+        languages_mapping: Tuple of ({model_id: [language codes from tags]}, run_folder)
+        readme_languages_mapping: Tuple of ({model_id: [{code, confidence}]}, run_folder)
         tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
         base_models_mapping: Tuple of ({model_id: [base_model_ids]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
@@ -286,7 +351,9 @@ def hf_entity_linking(
     Returns:
         Path to saved entity linking JSON file
     """
-    _, normalized_folder = run_folder_data
+    models_json_path, normalized_folder = run_folder_data
+
+    hf_catalog_website_mlentory_iris = _hf_catalog_website_mlentory_iris()
 
     # Extract the model-entity mappings from the tuples
     model_datasets = datasets_mapping[0]
@@ -295,22 +362,67 @@ def hf_entity_linking(
     model_licenses = licenses_mapping[0]
     model_base_models = base_models_mapping[0]
     model_languages = languages_mapping[0]
+    model_readme_languages = readme_languages_mapping[0]
     model_tasks = tasks_mapping[0]
-    # Create the final linking structure
-    entity_linking = {}
+    model_sharedby = sharedby_mapping[0]
 
-    logger.info(f"base models: {model_base_models}")
-    logger.info(f"base models: {model_base_models.keys()}")
-    
-    for model_id in model_datasets.keys():
+    with open(models_json_path, "r", encoding="utf-8") as file_handle:
+        raw_models = json.load(file_handle)
+    if not isinstance(raw_models, list):
+        logger.warning("Expected list of models at %s", models_json_path)
+        model_ids_ordered: List[str] = []
+    else:
+        model_ids_ordered = [
+            mid for mid in (row.get("modelId") for row in raw_models) if mid
+        ]
+
+    entity_linking: Dict[str, Dict[str, Any]] = {}
+
+    logger.info("Building entity linking for %s models", len(model_ids_ordered))
+
+    for model_id in model_ids_ordered:
         model_entities = {
-            "datasets": [HFHelper.generate_mlentory_entity_hash_id('Dataset', x) for x in model_datasets[model_id]],
-            "articles": [HFHelper.generate_mlentory_entity_hash_id('Article', x) for x in model_articles[model_id]],
-            "keywords": [HFHelper.generate_mlentory_entity_hash_id('Keyword', x) for x in model_keywords[model_id]],
-            "licenses": [HFHelper.generate_mlentory_entity_hash_id('License', x) for x in model_licenses[model_id]],
-            "base_models": [HFHelper.generate_mlentory_entity_hash_id('Model', x) for x in model_base_models[model_id]],
-            "languages": [HFHelper.generate_mlentory_entity_hash_id('Language', x) for x in model_languages[model_id]],
-            "tasks": [HFHelper.generate_mlentory_entity_hash_id('Task', x) for x in model_tasks[model_id]],
+            "datasets": [
+                HFHelper.generate_mlentory_entity_hash_id("Dataset", x)
+                for x in model_datasets.get(model_id, [])
+            ],
+            "articles": [
+                HFHelper.generate_mlentory_entity_hash_id("Article", x)
+                for x in model_articles.get(model_id, [])
+            ],
+            "keywords": [
+                HFHelper.generate_mlentory_entity_hash_id("Keyword", x)
+                for x in model_keywords.get(model_id, [])
+            ],
+            "licenses": [
+                HFHelper.generate_mlentory_entity_hash_id("License", x)
+                for x in model_licenses.get(model_id, [])
+            ],
+            "base_models": [
+                HFHelper.generate_mlentory_entity_hash_id("Model", x)
+                for x in model_base_models.get(model_id, [])
+            ],
+            "languages": [
+                HFHelper.generate_mlentory_entity_hash_id("Language", x)
+                for x in model_languages.get(model_id, [])
+            ],
+            "inLanguage": [
+                HFHelper.generate_mlentory_entity_hash_id("Language", x)
+                for x in [
+                    str(prediction.get("code")).strip()
+                    for prediction in (model_readme_languages.get(model_id, []) or [])
+                    if isinstance(prediction, dict) and str(prediction.get("code", "")).strip()
+                ]
+            ],
+            "tasks": [
+                HFHelper.generate_mlentory_entity_hash_id("Task", x)
+                for x in model_tasks.get(model_id, [])
+            ],
+            "sharedby": [
+                HFHelper.generate_mlentory_entity_hash_id("SharedBy", x)
+                for x in model_sharedby.get(model_id, [])
+            ],
+            "sources": list(hf_catalog_website_mlentory_iris),
         }
 
         entity_linking[model_id] = model_entities
@@ -333,6 +445,8 @@ def hf_entity_linking(
         "languages_json": AssetIn("hf_languages_normalized"),
         "models_json": AssetIn("hf_models_normalized"),
         "tasks_json": AssetIn("hf_tasks_normalized"),
+        "sharedby_json": AssetIn("hf_sharedby_normalized"),
+        "sources_json": AssetIn("hf_sources_normalized"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
     },
     tags={"pipeline": "hf_etl", "stage": "transform"}
@@ -345,6 +459,8 @@ def hf_create_translation_mapping(
     models_json: Tuple[str, str],
     languages_json: str,
     tasks_json: str,
+    sharedby_json: str,
+    sources_json: str,
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -358,6 +474,7 @@ def hf_create_translation_mapping(
         models_json: Tuple of (models_json_path, normalized_folder).
         languages_json: Path to enriched languages JSON file.
         tasks_json: Path to enriched tasks JSON file.
+        sources_json: Path to normalized HF sources JSON file.
         run_folder_data: Tuple of (models_json_path, normalized_folder).
 
     Returns:
@@ -405,6 +522,14 @@ def hf_create_translation_mapping(
         {
             "label": "tasks",
             "path": tasks_json,
+        },
+        {
+            "label": "sharedby",
+            "path": sharedby_json,
+        },
+        {
+            "label": "sources",
+            "path": sources_json,
         },
     ]
 
@@ -576,15 +701,18 @@ def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]],
 
                 # Add enriched datasets, articles, keywords, licenses
                 merged["license"] = model_entities["licenses"][0] if len(model_entities["licenses"]) > 0 else None
+                merged["source"] = model_entities["sources"][0] if len(model_entities["sources"]) > 0 else None
                 merged["trainedOn"] = model_entities["datasets"]
                 merged["testedOn"] = model_entities["datasets"]
                 merged["validatedOn"] = model_entities["datasets"]
                 merged["evaluatedOn"] = model_entities["datasets"]
                 merged["referencePublication"] = model_entities["articles"]
                 merged["keywords"] = model_entities["keywords"]
-                merged["fineTunedFrom"] = model_entities["base_models"]
-                merged["inLanguage"] = model_entities["languages"]
+                merged["baseModel"] = model_entities["base_models"]
+                merged["supportedLanguages"] = model_entities["languages"]
+                merged["inLanguage"] = model_entities.get("inLanguage", [])
                 merged["mlTask"] = model_entities["tasks"]
+                merged["sharedBy"] = model_entities["sharedby"][0] if len(model_entities["sharedby"]) > 0 else merged.get("sharedBy")
                 logger.info(f"Merged schemas for model {model_id}: {merged}")
             
             merged_schemas.append(merged)
@@ -1269,6 +1397,82 @@ def hf_tasks_normalized(
         entity_label="tasks",
         normalized_folder=normalized_folder,
         normalized_records=normalized_tasks,
+        validation_errors=validation_errors,
+    )
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "sharedby_json": AssetIn("hf_enriched_sharedby"),
+        "run_folder": AssetIn("hf_normalized_run_folder"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "transform"}
+)
+def hf_sharedby_normalized(
+    sharedby_json: str,
+    run_folder: Tuple[str, str],
+) -> str:
+    """
+    Normalize HF sharedBy metadata to Schema.org DefinedTerm format.
+
+    Args:
+        sharedby_json: Path to enriched sharedBy JSON file
+        run_folder: Tuple of (raw_data_json_path, normalized_folder)
+
+    Returns:
+        Path to normalized sharedBy JSON file
+    """
+    _, normalized_folder = run_folder
+
+    raw_sharedby = _load_entity_records(sharedby_json, "sharedby")
+    if raw_sharedby is None:
+        return ""
+
+    normalized_records: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+
+    for idx, rec in enumerate(raw_sharedby):
+        name = str(rec.get("name", "")).strip() or f"sharedby_{idx}"
+        mlentory_id = rec.get("mlentory_id") or HFHelper.generate_mlentory_entity_hash_id(
+            "SharedBy", name
+        )
+
+        try:
+            identifiers = [mlentory_id]
+            payload: Dict[str, Any] = {
+                "identifier": identifiers,
+                "name": name,
+                "url": None,
+                "termCode": name,
+                "description": "Entity representing who shared/published the model.",
+                "inDefinedTermSet": ["https://huggingface.co"],
+                "extraction_metadata": rec.get("extraction_metadata", {}),
+            }
+
+            normalized = DefinedTerm(**payload)
+            normalized_records.append(normalized.model_dump(mode="json", by_alias=True))
+        except ValidationError as exc:
+            validation_errors.append(
+                {
+                    "name": name,
+                    "error": str(exc),
+                    "raw_data": rec,
+                }
+            )
+        except Exception as exc:
+            validation_errors.append(
+                {
+                    "name": name,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    return _write_normalization_results(
+        entity_label="sharedby",
+        normalized_folder=normalized_folder,
+        normalized_records=normalized_records,
         validation_errors=validation_errors,
     )
 
