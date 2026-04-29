@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from elasticsearch_dsl import Document, Keyword, Text, connections
+from elasticsearch_dsl import Date, Document, Keyword, Text, connections
 
 from etl_loaders.elasticsearch_store import (
     ElasticsearchConfig,
@@ -36,6 +36,11 @@ class ModelDocument(Document):
     keywords = Keyword(multi=True)
     datasets = Keyword(multi=True)
     source = Keyword()
+    url = Keyword(multi=True)
+    readme = Keyword()
+    datecreated = Date()
+    datemodified = Date()
+    inLanguage = Keyword(multi=True)
 
     class Index:
         # Default name; actual index is configured by caller/env.
@@ -79,6 +84,11 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     ml_tasks = model.get("https://w3id.org/fair4ml/mlTask") or []
     keywords = model.get("https://schema.org/keywords") or []
     source_iri = model.get("https://schema.org/source")
+    url = model.get("https://schema.org/url") or []
+    readme = model.get("https://w3id.org/codemeta/readme")
+    datecreated = model.get("https://schema.org/dateCreated")
+    datemodified = model.get("https://schema.org/dateModified")
+    in_language = model.get("https://schema.org/inLanguage") or []
     
     
     dataset_fields = [
@@ -111,6 +121,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     license_value = translation_mapping.get(license_value, license_value)
     shared_by = translation_mapping.get(shared_by, shared_by)
     source_name = translation_mapping.get(source_iri, source_iri)
+    in_language = [translation_mapping.get(lang, lang) for lang in in_language]
     doc = ModelDocument(
         db_identifier=[str(id) for id in identifier],
         name=str(name) if name is not None else "",
@@ -121,6 +132,11 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         keywords=_extract_list(keywords),
         datasets=_extract_list(datasets),
         source=str(source_name) if source_name is not None else "Unknown",
+        url=_extract_list(url),
+        readme=str(readme) if readme is not None else "",
+        datecreated=datecreated,
+        datemodified=datemodified,
+        inLanguage=_extract_list(in_language),
         meta={"id": [str(id) for id in identifier]},
     )
 
