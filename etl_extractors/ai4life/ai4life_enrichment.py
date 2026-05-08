@@ -16,6 +16,8 @@ from .entity_identifiers.base import EntityIdentifier
 from .entity_identifiers.dataset_identifier import DatasetIdentifier 
 from .entity_identifiers.license_identifier import LicenseIdentifier
 from .entity_identifiers.keyword_identifier import KeywordIdentifier
+from .entity_identifiers.task_identifier import TaskIdentifier
+from .entity_identifiers.sharedby_identifier import SharedByIdentifier
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,9 @@ class AI4LifeEnrichment:
         self.identifiers: Dict[str, EntityIdentifier] = {
             "datasets": DatasetIdentifier(),
             "licenses": LicenseIdentifier(),
-            "keywords": KeywordIdentifier()
+            "keywords": KeywordIdentifier(),
+            "tasks": TaskIdentifier(),
+            "sharedby": SharedByIdentifier(),
            }
         
     

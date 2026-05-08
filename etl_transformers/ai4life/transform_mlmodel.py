@@ -10,7 +10,6 @@ a dictionary with the mapped fields plus extraction metadata for provenance trac
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Dict, Any, Optional
 import logging
@@ -18,6 +17,12 @@ from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 import pycountry
 import json
 from typing import Any, List, Dict
+from etl_transformers.common.utils import (
+    extract_normalized_doi,
+    build_identifier,
+    build_model_urls,
+    validate_optional_url,
+)
 from schemas.fair4ml import MLModel, ExtractionMetadata
 
 
@@ -157,11 +162,12 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     url = str(raw_model.get("url", "")).strip()
     mlentory_id = str(raw_model.get("mlentory_id", "")).strip()
 
-    identifier: List[str] = []
-    if url:
-        identifier.append(url)
-    if mlentory_id:
-        identifier.append(mlentory_id)
+    doi = extract_normalized_doi(
+        raw_record=raw_model,
+        candidate_fields=("doi", "DOI", "referencePublication", "reference_publication"),
+    )
+    identifier: List[str] = build_identifier(doi=doi, mlentory_id=mlentory_id)
+    urls: List[str] = build_model_urls(platform_url=url, mlentory_id=mlentory_id)
 
     name = str(raw_model.get("name", "")).strip() or model_id
     shared_by = str(raw_model.get("sharedBy", "")).strip()
@@ -180,7 +186,7 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     date_modified = _parse_datetime(date_modified)
 
     description = str(raw_model.get("intendedUse", "")).strip()
-    readme = str(raw_model.get("readme_file", "")).strip()
+    readme = validate_optional_url(raw_model.get("readme_file"))
     archived_at = _pick_archived_at(raw_model.get("archivedAt"), fallback=url)
 
     # Optional fields (often missing in AI4Life)
@@ -191,7 +197,7 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "identifier": identifier,
         "name": name,
-        "url": url,
+        "url": urls,
         "author": author,
         "sharedBy": shared_by,
         "modelCategory": modelCategory,
@@ -213,8 +219,8 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "identifier": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
             confidence=1.0,
-            source_field="url, mlentory_id",
-            notes=None,
+            source_field="doi, referencePublication, mlentory_id",
+            notes="Contains only DOI (if present) and mlentory_id",
         ),
         "name": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
@@ -225,8 +231,8 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "url": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
             confidence=1.0,
-            source_field="url",
-            notes=None,
+            source_field="url, mlentory_id",
+            notes="Contains platform URL and MLentory UI URL",
         ),
         "author": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
@@ -333,10 +339,10 @@ def normalize_ai4life_model(raw_model: Dict[str, Any]) -> MLModel:
    
     
     # TODO: Add more mapping functions:
-    # - map_keywords_and_language(raw_model) for tags → keywords, inLanguage
+    # - map_keywords_and_language(raw_model) for tags → keywords, supportedLanguages
     # - map_task_and_category(raw_model) for pipeline_tag, library_name → mlTask, modelCategory
     # - map_license(raw_model) for license extraction
-    # - map_lineage(raw_model) for base_model → fineTunedFrom
+    # - map_lineage(raw_model) for base_model → baseModel
     # - map_code_and_usage(raw_model) for code snippets and usage instructions
     # - map_datasets(raw_model) for trainedOn, evaluatedOn, etc.
     # - map_ethics_and_risks(raw_model) for limitations, biases, etc.
