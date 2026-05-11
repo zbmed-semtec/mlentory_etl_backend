@@ -258,7 +258,7 @@ class VectorIndexManager:
                     "modalities": {"type": "keyword"},
                     "domain": {"type": "keyword"},
                     "architecture": {"type": "text"},
-                    "modelSize": {"type": "keyword"},
+                    "parameterCount": {"type": "text"},
                     "dataset": {"type": "text"},
                     "trainingType": {"type": "keyword"},
                     
@@ -373,10 +373,17 @@ class VectorIndexManager:
         if architecture:
             text_parts.append(f"The architecture is {architecture}.")
         
-        # Model size (extracted)
-        model_size = extracted_data.get('modelSize') or extracted_data.get('model_size')
-        if model_size:
-            text_parts.append(f"The model size is {model_size}.")
+        # Parameter count scale label (extracted or from source doc)
+        # Canonical FAIR4ML-style field; ``model_data`` may still carry legacy ``modelSize`` from older indices
+        pc_label = (
+            extracted_data.get("parameterCount")
+            or model_data.get("parameterCount")
+            or model_data.get("modelSize")
+            or model_data.get("model_size")
+            or model_data.get("parameter_count")
+        )
+        if pc_label:
+            text_parts.append(f"The model has approximately {pc_label} parameters.")
         
         # Datasets
         datasets = model_data.get('datasets') or model_data.get('dataset')
@@ -502,11 +509,34 @@ class VectorIndexManager:
                         
                         # Generate embedding using integrated model
                         model_vector = self._encode_text(searchable_text)
-                        
+
+                        _skip_extracted = frozenset(
+                            {
+                                "parameterCount",
+                                "modelSize",
+                                "model_size",
+                                "parameter_count",
+                            }
+                        )
+                        vector_doc = {
+                            k: v
+                            for k, v in extracted_data.items()
+                            if k not in _skip_extracted
+                        }
+                        pc_val = (
+                            extracted_data.get("parameterCount")
+                            or model_data.get("parameterCount")
+                            or model_data.get("modelSize")
+                            or model_data.get("model_size")
+                            or model_data.get("parameter_count")
+                        )
+                        if pc_val is not None:
+                            vector_doc["parameterCount"] = str(pc_val)
+
                         # Prepare update document with extracted fields, vector, and searchable text
                         # Only update/add vector-related fields, keep existing document data intact
                         update_doc = {
-                            **extracted_data,  # Extracted fields (empty for now)
+                            **vector_doc,
                             "model_vector": model_vector,
                             "searchable_text": searchable_text,  # Store the text used for embedding
                             "vector_created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),

@@ -268,7 +268,15 @@ class MLModel(BaseModel):
         description="Memory/storage requirements for the model (schema:memoryRequirements)",
         alias="https://schema.org/memoryRequirements"
     )
-    
+    parameterCount: Optional[str] = Field(
+        default=None,
+        description=(
+            "Approximate parameter count or scale label inferred from naming or documentation "
+            "(e.g., '7B', '540M') (fair4ml:parameterCount)"
+        ),
+        alias="https://w3id.org/fair4ml/parameterCount",
+    )
+
     # ========== Environmental Impact (fair4ml) ==========
     hasCO2eEmissions: Optional[str] = Field(
         default=None,

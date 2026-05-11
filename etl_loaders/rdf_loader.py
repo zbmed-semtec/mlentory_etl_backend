@@ -66,6 +66,7 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         "https://schema.org/archivedAt",
         "https://w3id.org/codemeta/readme",
         "https://w3id.org/codemeta/issueTracker",
+        "https://w3id.org/fair4ml/parameterCount",
     ]
     
     for string_property in string_properties_lst:

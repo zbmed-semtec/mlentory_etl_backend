@@ -564,30 +564,6 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
-def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, str | None], str]:
-    """
-    Identify model size per model from raw HF models.
-
-    Args:
-        models_data: Tuple of (models_json_path, run_folder)
-
-    Returns:
-        Tuple of ({model_id: model_size(e.g. 7B, 540M)}, run_folder)
-    """
-    models_json_path, run_folder = models_data
-    enrichment = HFEnrichment()
-    models_df = HFHelper.load_models_dataframe(models_json_path)
-
-    model_sizes = enrichment.identifiers["modelsize"].identify_per_model(models_df)
-    logger.info(f"Identified model size for {len(model_sizes)} models")
-
-    return (model_sizes, run_folder)
-
-@asset(
-    group_name="hf_enrichment",
-    ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl", "stage": "extract"}
-)
 def hf_identified_licenses(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[str]], str]:
     """
     Identify license references per model from raw HF models.
