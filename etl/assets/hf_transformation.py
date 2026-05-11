@@ -33,6 +33,7 @@ from pydantic import BaseModel, ValidationError
 from dagster import asset, AssetIn
 
 from etl_extractors.hf import HFHelper
+from etl_extractors.hf.hf_citation_normalization import normalize_citations_from_chunk
 from etl_extractors.hf.hf_parameter_count_inference import infer_parameter_count_labels
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from schemas.fair4ml import MLModel
@@ -231,26 +232,49 @@ def hf_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
     group_name="hf_transformation",
     ins={
         "models_data": AssetIn("hf_normalized_run_folder"),
+        "citation_chunks": AssetIn("hf_identified_chunk_citation"),
     },
-    tags={"pipeline": "hf_etl", "stage": "transform"}
+    tags={"pipeline": "hf_etl", "stage": "transform"},
 )
 def hf_extract_basic_properties(
     models_data: Tuple[str, str],
+    citation_chunks: str,
 ) -> str:
     """
     Extract basic properties from HF models.
     
     Maps: modelId, author, createdAt, last_modified, card
     To: identifier, name, url, author, sharedBy, dates, description, URLs,
-    plus parameterCount (scale label inferred from the model id when present).
+    plus parameterCount (scale label inferred from the model id when present),
+    and schema.org citation (normalized CreativeWork list, or ``[]``).
+
     Args:
         models_data: Tuple of (raw_data_json_path, normalized_folder)
-        
+        citation_chunks: Path to ``chunks_citation.json`` from extraction (same run)
+
     Returns:
         Path to saved partial schema JSON file
     """
     raw_data_json_path, normalized_folder = models_data
-    
+
+    citation_chunks_path = Path(citation_chunks)
+    chunk_by_model: Dict[str, Any] = {}
+    if citation_chunks_path.is_file():
+        with open(citation_chunks_path, "r", encoding="utf-8") as cf:
+            loaded_chunks = json.load(cf)
+        if isinstance(loaded_chunks, dict):
+            chunk_by_model = loaded_chunks
+        else:
+            logger.warning(
+                "Expected dict in citation chunks at %s; ignoring",
+                citation_chunks_path,
+            )
+    else:
+        logger.warning(
+            "Citation chunks file not found at %s; citation will be [] for all models",
+            citation_chunks_path,
+        )
+
     # Load raw models
     logger.info(f"Loading raw models from {raw_data_json_path}")
     with open(raw_data_json_path, 'r', encoding='utf-8') as f:
@@ -279,6 +303,10 @@ def hf_extract_basic_properties(
             if pc_val:
                 partial_data["parameterCount"] = pc_val
 
+            partial_data["citation"] = normalize_citations_from_chunk(
+                model_id, chunk_by_model.get(model_id)
+            )
+
             partial_schemas.append(partial_data)
             
             if (idx + 1) % 100 == 0:
@@ -300,6 +328,7 @@ def hf_extract_basic_properties(
             pc_val = parameter_counts_by_model.get(model_id)
             if pc_val:
                 err_entry["parameterCount"] = pc_val
+            err_entry["citation"] = []
     
     logger.info(f"Extracted basic properties for {len(partial_schemas)} models")
     
@@ -718,7 +747,6 @@ def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]],
                 merged["testedOn"] = model_entities["datasets"]
                 merged["validatedOn"] = model_entities["datasets"]
                 merged["evaluatedOn"] = model_entities["datasets"]
-                merged["referencePublication"] = model_entities["articles"]
                 merged["keywords"] = model_entities["keywords"]
                 merged["baseModel"] = model_entities["base_models"]
                 merged["supportedLanguages"] = model_entities["languages"]

@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
+from schemas.fair4ml.citation import SCHEMA_ORG_CITATION, ModelCitationWork
+
 
 class ValidPeriod(BaseModel):
     """
@@ -158,6 +160,15 @@ class MLModel(BaseModel):
         default_factory=list,
         description="Reference publication for the model (schema:referencePublication)",
         alias="https://w3id.org/codemeta/referencePublication"
+    )
+
+    citation: List[ModelCitationWork] = Field(
+        default_factory=list,
+        description=(
+            "Structured bibliographic references for the model (schema:citation); "
+            "JSON-LD CreativeWork-shaped entries, stored as model-local data"
+        ),
+        alias=SCHEMA_ORG_CITATION,
     )
     
     # ========== ML Task & Category (fair4ml) ==========

@@ -516,6 +516,8 @@ class VectorIndexManager:
                                 "modelSize",
                                 "model_size",
                                 "parameter_count",
+                                "citation",
+                                "https://schema.org/citation",
                             }
                         )
                         vector_doc = {

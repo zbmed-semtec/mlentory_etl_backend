@@ -84,8 +84,6 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     
     # add related entities
     related_entities_lst = [
-        # Reference publication
-        "https://w3id.org/codemeta/referencePublication",
         # License
         "https://schema.org/license",
         # Hosting catalog/source website
@@ -111,7 +109,19 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     for related_entity in related_entities_lst:
         add_literal_or_iri(graph, subject, related_entity,
                            model.get(related_entity))
-    
+
+    # schema.org citation: single JSON literal (list of CreativeWork-shaped dicts)
+    citation_iri = "https://schema.org/citation"
+    cit_val = model.get(citation_iri)
+    if isinstance(cit_val, list) and len(cit_val) > 0:
+        graph.add(
+            (
+                subject,
+                URIRef(citation_iri),
+                Literal(json.dumps(cit_val, ensure_ascii=False), datatype=XSD.string),
+            )
+        )
+
     triples_added = len(graph) - triples_before
     return triples_added
 
