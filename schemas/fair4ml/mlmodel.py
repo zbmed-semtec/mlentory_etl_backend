@@ -85,9 +85,9 @@ class MLModel(BaseModel):
         description="Human-readable name of the model", 
         alias="https://schema.org/name"
     )
-    url: Optional[str] = Field(
-        default=None,
-        description="Primary URL where the model can be accessed",
+    url: List[str] = Field(
+        default_factory=list,
+        description="URLs where the model can be accessed",
         alias="https://schema.org/url"
     )
     
@@ -102,7 +102,14 @@ class MLModel(BaseModel):
         description="Person or Organization who shared the model online (fair4ml:sharedBy)",
         alias="https://w3id.org/fair4ml/sharedBy"
     )
-    
+    source: Optional[str] = Field(
+        default=None,
+        description=(
+            "IRI of the schema:WebSite for the catalog or platform that hosts this model (schema:source)"
+        ),
+        alias="https://schema.org/source",
+    )
+
     # ========== Temporal Information (schema.org) ==========
     dateCreated: Optional[datetime] = Field(
         default=None,
@@ -133,8 +140,13 @@ class MLModel(BaseModel):
     )
     inLanguage: List[str] = Field(
         default_factory=list,
-        description="Natural language(s) the model works with (schema:inLanguage)",
+        description="Natural Language used to describe model documentation/readme (schema:inLanguage)",
         alias="https://schema.org/inLanguage"
+    )
+    supportedLanguages: List[str] = Field(
+        default_factory=list,
+        description="Languages represented in model training data (fair4ml:supportedLanguages)",
+        alias="https://w3id.org/fair4ml/supportedLanguages"
     )
     license: Optional[str] = Field(
         default=None,
@@ -161,10 +173,10 @@ class MLModel(BaseModel):
     )
     
     # ========== Model Lineage (fair4ml) ==========
-    fineTunedFrom: Optional[List[str]] = Field(
+    baseModel: Optional[List[str]] = Field(
         default_factory=list,
-        description="Identifier of the base model this was fine-tuned from (fair4ml:fineTunedFrom)",
-        alias="https://w3id.org/fair4ml/fineTunedFrom"
+        description="Identifier of the base model this model was derived from (fair4ml:baseModel)",
+        alias="https://w3id.org/fair4ml/baseModel"
     )
     
     # ========== Usage & Code (fair4ml) ==========
@@ -285,7 +297,10 @@ class MLModel(BaseModel):
             "example": {
                 "identifier": "https://huggingface.co/bert-base-uncased",
                 "name": "bert-base-uncased",
-                "url": "https://huggingface.co/bert-base-uncased",
+                "url": [
+                    "https://huggingface.co/bert-base-uncased",
+                    "https://mlentory.zbmed.de/mlentory_graph/4b31454870c7d69c4b9b486efd17337b516d1881376559bbe1159df13cd3bfe4",
+                ],
                 "author": "google",
                 "dateCreated": "2020-01-01T00:00:00Z",
                 "keywords": ["bert", "transformer", "nlp"],

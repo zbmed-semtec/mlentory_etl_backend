@@ -16,6 +16,12 @@ from typing import Dict, Any, Optional
 import logging
 from etl_extractors.hf import HFHelper
 import pycountry
+from etl_transformers.common.utils import (
+    extract_normalized_doi,
+    build_identifier,
+    build_model_urls,
+    validate_optional_url,
+)
 
 from schemas.fair4ml import MLModel, ExtractionMetadata
 
@@ -143,17 +149,27 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     # Build HuggingFace URLs
     hf_base_url = f"https://huggingface.co/{model_id}" if model_id else None
     discussion_url = f"{hf_base_url}/discussions" if hf_base_url else None
-    readme_url = f"{hf_base_url}/blob/main/README.md" if hf_base_url else None
+    readme_url = validate_optional_url(
+        f"{hf_base_url}/blob/main/README.md" if hf_base_url else None
+    )
     
     # Extract clean description
     description = _strip_frontmatter(card) if card else None
     
+    doi = extract_normalized_doi(
+        raw_record=raw_model,
+        candidate_fields=("doi", "DOI", "referencePublication", "reference_publication"),
+    )
+    identifier = build_identifier(doi=doi, mlentory_id=mlentory_id)
+
+    urls = build_model_urls(platform_url=hf_base_url, mlentory_id=mlentory_id)
+
     # Build result with mapped fields
     result = {
         # Core identification
-        "identifier": [hf_base_url or model_id, mlentory_id],
+        "identifier": identifier,
         "name": _extract_model_name(model_id),
-        "url": hf_base_url or "",
+        "url": urls,
         
         # Authorship
         "author": author,
@@ -179,8 +195,8 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "identifier": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
             confidence=1.0,
-            source_field="modelId",
-            notes="Converted to HuggingFace URL format and mlentory_id"
+            source_field="doi, referencePublication, mlentory_id",
+            notes="Contains only DOI (if present) and mlentory_id"
         ),
         "name": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
@@ -191,8 +207,8 @@ def map_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "url": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
             confidence=1.0,
-            source_field="modelId",
-            notes="Generated HuggingFace model URL"
+            source_field="modelId, mlentory_id",
+            notes="Contains platform URL and MLentory UI URL"
         ),
         "author": _create_extraction_metadata(
             method="Parsed_from_HF_dataset",
@@ -284,10 +300,10 @@ def normalize_hf_model(raw_model: Dict[str, Any]) -> MLModel:
     }
     
     # TODO: Add more mapping functions:
-    # - map_keywords_and_language(raw_model) for tags → keywords, inLanguage
+    # - map_keywords_and_language(raw_model) for tags → keywords, supportedLanguages
     # - map_task_and_category(raw_model) for pipeline_tag, library_name → mlTask, modelCategory
     # - map_license(raw_model) for license extraction
-    # - map_lineage(raw_model) for base_model → fineTunedFrom
+    # - map_lineage(raw_model) for base_model → baseModel
     # - map_code_and_usage(raw_model) for code snippets and usage instructions
     # - map_datasets(raw_model) for trainedOn, evaluatedOn, etc.
     # - map_ethics_and_risks(raw_model) for limitations, biases, etc.

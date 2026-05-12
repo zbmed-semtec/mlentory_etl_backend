@@ -162,3 +162,21 @@ class HFHelper:
         # Generate SHA-256 hash
         hash_obj = hashlib.sha256(properties_str.encode())
         return "https://w3id.org/mlentory/mlentory_graph/"+hash_obj.hexdigest()
+
+    @staticmethod
+    def raw_hf_catalog_website_records() -> list[dict[str, object]]:
+        """
+        Canonical Hugging Face hosting ``schema:WebSite`` row(s) for this pipeline.
+
+        Minted with :meth:`generate_mlentory_entity_hash_id` like other HF entities.
+        Intended to be written as ``sources.json`` under ``1_raw/hf/<run>/`` at extract.
+        """
+        url = "https://huggingface.co/"
+        mlentory_id = HFHelper.generate_mlentory_entity_hash_id("WebSite", url)
+        return [
+            {
+                "https://schema.org/identifier": [mlentory_id],
+                "https://schema.org/name": "Hugging Face",
+                "https://schema.org/url": url,
+            }
+        ]

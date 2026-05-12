@@ -2,7 +2,7 @@
 Reindex Hugging Face models with updated mapping.
 
 Workflow:
-- Create a temporary index with the new mapping (HFModelDocument).
+- Create a temporary index with the new mapping (ModelDocument).
 - Copy data from the existing index into the temporary index.
 - Drop and recreate the original index with the new mapping.
 - Copy data back from the temporary index.
@@ -26,20 +26,20 @@ from etl_loaders.elasticsearch_store import (
     ElasticsearchConfig,
     create_elasticsearch_client,
 )
-from etl_loaders.hf_index_loader import HFModelDocument
+from etl_loaders.index_loader import ModelDocument
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
 def ensure_index(es: Elasticsearch, index_name: str) -> None:
-    """Create index with HFModelDocument mapping."""
+    """Create index with ModelDocument mapping."""
     if es.indices.exists(index=index_name):
         logger.info("Index %s already exists; deleting before recreation", index_name)
         es.indices.delete(index=index_name)
-    HFModelDocument.init(index=index_name, using=es)
+    ModelDocument.init(index=index_name, using=es)
     es.indices.refresh(index=index_name)
-    logger.info("Index %s created with HFModelDocument mapping", index_name)
+    logger.info("Index %s created with ModelDocument mapping", index_name)
 
 
 def reindex(

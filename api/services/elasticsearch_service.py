@@ -29,7 +29,7 @@ from elasticsearch_dsl import Q, Search
 from api.config import get_es_client, get_es_config
 from api.schemas.responses import ModelListItem, FacetValue, FacetConfig
 from api.services.faceted_search import FacetedSearchMixin
-from etl_loaders.hf_index_loader import HFModelDocument
+from etl_loaders.index_loader import ModelDocument
 from etl_loaders.elasticsearch_store import search
 
 logger = logging.getLogger(__name__)
@@ -120,7 +120,7 @@ class ElasticsearchService(FacetedSearchMixin):
             ModelListItem if found, None otherwise
         """
         # Search for model_id as an element of db_identifier (assuming db_identifier is a list in the ES document)
-        # search = HFModelDocument.search(using=self.client, index=self.config.hf_models_index)
+        # search = ModelDocument.search(using=self.client, index=self.config.hf_models_index)
         
         search_query = {
                 "size": 1,
