@@ -11,7 +11,7 @@ import pandas as pd
 
 from dagster import asset, AssetIn
 
-from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper
+from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper, LLMSchemaPropertyExtractor, LLMConfig
 from etl.config import get_hf_config
 
 
@@ -535,10 +535,79 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
 
 @asset(
     group_name="hf_enrichment",
+    ins={"chunks_data": AssetIn("hf_identified_modelcard_chunks")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_llm_schema_extractor(chunks_data: Tuple[Dict[str, List[dict]], str]) -> Tuple[Dict[str, Dict[str, str]], str]:
+    """
+    Uses an LLM to extract structured metadata from model card chunks,
+
+    Args:
+        chunks_data: Tuple of ({model_id: list_of_chunks}, run_folder)
+
+    Returns:
+        Tuple of ({model_id: {property: result}}, run_folder)
+    """
+    def preprocess_chunks(chunks):
+        """
+        Preprocesses ModelCard chunks by removing code blocks.
+
+        Args:
+            chunks (List[dict]): A list of chunks representing the ModelCard content.
+
+        Returns:
+            str: The preprocessed content.
+        """
+        content = ""
+        current_heading = ""
+        for chunk in chunks:
+            if chunk.get("type") in ["section", "code"]:
+                continue
+                
+            phtext = chunk.get("phtext") or ""
+            
+            if phtext != current_heading and phtext != "":
+                current_heading = phtext
+                content += current_heading + "\n"
+
+            text = chunk.get("text") or ""
+            content += text + "\n"
+
+        return content.strip()
+
+    chunks_dict, run_folder = chunks_data
+    enrichment = HFEnrichment()
+    output_root = Path(run_folder).parent.parent
+
+    preprocessed_chunks = {}
+
+    for model_id, chunks in chunks_dict.items():
+        preprocessed_chunks[model_id] = preprocess_chunks(chunks)
+
+    llm_extractor = LLMSchemaPropertyExtractor(logger=logger)
+    llm_extractor.load_metadata(metadata_dir=str(LLMConfig.DIR_METADATA))
+    llm_extractor.load_llm(llm_kwargs=LLMConfig.LLM_KWARGS)
+    llm_extractor.extract_properties(preprocessed_chunks, 
+                                     batch_size=LLMConfig.BATCH_SIZE,
+                                     return_result=False,
+                                     sampler_kwargs=LLMConfig.SAMPLER_KWARGS,
+                                     chat_template_kwargs=LLMConfig.CHAT_TEMPLATE_KWARGS,
+                                     connection_retry_delay=LLMConfig.CONNECTION_RETRY_DELAY)
+    
+    # Move to run folder with clean name
+    final_path = Path(run_folder) / "llm_extraction_results.json"
+    with open(final_path, "w", encoding="utf-8") as f:
+        json.dump(llm_extractor.extraction_results, f, indent=4)
+    
+    logger.info(f"LLM extraction results saved to {final_path}")
+    return (llm_extractor.extraction_results, str(final_path))
+
+@asset(
+    group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
-def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, str | None], str]:
+def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, Dict[str, str] | None], str]:
     """
     Identify model size per model from raw HF models.
 

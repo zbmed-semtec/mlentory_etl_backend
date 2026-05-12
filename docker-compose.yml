@@ -37,6 +37,40 @@ services:
       retries: 3
       start_period: 40s
 
+  vllm:
+      container_name: vllm
+      hostname: vllm
+      image: vllm/vllm-openai:latest
+      ports:
+        - "8003:8000"
+      volumes:
+        - ../deploy/vllm_models:/root/.cache/huggingface
+        - ./etl_extractors/hf/hf_llm_extractor_resources:/app/metadata:ro
+      networks:
+        - mlentory-network
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                capabilities: [gpu]
+                count: all
+      environment:
+        - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
+      command: >
+        --model google/gemma-4-E4B-it
+        --host 0.0.0.0
+        --port 8000
+        --max-num-seqs 625
+        --gpu-memory-utilization 0.80
+        --max-model-len 65536
+        --enable-prefix-caching
+        --trust-remote-code
+        --chat-template /app/metadata/tool_chat_template_gemma4.jinja
+        --reasoning-parser gemma4
+        --reasoning-config '{"reasoning_start_str":"<|channel>","reasoning_end_str":"<channel|>"}'
+      restart: unless-stopped
+
   elasticsearch:
     profiles: ["etl", "api", "complete", "mcp"]
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.2

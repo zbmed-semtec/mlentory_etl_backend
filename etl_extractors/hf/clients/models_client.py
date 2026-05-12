@@ -87,8 +87,9 @@ class HFModelsClient:
                 card = ModelCard.load(model.modelId, token=self.token) if self.token else ModelCard.load(
                     model.modelId
                 )
+                full_metadata = self.api.model_info(model.modelId)
             except Exception as e:  # noqa: BLE001
-                logger.warning("Error loading model card for %s: %s", model.id, e)
+                logger.warning("Error loading model card and full metadata for %s: %s", model.id, e)
                 return None
 
             model_info = {
@@ -99,6 +100,7 @@ class HFModelsClient:
                 "downloads": model.downloads,
                 "likes": model.likes,
                 "library_name": model.library_name,
+                "safetensors": full_metadata.safetensors if hasattr(full_metadata, 'safetensors') and full_metadata.safetensors else {},
                 "tags": model.tags,
                 "pipeline_tag": model.pipeline_tag,
                 "createdAt": model.created_at,
@@ -123,6 +125,7 @@ class HFModelsClient:
 
         def process_model(model_id: str):
             models_to_process = self.api.list_models(model_name=model_id, limit=1, full=True)
+            full_metadata = self.api.model_info(model_id)
             results = []
             for model in models_to_process:
                 try:
@@ -143,6 +146,7 @@ class HFModelsClient:
                     "downloads": model.downloads,
                     "likes": model.likes,
                     "library_name": model.library_name,
+                    "safetensors": full_metadata.safetensors if hasattr(full_metadata, 'safetensors') and full_metadata.safetensors else {},
                     "tags": model.tags,
                     "pipeline_tag": model.pipeline_tag,
                     "createdAt": model.created_at,
