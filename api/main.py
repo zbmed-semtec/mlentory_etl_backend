@@ -89,6 +89,7 @@ from api.controllers.SearchController import SearchController
 from api.controllers.LLMController import LLMController
 from api.controllers.ModelContextProcessor import ModelContextProcessor
 from api.controllers.PlatformDocsController import PlatformDocsController
+from api.controllers.RelatedModelsController import RelatedModelsController
 
 # Import LLMRunner implementations
 from api.utils.llm_runners import LLMRunner, OllamaRunner, VLLMRunner, OpenAIRunner
@@ -99,6 +100,7 @@ indexHandler = None
 searchController = None
 entityController = None
 llmController = None
+relatedModelsController = None
 modelContextProcessor = None
 platformDocsController = None
 
@@ -119,7 +121,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("STELLA integration disabled (USE_STELLA!=true)")
 
-    global searchController, entityController, llmController, modelContextProcessor, platformDocsController, sqlHandler, indexHandler
+    global searchController, entityController, llmController, relatedModelsController, modelContextProcessor, platformDocsController, sqlHandler, indexHandler
 
     # Get database configuration from environment variables
     # postgres_host = os.environ.get("POSTGRES_HOST", "postgres_db")
@@ -144,6 +146,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # )
     # entityController = EntityController(sqlHandler)
     # searchController = SearchController(indexHandler, entityController, llmController)
+    relatedModelsController = RelatedModelsController(sqlHandler, indexHandler, entityController, searchController)
 
     # Initialize LLM Runner based on environment configuration
     llm_provider = os.environ.get("LLM_PROVIDER", "vllm").lower()
