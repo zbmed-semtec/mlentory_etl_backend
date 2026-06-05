@@ -12,6 +12,7 @@ from api.dbHandler.SQLHandler import SQLHandler
 from api.dbHandler.IndexHandler import IndexHandler
 from api.controllers.EntityController import EntityController
 from api.controllers.SearchController import SearchController
+from api.services.elasticsearch_service import elasticsearch_service
 
 class RelatedModelsController:
     """
@@ -80,7 +81,8 @@ class RelatedModelsController:
         models_dict = {}
         for _, row in models_uris.iterrows():
             model_uri = row["model_uri"]
-            model_details = self.searchController.search_model_by_id(model_uri, extended=True)[0]
+            # model_details = self.searchController.search_model_by_id(model_uri, extended=True)[0]
+            model_details = elasticsearch_service.get_model_by_id(model_uri)[0]
             type_value = model_details["type"][0]
             if "MLModel" in type_value or "Run" in type_value or "AI4Life_Model" in type_value:
                 models_dict[model_uri] = model_details
@@ -106,11 +108,13 @@ class RelatedModelsController:
             >>> print(model["name"])
         """
         # Search for the model using the search functionality with extended info to ensure all fields are included
-        reference_models = self.searchController.search_model_by_id(model_id, extended=True)
+        # reference_models = self.searchController.search_model_by_id(model_id, extended=True)
+        reference_models = elasticsearch_service.get_model_by_id(model_id)
         
         if not reference_models:
             raise ValueError(f"Reference model with ID {model_id} not found")
-            
+        
+        print(f"DEBUG: Found reference model with ID {model_id}: {reference_models[0]}")
         return reference_models[0]  # Take the first match
 
     def find_models_by_same_author(
@@ -154,11 +158,10 @@ class RelatedModelsController:
         try:
             # Use a more flexible query that finds models with ANY of the authors
             # This is more useful than requiring ALL authors to match
-            same_author_models = self.searchController.search_models_with_filters(
+            same_author_models = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"sharedBy": reference_authors},
-                extended=extended,
-                limit=limit + 1  # +1 to account for reference model
+                page_size=limit + 1  # +1 to account for reference model
             )
             
             # Remove the reference model from results
@@ -307,10 +310,9 @@ class RelatedModelsController:
             return []
             
         try:
-            similar_task_models = self.searchController.search_models_with_filters(
+            similar_task_models = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"mlTask": reference_tasks},
-                extended=extended,
                 limit=limit + 1
             )
             
@@ -355,10 +357,9 @@ class RelatedModelsController:
             return []
             
         try:
-            same_base_models = self.searchController.search_models_with_filters(
+            same_base_models = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"baseModels": reference_base_models},
-                extended=extended,
                 limit=limit + 1
             )
             
@@ -414,10 +415,9 @@ class RelatedModelsController:
             
             # Use Elasticsearch to find models with ANY keyword overlap
             # This ensures we check ALL models in the database, not just a limited sample
-            models_with_keyword_matches = self.searchController.search_models_with_filters(
+            models_with_keyword_matches = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"keywords": keyword_subset},  # Use keywords filter directly
-                extended=extended,
                 limit=limit * 5  # Get more candidates for better ranking
             )
             
@@ -509,9 +509,7 @@ class RelatedModelsController:
                 return []
                 
             different_size_models = self.searchController.search_models_by_phrase(
-                query=base_name.strip(),
-                extended=extended
-            )
+                query=base_name.strip(),            )
             
             # Filter and limit results
             return [
