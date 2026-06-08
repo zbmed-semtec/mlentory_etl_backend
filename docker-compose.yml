@@ -69,7 +69,7 @@ services:
       - --port
       - "8000"
       - --served-model-name
-      - google/gemma-3-4b-it
+      - ${VLLM_MODEL:-google/gemma-3-4b-it}
       - --limit-mm-per-prompt
       - image=0
       - --max-model-len
