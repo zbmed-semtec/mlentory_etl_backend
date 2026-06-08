@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run build hf-etl run-by-tag
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run build hf-etl run-by-tag init ensure-env stella-init stella-up stella-down wait-stella wait-vllm check-vllm-env
 
 # Default target
 .DEFAULT_GOAL := help
@@ -18,19 +18,98 @@ help: ## Display this help message
 
 ##@ Docker Operations
 
-up: ## Start all services
+ensure-env: ## Ensure .env exists (copy from .env.example if missing)
+	@if [ ! -f .env ]; then \
+		cp .env.example .env; \
+		echo "$(GREEN).env created from .env.example$(NC)"; \
+	else \
+		echo "$(GREEN).env already exists$(NC)"; \
+	fi
+
+check-vllm-env: ## Verify HuggingFace token is set when using gated models
+	@VLLM_MODEL=$$(grep -E '^VLLM_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' || echo google/gemma-3-4b-it); \
+	HF_TOKEN_LEN=$$(awk -F= '/^HUGGINGFACE_API_TOKEN=/{print length($$2)}' .env 2>/dev/null || echo 0); \
+	if [ "$$HF_TOKEN_LEN" -eq 0 ]; then \
+		echo "$(YELLOW)WARNING: HUGGINGFACE_API_TOKEN is empty in .env$(NC)"; \
+		echo "  The default model ($$VLLM_MODEL) is gated on HuggingFace."; \
+		echo "  Set HUGGINGFACE_API_TOKEN in .env (with model access), or set VLLM_MODEL to an open model."; \
+		exit 1; \
+	fi
+
+wait-vllm: ## Wait for vLLM to serve /v1/models (model load can take several minutes)
+	@echo "$(BLUE)Waiting for vLLM to be ready (google/gemma-3-4b-it — load may take several minutes)...$(NC)"
+	@for i in $$(seq 1 90); do \
+		if curl -sf http://localhost:8003/v1/models >/dev/null 2>&1; then \
+			echo "$(GREEN)vLLM is ready$(NC)"; \
+			exit 0; \
+		fi; \
+		LOGS=$$(sudo docker logs vllm 2>&1 | tail -30); \
+		echo "$$LOGS" | grep -q "gated repo" && { \
+			echo "$(YELLOW)vLLM failed: gated HuggingFace model — set HUGGINGFACE_API_TOKEN in .env$(NC)"; exit 1; }; \
+		echo "$$LOGS" | grep -q "no kernel image is available" && { \
+			echo "$(YELLOW)vLLM failed: GPU/kernel incompatible — use pinned vllm v0.8.5 image (see docker-compose.yml)$(NC)"; \
+			echo "$$LOGS" | tail -5; exit 1; }; \
+		echo "$$LOGS" | grep -q "Engine core initialization failed" && [ $$i -gt 15 ] && { \
+			echo "$(YELLOW)vLLM engine failed to start — last logs:$(NC)"; \
+			echo "$$LOGS" | tail -8; exit 1; }; \
+		echo "  attempt $$i/90 (waiting 20s)..."; \
+		sleep 20; \
+	done; \
+	echo "$(YELLOW)vLLM did not become ready in time — check: docker logs vllm$(NC)"; \
+	sudo docker logs vllm 2>&1 | tail -15; \
+	exit 1
+
+wait-stella: ## Wait for STELLA containers to be running
+	@echo "$(BLUE)Waiting for STELLA containers to be ready...$(NC)"
+	@for i in $$(seq 1 60); do \
+		if sudo docker inspect -f '{{.State.Running}}' stella-app 2>/dev/null | grep -q true && \
+		   sudo docker inspect -f '{{.State.Running}}' stella-server 2>/dev/null | grep -q true; then \
+			echo "$(GREEN)STELLA containers are running$(NC)"; \
+			exit 0; \
+		fi; \
+		sleep 2; \
+	done; \
+	echo "$(YELLOW)STELLA containers did not become ready in time$(NC)"; \
+	exit 1
+
+up: ensure-env ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)
 	@echo "$(BLUE)Starting MLentory ETL services...$(NC)"
-	sudo chown -R 1000:1000 ./config
-	sudo chmod -R 775 ./config
-	sudo docker compose --profile=complete up -d
+	@set -e; \
+	USE_STELLA=$$(grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' | tr '[:upper:]' '[:lower:]' || echo true); \
+	[ -n "$$USE_STELLA" ] || USE_STELLA=true; \
+	echo "USE_STELLA=$$USE_STELLA"; \
+	sudo chown -R 1000:1000 ./config; \
+	sudo chmod -R 775 ./config; \
+		$(MAKE) check-vllm-env; \
+		echo "$(BLUE)Step 1/3: Starting vLLM (LLM inference — may take several minutes on first run)...$(NC)"; \
+		sudo docker compose up -d vllm; \
+		$(MAKE) wait-vllm; \
+	if [ "$$USE_STELLA" = "true" ]; then \
+		echo "$(BLUE)Step 2/3: Starting complete + STELLA profiles...$(NC)"; \
+		sudo docker compose --profile=complete --profile=stella up -d; \
+	else \
+		echo "$(BLUE)Step 2/3: Starting complete profile (STELLA disabled)...$(NC)"; \
+		sudo docker compose --profile=complete up -d; \
+	fi; \
+	if [ "$$USE_STELLA" = "true" ]; then \
+		echo "$(BLUE)Step 3/3: Initializing STELLA...$(NC)"; \
+		$(MAKE) wait-stella; \
+		$(MAKE) stella-init; \
+	fi
 	@echo "$(GREEN)Services started!$(NC)"
 	@echo "Dagster UI: http://localhost:3000"
 	@echo "Neo4j Browser: http://localhost:7474"
 	@echo "Elasticsearch: http://localhost:9200"
+	@echo "vLLM: http://localhost:8003"
+	@echo "API: http://localhost:8008"
+	@if grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | grep -qi 'true'; then \
+		echo "STELLA App: http://localhost:8080"; \
+		echo "STELLA Server: http://localhost:8004"; \
+	fi
 
-down: ## Stop all services
+down: ## Stop all services (including STELLA when running)
 	@echo "$(BLUE)Stopping MLentory ETL services...$(NC)"
-	sudo docker compose --profile=complete down 
+	sudo docker compose --profile=complete --profile=stella --profile=mcp down
 	@echo "$(GREEN)Services stopped!$(NC)"
 
 mcp-up: ## Start MCP API service only
@@ -46,19 +125,26 @@ mcp-down: ## Stop MCP services
 	sudo docker compose --profile=mcp down 
 	@echo "$(GREEN)Services stopped!$(NC)"
 
-stella-up: ## Start STELLA services
-	@echo "$(BLUE)Starting STELLA services...$(NC)"
-	sudo docker compose --profile=stella up -d
-	@echo "$(GREEN)STELLA services started!$(NC)"
-	@echo "STELLA App: http://localhost:8080"
-	@echo "STELLA Server: http://localhost:8004"
+stella-up: ensure-env ## Start STELLA services and initialize when USE_STELLA=true
+	@USE_STELLA=$$(grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' | tr '[:upper:]' '[:lower:]' || echo true); \
+	if [ "$$USE_STELLA" != "true" ]; then \
+		echo "$(YELLOW)USE_STELLA is not true in .env — skipping STELLA startup$(NC)"; \
+		exit 0; \
+	fi; \
+	echo "$(BLUE)Starting STELLA services...$(NC)"; \
+	sudo docker compose --profile=stella up -d; \
+	$(MAKE) wait-stella; \
+	$(MAKE) stella-init; \
+	echo "$(GREEN)STELLA services started!$(NC)"; \
+	echo "STELLA App: http://localhost:8080"; \
+	echo "STELLA Server: http://localhost:8004"
 
-stella-init: ## Initialize STELLA services
+stella-init: ## Initialize STELLA databases (idempotent)
 	@echo "$(BLUE)Initializing STELLA services...$(NC)"
-	sudo docker exec -it stella-app flask init-db
-	sudo docker exec -it stella-app flask seed-db
-	sudo docker exec -it stella-server flask init-db
-	sudo docker exec -it stella-server flask seed-db
+	@sudo docker exec stella-app flask init-db || true
+	@sudo docker exec stella-app flask seed-db || true
+	@sudo docker exec stella-server flask init-db || true
+	@sudo docker exec stella-server flask seed-db || true
 	@echo "$(GREEN)STELLA services initialized!$(NC)"
 
 stella-down: ## Stop STELLA services
@@ -193,18 +279,19 @@ init: ## Initialize the project (copy .env.example to .env)
 		echo "$(GREEN).env file created! Please edit it with your configuration.$(NC)"; \
 	fi
 
-setup: init up ## Complete initial setup (init + start services)
+setup: up ## Complete initial setup (.env + all services per USE_STELLA)
 	@echo "$(GREEN)Setup complete!$(NC)"
 	@echo "Next steps:"
-	@echo "  1. Edit .env file with your configuration"
+	@echo "  1. Edit .env file with your configuration if needed"
 	@echo "  2. Visit http://localhost:3000 for Dagster UI"
 	@echo "  3. Visit http://localhost:7474 for Neo4j Browser"
+	@echo "  4. Run 'make hf-etl' to load model data into Elasticsearch/Neo4j"
 
 ##@ Information
 
 status: ## Show status of all services
 	@echo "$(BLUE)Service Status:$(NC)"
-	@docker compose ps
+	@docker compose --profile=complete --profile=stella --profile=mcp ps
 	@echo ""
 	@echo "$(BLUE)Network Info:$(NC)"
 	@docker network inspect mlentory-network --format '{{range .Containers}}{{.Name}}: {{.IPv4Address}}{{println}}{{end}}' 2>/dev/null || echo "Network not found"

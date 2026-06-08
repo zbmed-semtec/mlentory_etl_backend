@@ -41,11 +41,14 @@ services:
   vllm:
     container_name: vllm
     hostname: vllm
-    image: vllm/vllm-openai:latest
+    # v0.8.x legacy engine supports Tesla V100 (sm_70); latest vLLM v1 engine does not
+    image: vllm/vllm-openai:v0.8.5
     ports:
       - "8003:8000"  # Map container port 8000 to host port 8003
     volumes:
       - ../deploy/vllm_models:/root/.cache/huggingface  # Cache for model storage
+    env_file:
+      - .env
     networks:
       - mlentory-network
     deploy:
@@ -56,17 +59,31 @@ services:
               capabilities: [gpu]
               count: all
     environment:
-      - VLLM_MODEL=${VLLM_MODEL:-google/gemma-3-4b-it}  # Default model
-      - VLLM_HOST=0.0.0.0
-      - VLLM_PORT=8000
+      - VLLM_USE_V1=0
       - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
-    command: ["--model", "${VLLM_MODEL:-google/gemma-3-4b-it}", "--host", "0.0.0.0", "--port", "8000"]
-    # healthcheck:
-    #   test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 20
-    #   start_period: 600s
+    command:
+      - --model
+      - ${VLLM_MODEL:-google/gemma-3-4b-it}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --served-model-name
+      - google/gemma-3-4b-it
+      - --limit-mm-per-prompt
+      - image=0
+      - --max-model-len
+      - "8192"
+      - --enforce-eager
+      - --dtype
+      - float16
+      - --trust-remote-code
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 40
+      start_period: 600s
     restart: unless-stopped
 
   elasticsearch:
@@ -187,8 +204,12 @@ services:
     networks:
       - mlentory-network
     depends_on:
-      - neo4j
-      - elasticsearch
+      neo4j:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
+      vllm:
+        condition: service_healthy
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
   # =============================================================================
