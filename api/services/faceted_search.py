@@ -40,6 +40,11 @@ _MISSING_INDEX_VALUES = ("", "Unknown")
 class FacetedSearchMixin:
     """Mixin that adds faceted search capabilities to Elasticsearch service."""
 
+    def _model_search_indices(self) -> List[str]:
+        """HF + AI4Life model indexes queried by search endpoints."""
+        cfg = self.config
+        return [cfg.hf_models_index, cfg.ai4life_models_index]
+
     def _minimum_metadata_bool_filter(self) -> Dict[str, Any]:
         """Gate search endpoints to documents with all required fields populated."""
         must = [{"exists": {"field": field}} for field in _REQUIRED_ES_FIELDS]
@@ -380,10 +385,10 @@ class FacetedSearchMixin:
         }
 
         try:
-            # Execute search using raw client
             response = self.client.search(
-                index=self.config.hf_models_index,
-                body=search_body
+                index=self._model_search_indices(),
+                body=search_body,
+                params={"ignore_unavailable": "true"},
             )
 
             # Extract hits
@@ -515,8 +520,9 @@ class FacetedSearchMixin:
 
         try:
             response = self.client.search(
-                index=self.config.hf_models_index,
-                body=search_body
+                index=self._model_search_indices(),
+                body=search_body,
+                params={"ignore_unavailable": "true"},
             )
 
             aggs_data = response.get("aggregations", {})

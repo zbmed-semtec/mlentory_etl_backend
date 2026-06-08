@@ -79,8 +79,9 @@ class ElasticsearchService(FacetedSearchMixin):
             else Q("match_all")
         )
         search = (
-            Search(using=self.client, index=self.config.hf_models_index)
+            Search(using=self.client, index=self._model_search_indices())
             .query("bool", must=[q_meta, q_text])
+            .params(ignore_unavailable=True)
             [from_offset : from_offset + page_size]
         )
         response = search.execute()
@@ -136,7 +137,11 @@ class ElasticsearchService(FacetedSearchMixin):
                     }
                 }
             }
-        response = self.client.search(index=self.config.hf_models_index, body=search_query)
+        response = self.client.search(
+            index=self._model_search_indices(),
+            body=search_query,
+            params={"ignore_unavailable": "true"},
+        )
         
 
         if response["hits"]["total"]["value"] == 0:

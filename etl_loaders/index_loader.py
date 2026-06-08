@@ -157,21 +157,13 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     return doc
 
 
-def index_hf_models(
+def index_models(
     json_path: str,
     translation_mapping_path: str,
+    index_name: str,
     es_config: Optional[ElasticsearchConfig] = None,
 ) -> Dict[str, Any]:
-    """Index normalized models into Elasticsearch.
-
-    Args:
-        json_path: Path to normalized models JSON (mlmodels.json).
-        translation_mapping_path: Path to translation mapping JSON file. Maps URIs to human readable names.
-        es_config: Optional ElasticsearchConfig. If None, loads from env.
-
-    Returns:
-        Statistics about the indexing operation.
-    """
+    """Index normalized models into the given Elasticsearch index."""
     config = es_config or ElasticsearchConfig.from_env()
     json_file = Path(json_path)
     if not json_file.exists():
@@ -180,36 +172,33 @@ def index_hf_models(
     logger.info("Loading normalized models from %s for Elasticsearch indexing", json_path)
     with open(json_file, "r", encoding="utf-8") as f:
         models = json.load(f)
-    
+
     if not isinstance(models, list):
         raise ValueError(f"Expected list of models, got {type(models)}")
 
     logger.info("Loaded %s normalized models", len(models))
-    
+
     logger.info("Loading translation mapping from %s", translation_mapping_path)
     with open(translation_mapping_path, "r", encoding="utf-8") as f:
         translation_mapping = json.load(f)
-    
+
     if not isinstance(translation_mapping, dict):
         raise ValueError(f"Expected dict of translation mapping, got {type(translation_mapping)}")
 
     logger.info("Loaded %s translation mapping entries", len(translation_mapping))
 
-
-    # Create client and bind it to elasticsearch-dsl connections
     es_client = create_elasticsearch_client(config)
     connections.add_connection("default", es_client)
 
-    # Ensure index and mapping exist
-    logger.info("Ensuring models index exists: %s", config.hf_models_index)
-    ModelDocument.init(index=config.hf_models_index, using=es_client)
+    logger.info("Ensuring models index exists: %s", index_name)
+    ModelDocument.init(index=index_name, using=es_client)
 
     indexed = 0
     errors = 0
 
     for idx, model in enumerate(models):
         try:
-            doc = build_model_document(model, config.hf_models_index, translation_mapping)
+            doc = build_model_document(model, index_name, translation_mapping)
             doc.save(using=es_client, refresh=False)
             indexed += 1
         except Exception as exc:
@@ -229,15 +218,30 @@ def index_hf_models(
         "Completed Elasticsearch indexing: %s indexed, %s errors, index=%s",
         indexed,
         errors,
-        config.hf_models_index,
+        index_name,
     )
 
     return {
         "models_indexed": indexed,
         "errors": errors,
-        "index": config.hf_models_index,
+        "index": index_name,
         "input_file": str(json_file),
     }
+
+
+def index_hf_models(
+    json_path: str,
+    translation_mapping_path: str,
+    es_config: Optional[ElasticsearchConfig] = None,
+) -> Dict[str, Any]:
+    """Index normalized HF models into Elasticsearch."""
+    config = es_config or ElasticsearchConfig.from_env()
+    return index_models(
+        json_path=json_path,
+        translation_mapping_path=translation_mapping_path,
+        index_name=config.hf_models_index,
+        es_config=config,
+    )
 
 def _get_names_from_uris(models: List[Dict[str, Any]]) -> Dict[str, str]:
     """ 

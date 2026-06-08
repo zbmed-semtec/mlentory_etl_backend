@@ -105,8 +105,8 @@ class VectorSearchService(FacetedSearchMixin):
         if facets is None:
             facets = ["mlTask", "license", "keywords", "datasets", "platform"]
 
-        # default to the API's HF index unless explicitly overridden
-        indices = indices or [self.config.hf_models_index]
+        # default to HF + AI4Life model indexes unless explicitly overridden
+        indices = indices or self._model_search_indices()
 
         # pagination
         limit = min(max(limit, 1), 1000)
