@@ -182,7 +182,12 @@ class MLModel(BaseModel):
         description="Category/architecture of the model, e.g., 'transformer', 'CNN', 'LLM' (fair4ml:modelCategory)",
         alias="https://w3id.org/fair4ml/modelCategory"
     )
-    
+    domain: Optional[str] = Field(
+        default=None,
+        description="Application or subject-matter domain of the model (fair4ml:domain)",
+        alias="https://w3id.org/fair4ml/domain",
+    )
+
     # ========== Model Lineage (fair4ml) ==========
     baseModel: Optional[List[str]] = Field(
         default_factory=list,
@@ -250,7 +255,17 @@ class MLModel(BaseModel):
         description="Evaluation metrics and their values (fair4ml:evaluationMetrics)",
         alias="https://w3id.org/fair4ml/evaluationMetrics"
     )
-    
+    dataSplits: Optional[str] = Field(
+        default=None,
+        description="Dataset train/validation/test split strategy and values (insilico:dataSplits)",
+        alias="https://w3id.org/insilico/dataSplits",
+    )
+    adaptionTechniques: Optional[str] = Field(
+        default=None,
+        description="Training or fine-tuning adaptation technique (insilico:adaptionTechniques)",
+        alias="https://w3id.org/insilico/adaptionTechniques",
+    )
+
     # ========== Additional URLs (schema.org + codemeta) ==========
     discussionUrl: Optional[str] = Field(
         default=None,
