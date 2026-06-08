@@ -2,19 +2,18 @@ from datetime import datetime
 import re
 
 from api.dbHandler.IndexHandler import IndexHandler
-from api.controllers.EntityController import EntityController
+from api.services.entity_service import EntityService
 from typing import List, Dict, Any
-from api.controllers.LLMController import LLMController
+from api.services.llm_service import LLMService
 
-class SearchController:
+class SearchService:
     def __init__(
-        self, indexHandler: IndexHandler, entityController: EntityController,
-        llmController: LLMController
+        self, indexHandler: IndexHandler, entityService: EntityService,
+        llmService: LLMService
     ):
         self.indexHandler = indexHandler
-        self.entityController = entityController
-        self.llmController = llmController
-
+        self.entityService = entityService
+        self.llmService = llmService
     def list_all_models(self, limit: int = 50, extended: bool = False, page: int = 1):
         """
         Retrieves a list of all models from the databases using the modern faceted search approach.
@@ -35,7 +34,7 @@ class SearchController:
                 - 'facet_config': Configuration metadata for default facets.
                 
         Example:
-            >>> controller.list_all_models(limit=20, page=1)
+            >>> service.list_all_models(limit=20, page=1)
             {
                 "models": [...],
                 "total": 1500,
@@ -103,7 +102,7 @@ class SearchController:
                 }
 
                 if extended:
-                    result_entity.update(self.entityController.get_entity_details(result_entity["db_identifier"]))
+                    result_entity.update(self.entityService.get_entity_details(result_entity["db_identifier"]))
 
                 # print("Result Entity:")
                 # print(result_entity)
@@ -150,7 +149,7 @@ class SearchController:
                 }
                 
                 if extended:
-                    extended_entity = self.entityController.get_entity_details(hit["_source"].get("db_identifier", ""))
+                    extended_entity = self.entityService.get_entity_details(hit["_source"].get("db_identifier", ""))
                     result_entity.update(extended_entity)
                
                 results_per_index.append(result_entity)
@@ -299,7 +298,7 @@ class SearchController:
                     
 
                     if extended:
-                        result_entity.update(self.entityController.get_entity_details(result_entity["db_identifier"]))
+                        result_entity.update(self.entityService.get_entity_details(result_entity["db_identifier"]))
 
                     formatted_results.append(result_entity)
 
@@ -454,7 +453,7 @@ class SearchController:
                 }
 
                 if extended:
-                    result_entity.update(self.entityController.get_entity_details(result_entity["db_identifier"]))
+                    result_entity.update(self.entityService.get_entity_details(result_entity["db_identifier"]))
 
                 formatted_results.append(result_entity)
             result_models = formatted_results
@@ -602,7 +601,7 @@ class SearchController:
                 }
 
                 if extended:
-                    result_entity.update(self.entityController.get_entity_details(result_entity["db_identifier"]))
+                    result_entity.update(self.entityService.get_entity_details(result_entity["db_identifier"]))
                 
                 result_models.append(result_entity)
 
@@ -650,7 +649,7 @@ class SearchController:
         """
         Handles a turn in the conversational search process.
 
-        Uses the LLMController to understand the user query in context, 
+        Uses the LLMService to understand the user query in context, 
         refine it, suggest filters, and potentially execute a search.
 
         Args:
@@ -672,28 +671,28 @@ class SearchController:
         # try:
         #     # Fetch and format mlTask values
         #     # Extract user-friendly names or the values themselves
-        #     mltask_details = self.entityController.get_distinct_property_values_with_entity_details("mlTask")[0]
+        #     mltask_details = self.entityService.get_distinct_property_values_with_entity_details("mlTask")[0]
         #     available_filters["mlTask"] = [
         #         str(details.get("name", value)).lower().replace("_", " ") # Use 'name' if available, else the raw value
         #         for value, details in mltask_details.items()
         #     ]
             
         #     # Fetch and format keywords values
-        #     keywords_details = self.entityController.get_distinct_property_values_with_entity_details("keywords")[0]
+        #     keywords_details = self.entityService.get_distinct_property_values_with_entity_details("keywords")[0]
         #     available_filters["keywords"] = [
         #         str(details.get("name", value)).lower().replace("_", " ")
         #         for value, details in keywords_details.items()
         #     ]
             
         #     # Fetch and format license values
-        #     license_details = self.entityController.get_distinct_property_values_with_entity_details("license")[0]
+        #     license_details = self.entityService.get_distinct_property_values_with_entity_details("license")[0]
         #     available_filters["license"] = [
         #         str(details.get("name", value)).lower().replace("_", " ")
         #         for value, details in license_details.items()
         #     ]
             
         #     # You could add more filters here, e.g., "license"
-        #     # license_details = self.entityController.get_distinct_property_values_with_entity_details("license")
+        #     # license_details = self.entityService.get_distinct_property_values_with_entity_details("license")
         #     # available_filters["license"] = [details.get("name", value) for value, details in license_details.items()]
 
         #     print(f"Providing available filters to LLM: {available_filters}") # Debug print
@@ -704,7 +703,7 @@ class SearchController:
         # # --- End Fetch available filter values ---
 
         
-        llm_analysis = self.llmController.process_search_conversation_turn(
+        llm_analysis = self.llmService.process_search_conversation_turn(
             user_message=user_message,
             conversation_history=conversation_history,
             available_filters=available_filters
@@ -758,7 +757,7 @@ class SearchController:
                 - pinned: Whether facet should be visible by default
         
         Example:
-            >>> controller.get_facets_config()
+            >>> service.get_facets_config()
             {
                 "mlTask": {
                     "field": "mlTask",
@@ -1054,7 +1053,7 @@ class SearchController:
             Exception: If Elasticsearch query fails or indices are unavailable
             
         Example:
-            >>> controller.search_models_with_facets(
+            >>> service.search_models_with_facets(
             ...     query="image classification",
             ...     filters={"license": ["MIT"]},
             ...     facets=["mlTask", "keywords"],
@@ -1154,7 +1153,7 @@ class SearchController:
                 # Add extended information if requested
                 if extended:
                     try:
-                        extended_info = self.entityController.get_entity_details(result_entity["db_identifier"])
+                        extended_info = self.entityService.get_entity_details(result_entity["db_identifier"])
                         result_entity.update(extended_info)
                     except Exception as e:
                         print(f"Warning: Failed to get extended info for {result_entity['db_identifier']}: {e}")
@@ -1220,7 +1219,7 @@ class SearchController:
             Exception: If Elasticsearch query fails or field is invalid
             
         Example:
-            >>> controller.fetch_facet_values(
+            >>> service.fetch_facet_values(
             ...     field="keywords",
             ...     search_query="medical",
             ...     limit=20,
