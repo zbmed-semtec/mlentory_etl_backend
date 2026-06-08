@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run build hf-etl run-by-tag init ensure-env stella-init stella-up stella-down wait-stella wait-vllm check-vllm-env
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env stella-init stella-up stella-down wait-stella wait-vllm check-vllm-env
 
 # Default target
 .DEFAULT_GOAL := help
@@ -241,33 +241,87 @@ lint: format typecheck ## Run all linting and formatting
 
 ##@ ETL Operations
 
-extract: ## Run extraction for all sources
-	@echo "$(BLUE)Running extraction for $(SOURCE)...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="extract"' -f ./etl/repository.py
+DAGSTER_ETL := docker exec mlentory-dagster-webserver dagster asset materialize -f ./etl/repository.py
 
-transform: ## Run transformation for all sources
-	@echo "$(BLUE)Running transformation for $(SOURCE)...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="transform"' -f ./etl/repository.py
+etl-check: ## Verify Dagster container is running
+	@docker inspect -f '{{.State.Running}}' mlentory-dagster-webserver 2>/dev/null | grep -q true \
+		|| { echo "$(YELLOW)Dagster not running — run 'make up' first$(NC)"; exit 1; }
 
-load: ## Run loading for all sources
-	@echo "$(BLUE)Running loading for $(SOURCE)...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="load"' -f ./etl/repository.py
+etl-run: etl-check ## Run full ETL pipeline for all sources (HF + AI4Life + OpenML)
+	@echo "$(BLUE)Running full ETL pipeline (all sources)...$(NC)"
+	$(DAGSTER_ETL)
 
-etl-run: ## Run full ETL pipeline for all sources
-	@echo "$(BLUE)Running full ETL pipeline...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize -f ./etl/repository.py
+etl-both: etl-check ## Run full HF + AI4Life pipelines (excludes OpenML)
+	@echo "$(BLUE)Running HuggingFace + AI4Life ETL pipelines...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl" or tag:"pipeline"="ai4life_etl"'
 
-hf-etl: ## Run HuggingFace ETL pipeline (all assets tagged with "pipeline"="hf_etl")
+hf-etl: etl-check ## Run full HuggingFace ETL pipeline
 	@echo "$(BLUE)Running HuggingFace ETL pipeline...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"pipeline"="hf_etl"' -f ./etl/repository.py
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl"'
 
-run-by-tag: ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline"="hf_etl")
+ai4life-etl: etl-check ## Run full AI4Life ETL pipeline
+	@echo "$(BLUE)Running AI4Life ETL pipeline...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl"'
+
+extract: etl-check ## Run extraction stage for all sources
+	@echo "$(BLUE)Running extraction stage (all sources)...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"stage"="extract"'
+
+transform: etl-check ## Run transformation stage for all sources
+	@echo "$(BLUE)Running transformation stage (all sources)...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"stage"="transform"'
+
+load: etl-check ## Run loading stage for all sources
+	@echo "$(BLUE)Running loading stage (all sources)...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"stage"="load"'
+
+hf-extract: etl-check ## HF extraction stage only
+	@echo "$(BLUE)Running HF extraction...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="extract"'
+
+hf-transform: etl-check ## HF transformation stage only
+	@echo "$(BLUE)Running HF transformation...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="transform"'
+
+hf-load: etl-check ## HF loading stage only (Neo4j, RDF)
+	@echo "$(BLUE)Running HF loading...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="load"'
+
+hf-index: etl-check ## HF Elasticsearch indexing only
+	@echo "$(BLUE)Running HF Elasticsearch indexing...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="index"'
+
+hf-vector: etl-check ## HF vector backfill only
+	@echo "$(BLUE)Running HF vector backfill...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="vector_index"'
+
+ai4life-extract: etl-check ## AI4Life extraction stage only
+	@echo "$(BLUE)Running AI4Life extraction...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="extract"'
+
+ai4life-transform: etl-check ## AI4Life transformation stage only
+	@echo "$(BLUE)Running AI4Life transformation...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="transform"'
+
+ai4life-load: etl-check ## AI4Life loading stage only (Neo4j, RDF)
+	@echo "$(BLUE)Running AI4Life loading...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="load"'
+
+ai4life-index: etl-check ## AI4Life Elasticsearch indexing only
+	@echo "$(BLUE)Running AI4Life Elasticsearch indexing...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="index"'
+
+ai4life-vector: etl-check ## AI4Life vector backfill only
+	@echo "$(BLUE)Running AI4Life vector backfill...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="vector_index"'
+
+run-by-tag: etl-check ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline"="hf_etl")
 	@if [ -z "$(TAG)" ]; then \
-		echo "$(YELLOW)Please specify TAG, e.g., make run-by-tag TAG=\"pipeline:hf_etl\"$(NC)"; \
+		echo "$(YELLOW)Please specify TAG, e.g., make run-by-tag TAG=\"pipeline\"=\"hf_etl\"$(NC)"; \
 		exit 1; \
 	fi
 	@echo "$(BLUE)Running assets with tag $(TAG)...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:$(TAG)' -f ./etl/repository.py
+	$(DAGSTER_ETL) --select 'tag:$(TAG)'
 
 ##@ Setup
 
@@ -285,7 +339,7 @@ setup: up ## Complete initial setup (.env + all services per USE_STELLA)
 	@echo "  1. Edit .env file with your configuration if needed"
 	@echo "  2. Visit http://localhost:3000 for Dagster UI"
 	@echo "  3. Visit http://localhost:7474 for Neo4j Browser"
-	@echo "  4. Run 'make hf-etl' to load model data into Elasticsearch/Neo4j"
+	@echo "  4. Run 'make hf-etl', 'make ai4life-etl', or 'make etl-both' to run pipelines"
 
 ##@ Information
 
