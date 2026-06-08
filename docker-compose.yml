@@ -163,7 +163,8 @@ services:
       - ./etl_transformers:/opt/dagster/app/etl_transformers
       - ./etl_loaders:/opt/dagster/app/etl_loaders
       - ./tests:/opt/dagster/app/tests
-      - ./config/etl:/opt/dagster/app/config/etl	
+      - ./config/etl:/opt/dagster/app/config/etl
+      - ./config/hf_schema_extraction:/opt/dagster/app/config/hf_schema_extraction
       - ./schemas:/opt/dagster/app/schemas
       - ./data:/data
       - dagster_home:/opt/dagster/dagster_home
