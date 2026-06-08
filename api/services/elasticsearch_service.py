@@ -66,17 +66,23 @@ class ElasticsearchService(FacetedSearchMixin):
         # Calculate offset
         from_offset = (page - 1) * page_size
 
-        # Create search object using elasticsearch_dsl
-        search = Search(using=self.client, index=self.config.hf_models_index)
-
-        # Add search query if provided
-        if search_query:
-            search = search.query("multi_match", query=search_query, fields=["name", "description", "keywords"])
-        else:
-            search = search.query("match_all")
-
-        # Apply pagination and execute search
-        search = search[from_offset:from_offset + page_size]
+        # Always require the minimum metadata set; combine with optional text query.
+        meta_filter = self._minimum_metadata_bool_filter()["bool"]
+        q_meta = Q(
+            "bool",
+            must=meta_filter["must"],
+            must_not=meta_filter.get("must_not", []),
+        )
+        q_text = (
+            Q("multi_match", query=search_query, fields=["name", "description", "keywords"])
+            if search_query
+            else Q("match_all")
+        )
+        search = (
+            Search(using=self.client, index=self.config.hf_models_index)
+            .query("bool", must=[q_meta, q_text])
+            [from_offset : from_offset + page_size]
+        )
         response = search.execute()
 
         # Convert to ModelListItem objects
@@ -99,7 +105,7 @@ class ElasticsearchService(FacetedSearchMixin):
                 mlTask=hit.ml_tasks or [],  # Note: ES field is snake_case, but schema uses camelCase
                 keywords=hit.keywords or [],
                 datasets=getattr(hit, "datasets", None) or [],
-                platform=hit.platform or "Unknown",
+                platform=getattr(hit, "source", None) or "Unknown",
             )
             models.append(model)
 
@@ -153,7 +159,7 @@ class ElasticsearchService(FacetedSearchMixin):
             mlTask=hit["ml_tasks"] or [],  # Note: ES field is snake_case, but schema uses camelCase
             keywords=hit["keywords"] or [],
             datasets=hit.get("datasets", []) or [],
-            platform=hit.get("platform", "Unknown"),
+            platform=hit.get("source") or "Unknown",
         )
 
 

@@ -17,8 +17,44 @@ from api.schemas.responses import FacetConfig, FacetValue, ModelListItem
 logger = logging.getLogger(__name__)
 
 
+# ES field names that must carry a real value in /search and /search_with_vector responses.
+_REQUIRED_ES_FIELDS = (
+    "db_identifier",
+    "name",
+    "url",
+    "shared_by",
+    "datecreated",
+    "datemodified",
+    "description",
+    "keywords",
+    "license",
+    "readme",
+    "ml_tasks",
+    "source",
+)
+
+# Loader defaults when upstream metadata is missing; excluded from search results.
+_MISSING_INDEX_VALUES = ("", "Unknown")
+
+
 class FacetedSearchMixin:
     """Mixin that adds faceted search capabilities to Elasticsearch service."""
+
+    def _minimum_metadata_bool_filter(self) -> Dict[str, Any]:
+        """Gate search endpoints to documents with all required fields populated."""
+        must = [{"exists": {"field": field}} for field in _REQUIRED_ES_FIELDS]
+        must_not = [
+            {"terms": {field: list(_MISSING_INDEX_VALUES)}}
+            for field in (
+                "name",
+                "description",
+                "shared_by",
+                "license",
+                "readme",
+                "source",
+            )
+        ]
+        return {"bool": {"must": must, "must_not": must_not}}
 
     def get_facets_config(self) -> Dict[str, FacetConfig]:
         """
@@ -83,7 +119,7 @@ class FacetedSearchMixin:
                 pinned=False
             ),
             "platform": FacetConfig(
-                field="platform",
+                field="source",
                 label="Platform",
                 type="keyword",
                 icon="mdi-cloud",
@@ -305,8 +341,8 @@ class FacetedSearchMixin:
         filters = filters or {}
         facet_query = facet_query or {}
 
-        # Build query conditions
-        must_conditions = []
+        # Build query conditions; always require the minimum metadata set.
+        must_conditions: List[Dict[str, Any]] = [self._minimum_metadata_bool_filter()]
 
         if query:
             text_query = self._build_text_search_query(query)
@@ -338,7 +374,7 @@ class FacetedSearchMixin:
                 "keywords",
                 "license",
                 "description",
-                "platform",
+                "source",
                 "datasets",
             ],
         }
@@ -375,7 +411,7 @@ class FacetedSearchMixin:
                     mlTask=source.get("ml_tasks", []),
                     keywords=source.get("keywords", []),
                     datasets=source.get("datasets", []) or [],
-                    platform=source.get("platform", "Unknown"),
+                    platform=source.get("source") or "Unknown",
                 )
                 models.append(model)
 
@@ -436,8 +472,9 @@ class FacetedSearchMixin:
         field_name = config.field
         current_filters = current_filters or {}
 
-        # Build filter conditions (excluding self-filter)
-        must_conditions = []
+        # Build filter conditions (excluding self-filter); always require the
+        # minimum metadata set so facet counts match the gated result list.
+        must_conditions: List[Dict[str, Any]] = [self._minimum_metadata_bool_filter()]
         for facet_key, values in current_filters.items():
             if values and facet_key != field:
                 filter_config = facet_config.get(facet_key)
@@ -472,12 +509,8 @@ class FacetedSearchMixin:
 
         search_body = {
             "size": 0,
-            "query": {
-                "bool": {
-                    "must": must_conditions if must_conditions else [{"match_all": {}}]
-                }
-            },
-            "aggs": {"facet_values": agg_config}
+            "query": {"bool": {"must": must_conditions}},
+            "aggs": {"facet_values": agg_config},
         }
 
         try:

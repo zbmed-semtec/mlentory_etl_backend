@@ -133,6 +133,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     shared_by = translation_mapping.get(shared_by, shared_by)
     source_name = translation_mapping.get(source_iri, source_iri)
     in_language = [translation_mapping.get(lang, lang) for lang in in_language]
+    source_value = str(source_name) if source_name is not None else "Unknown"
     doc = ModelDocument(
         db_identifier=w3id_identifiers,
         name=str(name) if name is not None else "",
@@ -142,7 +143,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         ml_tasks=_extract_list(ml_tasks),
         keywords=_extract_list(keywords),
         datasets=_extract_list(datasets),
-        source=str(source_name) if source_name is not None else "Unknown",
+        source=source_value,
         url=_extract_list(url),
         readme=str(readme) if readme is not None else "",
         datecreated=datecreated,
