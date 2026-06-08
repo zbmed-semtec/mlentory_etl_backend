@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
 # Set working directory
 WORKDIR /app
@@ -20,8 +20,8 @@ COPY ./pyproject.toml ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir poetry && \
     poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi --no-root --only main
-
+    poetry install --no-interaction --no-ansi --no-root --only main && \
+    pip install --no-cache-dir faiss-gpu==1.7.2
 # Copy application code
 COPY . ./api/
 COPY ../etl_loaders/ ./etl_loaders/
