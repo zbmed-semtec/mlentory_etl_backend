@@ -5,7 +5,8 @@ WORKDIR /app
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu124
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -21,6 +22,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir poetry && \
     poetry config virtualenvs.create false && \
     poetry install --no-interaction --no-ansi --no-root --only main && \
+    pip install --no-cache-dir --force-reinstall \
+        torch==2.6.0 torchvision==0.21.0 \
+        --index-url https://download.pytorch.org/whl/cu124 && \
     pip install --no-cache-dir faiss-gpu==1.7.2
 # Copy application code
 COPY . ./api/
