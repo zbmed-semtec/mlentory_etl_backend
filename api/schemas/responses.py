@@ -58,6 +58,7 @@ class ModelListItem(BaseModel):
     mlTask: List[str] = Field(description="Machine learning tasks", default_factory=list)
     keywords: List[str] = Field(description="Model keywords/tags", default_factory=list)
     datasets: List[str] = Field(description="Datasets the model was trained on", default_factory=list)
+    baseModels: List[str] = Field(description="Base model identifiers", default_factory=list)
     platform: str = Field(description="Platform where model is hosted (e.g., 'Hugging Face')")
 
 

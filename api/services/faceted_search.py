@@ -375,6 +375,7 @@ class FacetedSearchMixin:
                     mlTask=source.get("ml_tasks", []),
                     keywords=source.get("keywords", []),
                     datasets=source.get("datasets", []) or [],
+                    baseModels=source.get("baseModels", []),
                     platform=source.get("platform", "Unknown"),
                 )
                 models.append(model)

@@ -99,6 +99,7 @@ class ElasticsearchService(FacetedSearchMixin):
                 mlTask=hit.ml_tasks or [],  # Note: ES field is snake_case, but schema uses camelCase
                 keywords=hit.keywords or [],
                 datasets=getattr(hit, "datasets", None) or [],
+                baseModels=getattr(hit, "baseModels", []) or [],
                 platform=hit.platform or "Unknown",
             )
             models.append(model)
@@ -153,6 +154,7 @@ class ElasticsearchService(FacetedSearchMixin):
             mlTask=hit["ml_tasks"] or [],  # Note: ES field is snake_case, but schema uses camelCase
             keywords=hit["keywords"] or [],
             datasets=hit.get("datasets", []) or [],
+            baseModels=hit.get("baseModels", []),
             platform=hit.get("platform", "Unknown"),
         )
 
