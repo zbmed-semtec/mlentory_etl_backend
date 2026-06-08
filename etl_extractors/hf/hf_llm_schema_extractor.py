@@ -72,9 +72,33 @@ class HFLLMSchemaExtractor:
             )
 
             for model_id, card_text in batch:
-                results[model_id] = self._extract_model_properties(model_id, card_text)
+                try:
+                    results[model_id] = self._extract_model_properties(model_id, card_text)
+                except Exception as exc:
+                    logger.error(
+                        "LLM schema extraction failed for model=%s: %s",
+                        model_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    results[model_id] = self._empty_model_result(
+                        error_notes=f"model_extraction_error: {exc}",
+                    )
 
         return results
+
+    def _empty_model_result(self, *, error_notes: str) -> Dict[str, Any]:
+        """Build a null result object for all properties when a model fails."""
+        model_result: Dict[str, Any] = {EXTRACTION_METADATA_KEY: {}}
+        for property_name in self.prompt_builder.property_names:
+            model_result[property_name] = None
+            model_result[EXTRACTION_METADATA_KEY][property_name] = {
+                "extraction_method": "LLM_schema_extraction",
+                "confidence": 0.0,
+                "source_field": "card",
+                "notes": error_notes,
+            }
+        return model_result
 
     def _extract_model_properties(
         self,
