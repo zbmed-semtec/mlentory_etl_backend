@@ -40,7 +40,7 @@ class GraphService:
             "MLModel": [
                 # License & provenance
                 "schema__license",
-                "fair4ml__fineTunedFrom",
+                "fair4ml__baseModel",
                 "fair4ml__mlTask",
                 "schema__inLanguage",
                 "schema__keywords",
@@ -580,7 +580,7 @@ class GraphService:
             """
             # Dataset-related relationship types
             dataset_types = {
-                "fair4ml__fineTunedFrom",
+                "fair4ml__baseModel",
                 "fair4ml__trainedOn",
                 "fair4ml__testedOn",
                 "fair4ml__validatedOn",

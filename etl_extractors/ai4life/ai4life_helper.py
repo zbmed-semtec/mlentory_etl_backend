@@ -162,3 +162,21 @@ class AI4LifeHelper:
         # Generate SHA-256 hash
         hash_obj = hashlib.sha256(properties_str.encode())
         return "https://w3id.org/mlentory/mlentory_graph/"+hash_obj.hexdigest()
+
+    @staticmethod
+    def raw_ai4life_catalog_website_records() -> list[dict[str, object]]:
+        """
+        Canonical AI4Life hosting ``schema:WebSite`` row(s) for this pipeline.
+
+        Minted with :meth:`generate_mlentory_entity_hash_id` like other AI4Life entities.
+        Intended to be written as ``sources.json`` under ``1_raw/ai4life/<run>/`` at extract.
+        """
+        url = "https://ai4life.eurobioimaging.eu/"
+        mlentory_id = AI4LifeHelper.generate_mlentory_entity_hash_id("WebSite", url)
+        return [
+            {
+                "https://schema.org/identifier": [mlentory_id],
+                "https://schema.org/name": "AI4Life",
+                "https://schema.org/url": url,
+            }
+        ]

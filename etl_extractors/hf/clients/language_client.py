@@ -17,7 +17,12 @@ logger = logging.getLogger(__name__)
 class HFLanguagesClient:
     """Generate language metadata records using the pycountry dataset."""
 
-    def get_languages_metadata(self, language_codes: List[str]) -> pd.DataFrame:
+    def get_languages_metadata(
+        self,
+        language_codes: List[str],
+        language_confidences: Optional[Dict[str, float]] = None,
+        language_extraction_methods: Optional[Dict[str, str]] = None,
+    ) -> pd.DataFrame:
         """
         Build metadata entries for the provided ISO 639 language codes.
 
@@ -35,7 +40,11 @@ class HFLanguagesClient:
             if not normalized_code:
                 continue
 
-            metadata = self._build_language_record(normalized_code)
+            metadata = self._build_language_record(
+                normalized_code,
+                lingua_confidence=(language_confidences or {}).get(normalized_code),
+                extraction_method=(language_extraction_methods or {}).get(normalized_code),
+            )
             records.append(metadata)
 
         if not records:
@@ -55,7 +64,12 @@ class HFLanguagesClient:
 
         return pd.DataFrame(records)
 
-    def _build_language_record(self, code: str) -> Dict[str, Any]:
+    def _build_language_record(
+        self,
+        code: str,
+        lingua_confidence: Optional[float] = None,
+        extraction_method: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Construct a metadata record for a given language code."""
 
         language = self._lookup_language(code)
@@ -72,8 +86,12 @@ class HFLanguagesClient:
             "entity_type": "Language",
             "platform": "HF",
             "extraction_metadata": {
-                "extraction_method": "pycountry",
-                "confidence": 1.0,
+                "extraction_method": extraction_method or "pycountry",
+                "confidence": (
+                    float(lingua_confidence)
+                    if lingua_confidence is not None
+                    else 1.0
+                ),
             },
         }
 
@@ -103,6 +121,28 @@ class HFLanguagesClient:
             if language:
                 return language
 
+        return None
+
+    def normalize_language_code(self, code: str) -> Optional[str]:
+        """
+        Return a canonical ISO code string aligned with enrichment and hashing.
+
+        Prefer ISO 639-1 (alpha-2); otherwise ISO 639-3 (alpha-3), lowercased.
+        Used for tag-derived languages and Lingua-detected readme languages alike.
+
+        Args:
+            code: Raw language tag or code (e.g. ``en``, ``ENG``, ``en-US``).
+
+        Returns:
+            Normalized code when pycountry resolves it; otherwise ``None``.
+        """
+        language = self._lookup_language((code or "").strip())
+        if language is None:
+            return None
+        if getattr(language, "alpha_2", None):
+            return language.alpha_2.lower()
+        if getattr(language, "alpha_3", None):
+            return language.alpha_3.lower()
         return None
 
 
