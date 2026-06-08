@@ -67,6 +67,9 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         "https://w3id.org/codemeta/readme",
         "https://w3id.org/codemeta/issueTracker",
         "https://w3id.org/fair4ml/parameterCount",
+        "https://w3id.org/fair4ml/domain",
+        "https://w3id.org/insilico/dataSplits",
+        "https://w3id.org/insilico/adaptionTechniques",
     ]
     
     for string_property in string_properties_lst:

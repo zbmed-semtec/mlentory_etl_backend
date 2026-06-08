@@ -41,6 +41,11 @@ class ModelDocument(Document):
     datecreated = Date()
     datemodified = Date()
     inLanguage = Keyword(multi=True)
+    domain = Keyword()
+    model_category = Keyword(multi=True)
+    data_splits = Text()
+    adaption_techniques = Keyword()
+    parameter_count = Keyword()
 
     class Index:
         # Default name; actual index is configured by caller/env.
@@ -100,8 +105,12 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     datecreated = model.get("https://schema.org/dateCreated")
     datemodified = model.get("https://schema.org/dateModified")
     in_language = model.get("https://schema.org/inLanguage") or []
-    
-    
+    domain = model.get("https://w3id.org/fair4ml/domain")
+    model_category = model.get("https://w3id.org/fair4ml/modelCategory") or []
+    data_splits = model.get("https://w3id.org/insilico/dataSplits")
+    adaption_techniques = model.get("https://w3id.org/insilico/adaptionTechniques")
+    parameter_count = model.get("https://w3id.org/fair4ml/parameterCount")
+
     dataset_fields = [
         "https://w3id.org/fair4ml/trainedOn",
         "https://w3id.org/fair4ml/testedOn",
@@ -133,6 +142,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     shared_by = translation_mapping.get(shared_by, shared_by)
     source_name = translation_mapping.get(source_iri, source_iri)
     in_language = [translation_mapping.get(lang, lang) for lang in in_language]
+    model_category = [translation_mapping.get(cat, cat) for cat in _extract_list(model_category)]
     doc = ModelDocument(
         db_identifier=w3id_identifiers,
         name=str(name) if name is not None else "",
@@ -148,6 +158,11 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         datecreated=datecreated,
         datemodified=datemodified,
         inLanguage=_extract_list(in_language),
+        domain=str(domain) if domain is not None else None,
+        model_category=_extract_list(model_category),
+        data_splits=str(data_splits) if data_splits is not None else None,
+        adaption_techniques=str(adaption_techniques) if adaption_techniques is not None else None,
+        parameter_count=str(parameter_count) if parameter_count is not None else None,
         meta={"id": str(doc_id)},
     )
 
