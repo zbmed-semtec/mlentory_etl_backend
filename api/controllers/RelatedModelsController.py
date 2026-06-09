@@ -114,8 +114,10 @@ class RelatedModelsController:
         if not reference_models:
             raise ValueError(f"Reference model with ID {model_id} not found")
         
-        print(f"DEBUG: Found reference model with ID {model_id}: {reference_models[0]}")
-        return reference_models[0]  # Take the first match
+        if isinstance(reference_models, list):
+            reference_models = reference_models[0]  # Take the first match if multiple returned
+
+        return reference_models 
 
     def find_models_by_same_author(
         self, 
@@ -142,14 +144,14 @@ class RelatedModelsController:
             >>> print(f"Found {len(models)} models by same author")
         """
         # Handle sharedBy field - it might be stored as a single string or array
-        reference_authors_raw = reference_model.get("sharedBy", [])
+        reference_authors_raw = reference_model.sharedBy
         reference_authors = []
         if isinstance(reference_authors_raw, list):
             reference_authors = reference_authors_raw
         elif isinstance(reference_authors_raw, str) and reference_authors_raw.strip():
             reference_authors = [reference_authors_raw.strip()]
         
-        reference_model_id = reference_model.get("db_identifier", "")
+        reference_model_id = reference_model.db_identifier
         
         if not reference_authors:
             print("DEBUG: No authors found in reference model, returning empty list")
@@ -166,8 +168,8 @@ class RelatedModelsController:
             
             # Remove the reference model from results
             filtered_results = [
-                model for model in same_author_models 
-                if model.get("db_identifier") != reference_model_id
+                model for model in same_author_models[0]
+                if model.db_identifier != reference_model_id
             ]
         
             
@@ -203,14 +205,13 @@ class RelatedModelsController:
         
         for model in candidate_models:
             relevance_score = self._calculate_relevance_score(reference_model, model)
-            model_copy = model.copy()
-            model_copy["relevance_score"] = relevance_score
-            scored_models.append(model_copy)
+            model_dict = {"model": model, "score": relevance_score}
+            scored_models.append(model_dict)
         
         # Sort by relevance score (highest first)
-        scored_models.sort(key=lambda x: x["relevance_score"], reverse=True)
-        
-        return scored_models
+        scored_models.sort(key=lambda x: x["score"], reverse=True)
+        sorted_models = [model["model"] for model in scored_models]
+        return sorted_models
 
     def _calculate_relevance_score(
         self, 
@@ -230,45 +231,45 @@ class RelatedModelsController:
         score = 0.0
         
         # 1. Task Similarity (40% weight)
-        if reference_model.get("mlTask") and candidate_model.get("mlTask"):
-            ref_tasks = set(reference_model["mlTask"])
-            cand_tasks = set(candidate_model["mlTask"])
+        if reference_model.mlTask and candidate_model.mlTask:
+            ref_tasks = set(reference_model.mlTask)
+            cand_tasks = set(candidate_model.mlTask)
             if ref_tasks and cand_tasks:
                 common_tasks = ref_tasks & cand_tasks
                 task_similarity = len(common_tasks) / max(len(ref_tasks), len(cand_tasks))
                 score += task_similarity * 0.4
         
         # 2. Keyword Overlap (25% weight)
-        if reference_model.get("keywords") and candidate_model.get("keywords"):
-            ref_keywords = set(reference_model["keywords"])
-            cand_keywords = set(candidate_model["keywords"])
+        if reference_model.keywords and candidate_model.keywords:
+            ref_keywords = set(reference_model.keywords)
+            cand_keywords = set(candidate_model.keywords)
             if ref_keywords and cand_keywords:
                 common_keywords = ref_keywords & cand_keywords
                 keyword_similarity = len(common_keywords) / max(len(ref_keywords), len(cand_keywords))
                 score += keyword_similarity * 0.25
         
         # 3. Base Model Similarity (20% weight)
-        if reference_model.get("baseModels") and candidate_model.get("baseModels"):
-            ref_base_models = set(reference_model["baseModels"])
-            cand_base_models = set(candidate_model["baseModels"])
-            if ref_base_models and cand_base_models:
-                common_base_models = ref_base_models & cand_base_models
-                base_similarity = len(common_base_models) / max(len(ref_base_models), len(cand_base_models))
-                score += base_similarity * 0.2
+        # if reference_model.baseModels and candidate_model.baseModels:
+        #     ref_base_models = set(reference_model.baseModels)
+        #     cand_base_models = set(candidate_model.baseModels)
+        #     if ref_base_models and cand_base_models:
+        #         common_base_models = ref_base_models & cand_base_models
+        #         base_similarity = len(common_base_models) / max(len(ref_base_models), len(cand_base_models))
+        #         score += base_similarity * 0.2
         
         # 4. Name Similarity (10% weight)
-        if reference_model.get("name") and candidate_model.get("name"):
-            ref_name = str(reference_model["name"]).lower()
-            cand_name = str(candidate_model["name"]).lower()
+        if reference_model.name and candidate_model.name:
+            ref_name = str(reference_model.name).lower()
+            cand_name = str(candidate_model.name).lower()
             if ref_name and cand_name:
                 # Simple substring matching
                 if ref_name in cand_name or cand_name in ref_name:
                     score += 0.1
         
         # 5. License Compatibility (5% weight)
-        if reference_model.get("license") and candidate_model.get("license"):
-            ref_license = str(reference_model["license"]).lower()
-            cand_license = str(candidate_model["license"]).lower()
+        if reference_model.license and candidate_model.license:
+            ref_license = str(reference_model.license).lower()
+            cand_license = str(candidate_model.license).lower()
             if ref_license and cand_license:
                 # Check if both are open source or both are proprietary
                 ref_is_open = any(term in ref_license for term in ["mit", "apache", "gpl", "bsd", "open"])
@@ -303,8 +304,8 @@ class RelatedModelsController:
             >>> for model in models:
             ...     print(f"Model: {model['name']}, Tasks: {model['mlTask']}")
         """
-        reference_tasks = reference_model.get("mlTask", [])
-        reference_model_id = reference_model.get("db_identifier", "")
+        reference_tasks = reference_model.mlTask
+        reference_model_id = reference_model.db_identifier
         
         if not reference_tasks:
             return []
@@ -318,7 +319,7 @@ class RelatedModelsController:
             
             return [
                 model for model in similar_task_models 
-                if model.get("db_identifier") != reference_model_id
+                if model.db_identifier != reference_model_id
             ][:limit]
             
         except Exception as e:
@@ -350,8 +351,9 @@ class RelatedModelsController:
             >>> for model in models:
             ...     print(f"Model: {model['name']}, Base: {model['baseModels']}")
         """
-        reference_base_models = reference_model.get("baseModels", [])
-        reference_model_id = reference_model.get("db_identifier", "")
+        reference_base_models = None # No base model information available in the reference model, cannot perform search
+        # reference_base_models = reference_model.baseModels
+        reference_model_id = reference_model.db_identifier
         
         if not reference_base_models:
             return []
@@ -365,7 +367,7 @@ class RelatedModelsController:
             
             return [
                 model for model in same_base_models 
-                if model.get("db_identifier") != reference_model_id
+                if model.db_identifier != reference_model_id
             ][:limit]
             
         except Exception as e:
@@ -403,8 +405,8 @@ class RelatedModelsController:
             ... )
             >>> print(f"Found {len(models)} models with similar keywords")
         """
-        reference_keywords = reference_model.get("keywords", [])
-        reference_model_id = reference_model.get("db_identifier", "")
+        reference_keywords = reference_model.keywords
+        reference_model_id = reference_model.db_identifier
         
         if not reference_keywords:
             return []
@@ -424,8 +426,8 @@ class RelatedModelsController:
             # Remove the reference model and calculate detailed overlap counts
             models_with_overlap = []
             for model in models_with_keyword_matches:
-                if model.get("db_identifier") != reference_model_id:
-                    model_keywords = set(model.get("keywords", []))
+                if model.db_identifier != reference_model_id:
+                    model_keywords = set(model.keywords)
                     ref_keywords_set = set(keyword_subset)
                     
                     # Calculate overlapping keywords
@@ -483,8 +485,8 @@ class RelatedModelsController:
             >>> for model in models:
             ...     print(f"Model: {model['name']}, Score: {model['score']}")
         """
-        reference_name = reference_model.get("name", "")
-        reference_model_id = reference_model.get("db_identifier", "")
+        reference_name = reference_model.name
+        reference_model_id = reference_model.db_identifier
         
         if not reference_name:
             return []
@@ -514,8 +516,8 @@ class RelatedModelsController:
             # Filter and limit results
             return [
                 model for model in different_size_models 
-                if (model.get("db_identifier") != reference_model_id and 
-                    model.get("score", 0) > min_score)
+                if (model.db_identifier != reference_model_id and 
+                    model.score > min_score)
             ][:limit]
             
         except Exception as e:
