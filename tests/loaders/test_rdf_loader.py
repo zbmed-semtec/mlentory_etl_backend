@@ -19,7 +19,7 @@ import pytest
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, XSD
 
-from etl_loaders.hf_rdf_loader import (
+from etl_loaders.rdf_loader import (
     is_iri,
     to_xsd_datetime,
     mint_subject,
@@ -153,9 +153,9 @@ def test_add_literal_or_iri_with_iri(empty_graph):
     subject = URIRef("https://example.com/subject")
     predicate = "https://schema.org/url"
     value = "https://example.com/resource"
-    
+
     result = add_literal_or_iri(empty_graph, subject, predicate, value)
-    
+
     assert result is True
     assert len(empty_graph) == 1
     # Check that it was added as URIRef
@@ -167,9 +167,9 @@ def test_add_literal_or_iri_with_literal(empty_graph):
     subject = URIRef("https://example.com/subject")
     predicate = "https://schema.org/name"
     value = "Test Name"
-    
+
     result = add_literal_or_iri(empty_graph, subject, predicate, value)
-    
+
     assert result is True
     assert len(empty_graph) == 1
     # Check that it was added as Literal
@@ -181,9 +181,9 @@ def test_add_literal_or_iri_with_datatype(empty_graph):
     subject = URIRef("https://example.com/subject")
     predicate = "https://schema.org/dateCreated"
     value = "2020-01-01T00:00:00"
-    
+
     result = add_literal_or_iri(empty_graph, subject, predicate, value, datatype=XSD.dateTime)
-    
+
     assert result is True
     assert len(empty_graph) == 1
     triple = list(empty_graph)[0]
@@ -195,9 +195,9 @@ def test_add_literal_or_iri_with_list(empty_graph):
     subject = URIRef("https://example.com/subject")
     predicate = "https://schema.org/identifier"
     values = ["https://example.com/id1", "https://example.com/id2"]
-    
+
     result = add_literal_or_iri(empty_graph, subject, predicate, values)
-    
+
     assert result is True
     assert len(empty_graph) == 2
 
@@ -205,9 +205,9 @@ def test_add_literal_or_iri_with_list(empty_graph):
 def test_add_literal_or_iri_with_none(empty_graph):
     subject = URIRef("https://example.com/subject")
     predicate = "https://schema.org/name"
-    
+
     result = add_literal_or_iri(empty_graph, subject, predicate, None)
-    
+
     assert result is False
     assert len(empty_graph) == 0
 
@@ -215,9 +215,9 @@ def test_add_literal_or_iri_with_none(empty_graph):
 def test_add_literal_or_iri_with_empty_string(empty_graph):
     subject = URIRef("https://example.com/subject")
     predicate = "https://schema.org/name"
-    
+
     result = add_literal_or_iri(empty_graph, subject, predicate, "")
-    
+
     assert result is False
     assert len(empty_graph) == 0
 
@@ -225,9 +225,9 @@ def test_add_literal_or_iri_with_empty_string(empty_graph):
 def test_add_literal_or_iri_with_empty_list(empty_graph):
     subject = URIRef("https://example.com/subject")
     predicate = "https://schema.org/identifier"
-    
+
     result = add_literal_or_iri(empty_graph, subject, predicate, [])
-    
+
     assert result is False
     assert len(empty_graph) == 0
 
@@ -236,15 +236,15 @@ def test_add_literal_or_iri_with_empty_list(empty_graph):
 
 def test_build_model_triples_complete(empty_graph, sample_model):
     triples_added = build_model_triples(empty_graph, sample_model)
-    
+
     assert triples_added > 0
     assert len(empty_graph) == triples_added
-    
+
     # Verify rdf:type triple exists
     FAIR4ML = Namespace("https://w3id.org/fair4ml/")
     type_triples = list(empty_graph.triples((None, RDF.type, FAIR4ML.MLModel)))
     assert len(type_triples) == 1
-    
+
     # Verify subject
     subject = type_triples[0][0]
     assert isinstance(subject, URIRef)
@@ -252,9 +252,9 @@ def test_build_model_triples_complete(empty_graph, sample_model):
 
 def test_build_model_triples_minimal(empty_graph, minimal_model):
     triples_added = build_model_triples(empty_graph, minimal_model)
-    
+
     assert triples_added > 0
-    
+
     # Should at least have rdf:type, name, and url
     assert len(empty_graph) >= 3
 
@@ -267,11 +267,11 @@ def test_build_model_triples_with_dates(empty_graph):
         "https://schema.org/dateModified": "2020-06-01",
         "https://schema.org/datePublished": datetime(2020, 1, 15),
     }
-    
+
     triples_added = build_model_triples(empty_graph, model)
-    
+
     assert triples_added > 0
-    
+
     # Check that dates were added with xsd:dateTime datatype
     SCHEMA = Namespace("https://schema.org/")
     date_created_triples = list(empty_graph.triples((None, SCHEMA.dateCreated, None)))
@@ -286,14 +286,14 @@ def test_build_model_triples_subject_minting_priority(empty_graph):
         "https://schema.org/name": "test-model",
         "https://schema.org/url": "https://example.com/test",
     }
-    
+
     build_model_triples(empty_graph, model)
-    
+
     # Verify subject is the identifier IRI
     FAIR4ML = Namespace("https://w3id.org/fair4ml/")
     type_triples = list(empty_graph.triples((None, RDF.type, FAIR4ML.MLModel)))
     subject = type_triples[0][0]
-    
+
     assert str(subject) == "https://specific-id.com/model"
 
 
@@ -315,17 +315,17 @@ def test_build_model_triples_all_properties(empty_graph):
         "https://w3id.org/codemeta/readme": "https://example.com/README.md",
         "https://w3id.org/codemeta/issueTracker": "https://github.com/test/issues",
     }
-    
+
     triples_added = build_model_triples(empty_graph, model)
-    
+
     # Should have added all properties
     assert triples_added >= 13  # All properties + rdf:type
-    
+
     # Verify key properties exist
     SCHEMA = Namespace("https://schema.org/")
     FAIR4ML = Namespace("https://w3id.org/fair4ml/")
     CODEMETA = Namespace("https://w3id.org/codemeta/")
-    
+
     assert len(list(empty_graph.triples((None, RDF.type, FAIR4ML.MLModel)))) == 1
     assert len(list(empty_graph.triples((None, SCHEMA.name, None)))) >= 1
     assert len(list(empty_graph.triples((None, SCHEMA.url, None)))) >= 1
@@ -339,15 +339,15 @@ def test_build_model_triples_all_properties(empty_graph):
 @pytest.mark.integration
 def test_build_and_persist_models_rdf_file_not_found():
     """Test error handling for missing file."""
-    from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+    from etl_loaders.rdf_loader import build_and_persist_models_rdf
     from rdflib_neo4j import Neo4jStoreConfig
-    
+
     config = Neo4jStoreConfig(
         uri="bolt://localhost:7687",
         database="neo4j",
         auth=("neo4j", "password"),
     )
-    
+
     with pytest.raises(FileNotFoundError):
         build_and_persist_models_rdf("/nonexistent/path.json", config)
 
@@ -355,29 +355,29 @@ def test_build_and_persist_models_rdf_file_not_found():
 @pytest.mark.integration
 def test_build_and_persist_models_rdf_invalid_json(tmp_path):
     """Test error handling for invalid JSON."""
-    from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+    from etl_loaders.rdf_loader import build_and_persist_models_rdf
     from rdflib_neo4j import Neo4jStoreConfig
-    
+
     # Create invalid JSON file
     json_file = tmp_path / "invalid.json"
     json_file.write_text("not valid json")
-    
+
     config = Neo4jStoreConfig(
         uri="bolt://localhost:7687",
         database="neo4j",
         auth=("neo4j", "password"),
     )
-    
+
     with pytest.raises(json.JSONDecodeError):
         build_and_persist_models_rdf(str(json_file), config)
 
 @pytest.mark.integration
-@patch('etl_loaders.hf_rdf_loader.write_mlmodel_metadata_batch')
-@patch('etl_loaders.hf_rdf_loader.open_graph')
-@patch('etl_loaders.hf_rdf_loader.build_model_triples')
+@patch('etl_loaders.rdf_loader.write_mlmodel_metadata_batch')
+@patch('etl_loaders.rdf_loader.open_graph')
+@patch('etl_loaders.rdf_loader.build_model_triples')
 def test_build_and_persist_models_rdf_calls_batch_metadata(mock_build_triples, mock_open_graph, mock_write_batch, tmp_path):
     """Test that write_mlmodel_metadata_batch is called when write_metadata is True."""
-    from etl_loaders.hf_rdf_loader import build_and_persist_models_rdf
+    from etl_loaders.rdf_loader import build_and_persist_models_rdf
     from rdflib_neo4j import Neo4jStoreConfig
 
     # Create a dummy JSON file with multiple models
@@ -388,13 +388,13 @@ def test_build_and_persist_models_rdf_calls_batch_metadata(mock_build_triples, m
     ]
     json_file = tmp_path / "models.json"
     json_file.write_text(json.dumps(models))
-    
+
     config = Mock(spec=Neo4jStoreConfig)
     mock_graph = Mock()
     mock_open_graph.return_value = mock_graph
     mock_build_triples.return_value = 5
     mock_write_batch.return_value = 3
-    
+
     # Set batch size smaller than total models to force multiple batches
     result = build_and_persist_models_rdf(
         json_path=str(json_file),
@@ -402,19 +402,19 @@ def test_build_and_persist_models_rdf_calls_batch_metadata(mock_build_triples, m
         write_metadata=True,
         batch_size=2
     )
-    
+
     assert result["models_processed"] == 3
     assert result["triples_added"] == 15 # 5 * 3
     assert result["metadata_relationships"] == 6 # 3 * 2 batches? No, mock_write_batch return value is summed.
     # If mock_write_batch returns 3, and it's called twice (once for 2 models, once for 1 model)
     # It should be 6.
-    
+
     assert mock_write_batch.call_count == 2
-    
+
     # Verify first batch
     args, _ = mock_write_batch.call_args_list[0]
     assert len(args[0]) == 2
-    
+
     # Verify second batch
     args, _ = mock_write_batch.call_args_list[1]
     assert len(args[0]) == 1

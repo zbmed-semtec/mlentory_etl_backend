@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Any, Optional, Callable
 import logging
 import pandas as pd
+import pycountry
 from pydantic import BaseModel, ValidationError
 from dagster import asset, AssetIn
 from etl_extractors.hf import HFHelper
@@ -252,12 +253,48 @@ def ai4life_extract_basic_properties(models_data: Tuple[str, str]) -> str:
     logger.info("Saved basic properties to %s", output_path)
     return str(output_path)
 
+
+@asset(
+    group_name="ai4life_transformation",
+    ins={"run_folder_data": AssetIn("ai4life_normalized_model_folder")},
+    tags={"pipeline": "ai4life_etl", "stage": "transform"},
+)
+def ai4life_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
+    """
+    Bring the AI4Life catalog ``WebSite`` from raw extract into this run's
+    normalized folder as ``sources.json``.
+    """
+    raw_models_path, normalized_folder = run_folder_data
+    raw_run = Path(raw_models_path).parent
+    raw_sources = raw_run / "sources.json"
+    out_path = Path(normalized_folder) / "sources.json"
+
+    if raw_sources.exists():
+        with open(raw_sources, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        logger.info("Loaded AI4Life catalog sources from raw run: %s", raw_sources)
+    else:
+        logger.warning(
+            "Raw sources.json missing at %s; using AI4LifeHelper catalog payload",
+            raw_sources,
+        )
+        payload = AI4LifeHelper.raw_ai4life_catalog_website_records()
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False, default=_json_default)
+
+    logger.info("Wrote normalized AI4Life sources to %s", out_path)
+    return str(out_path)
+
 @asset(
     group_name="ai4life_transformation",
     ins={
         "datasets_mapping": AssetIn("ai4life_identified_datasets"),
         "keywords_mapping": AssetIn("ai4life_identified_keywords"),
         "licenses_mapping": AssetIn("ai4life_identified_licenses"),
+        "tasks_mapping": AssetIn("ai4life_identified_tasks"),
+        "sharedby_mapping": AssetIn("ai4life_identified_sharedby"),
+        "inlanguage_mapping": AssetIn("ai4life_detected_inlanguage"),
         "run_folder_data": AssetIn("ai4life_normalized_model_folder"),
     },
     tags={"pipeline": "ai4life_etl", "stage": "transform"}
@@ -266,28 +303,49 @@ def ai4life_entity_linking(
     datasets_mapping: Dict[str, List[str]],
     keywords_mapping: Dict[str, List[str]],
     licenses_mapping: Dict[str, List[str]],
+    tasks_mapping: Dict[str, List[str]],
+    sharedby_mapping: Dict[str, List[str]],
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {datasets, keywords, licenses}
+    Create entity linking mapping: model_id -> {datasets, keywords, licenses, tasks, sharedby, inLanguage, sources}
     Links identified entities with their enriched metadata.
 
     Args:
         datasets_mapping: Tuple of ({model_id: [dataset_names]}, run_folder)
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
+        tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
+        sharedby_mapping: Tuple of ({model_id: [sharedby_entities]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
 
     Returns:
         Path to saved entity linking JSON file
     """
     _, normalized_folder = run_folder_data
+    ai4life_catalog_source_iris: List[str] = []
+    for row in AI4LifeHelper.raw_ai4life_catalog_website_records():
+        ids = row.get("https://schema.org/identifier") or []
+        if not isinstance(ids, list):
+            continue
+        ai4life_catalog_source_iris = [
+            u
+            for u in ids
+            if isinstance(u, str)
+            and u.startswith("https://w3id.org/mlentory/mlentory_graph/")
+        ]
+        if ai4life_catalog_source_iris:
+            break
 
         # union of ids so you don't KeyError if a model appears in only one mapping
     all_model_ids = (
         set(datasets_mapping.keys())
         | set(keywords_mapping.keys())
         | set(licenses_mapping.keys())
+        | set(tasks_mapping.keys())
+        | set(sharedby_mapping.keys())
+        | set(inlanguage_mapping.keys())
     )
 
     entity_linking: Dict[str, Dict[str, List[str]]] = {}
@@ -296,6 +354,14 @@ def ai4life_entity_linking(
         datasets = datasets_mapping.get(model_id, []) or []
         keywords = keywords_mapping.get(model_id, []) or []
         licenses = licenses_mapping.get(model_id, []) or []
+        tasks = tasks_mapping.get(model_id, []) or []
+        sharedby = sharedby_mapping.get(model_id, []) or []
+        inlanguage_predictions = inlanguage_mapping.get(model_id, []) or []
+        inlanguage_codes = [
+            str(prediction.get("code")).strip()
+            for prediction in inlanguage_predictions
+            if isinstance(prediction, dict) and str(prediction.get("code", "")).strip()
+        ]
 
         entity_linking[model_id] = {
             "datasets": [
@@ -310,10 +376,22 @@ def ai4life_entity_linking(
             "licenses": [
                 AI4LifeHelper.generate_mlentory_entity_hash_id("License", x)
                 for x in licenses
-            ]
+            ],
+            "tasks": [
+                AI4LifeHelper.generate_mlentory_entity_hash_id("Task", x)
+                for x in tasks
+            ],
+            "sharedby": [
+                AI4LifeHelper.generate_mlentory_entity_hash_id("SharedBy", x)
+                for x in sharedby
+            ],
+            "inLanguage": [
+                AI4LifeHelper.generate_mlentory_entity_hash_id("Language", x)
+                for x in inlanguage_codes
+            ],
+            "sources": list(ai4life_catalog_source_iris),
             # "base_models": [],  # not available
             # "languages": [],    # not available
-            # "tasks": [],        # not available
         }
 
     output_path = Path(normalized_folder) / "entity_linking.json"
@@ -332,7 +410,11 @@ def ai4life_entity_linking(
         "datasets_json": AssetIn("ai4life_datasets_normalized"),   # path to datasets.json (normalized)
         "keywords_json": AssetIn("ai4life_keywords_normalized"),   # path to keywords.json (normalized)
         "licenses_json": AssetIn("ai4life_licenses_normalized"),   # path to licenses.json (normalized)
+        "inlanguage_json": AssetIn("ai4life_languages_normalized"),
+        "tasks_json": AssetIn("ai4life_tasks_normalized"),         # path to tasks.json (normalized)
+        "sharedby_json": AssetIn("ai4life_sharedby_normalized"),   # path to sharedby.json (normalized)
         "models_json": AssetIn("ai4life_model_normalized"),        # path to mlmodels.json (normalized)
+        "sources_json": AssetIn("ai4life_sources_normalized"),     # path to sources.json (normalized)
         "run_folder_data": AssetIn("ai4life_normalized_model_folder"),  # (raw_models_json_path, normalized_folder)
     },
     tags={"pipeline": "ai4life_etl", "stage": "transform"},
@@ -342,7 +424,11 @@ def ai4life_create_translation_mapping(
     datasets_json: str,
     keywords_json: str,
     licenses_json: str,
+    inlanguage_json: str,
+    tasks_json: str,
+    sharedby_json: str,
     models_json: str,
+    sources_json: str,
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -402,7 +488,11 @@ def ai4life_create_translation_mapping(
         {"label": "datasets", "path": datasets_json},
         {"label": "keywords", "path": keywords_json},
         {"label": "licenses", "path": licenses_json},
+        {"label": "inlanguage", "path": inlanguage_json},
+        {"label": "tasks", "path": tasks_json},
+        {"label": "sharedby", "path": sharedby_json},
         {"label": "models", "path": models_json},
+        {"label": "sources", "path": sources_json},
     ]
 
     for cfg in entity_configs:
@@ -427,6 +517,117 @@ def ai4life_create_translation_mapping(
         json.dump(out_map, f, indent=2, ensure_ascii=False)
 
     logger.info("Saved translation mapping (%d entries) to %s", len(out_map), output_path)
+    return str(output_path)
+
+
+@asset(
+    group_name="ai4life_transformation",
+    ins={
+        "inlanguage_mapping": AssetIn("ai4life_detected_inlanguage"),
+        "run_folder_data": AssetIn("ai4life_normalized_model_folder"),
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "transform"},
+)
+def ai4life_languages_normalized(
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Materialize detected AI4Life inLanguage codes into normalized Language entities.
+
+    Writes ``languages.json`` into the run's normalized folder so AI4Life outputs
+    are aligned with the HF pipeline artifact layout.
+    """
+    _, normalized_folder = run_folder_data
+    output_path = Path(normalized_folder) / "languages.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    normalized_languages: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+    per_code_confidence: Dict[str, float] = {}
+    for model_predictions in (inlanguage_mapping or {}).values():
+        for prediction in (model_predictions or []):
+            if not isinstance(prediction, dict):
+                continue
+            normalized_code = str(prediction.get("code", "")).strip()
+            if not normalized_code:
+                continue
+            confidence = float(prediction.get("confidence", 0.0) or 0.0)
+            per_code_confidence[normalized_code] = max(
+                per_code_confidence.get(normalized_code, 0.0),
+                confidence,
+            )
+
+    unique_codes = sorted(per_code_confidence.keys())
+
+    for idx, code in enumerate(unique_codes):
+        try:
+            language_ref = pycountry.languages.get(alpha_2=code.lower())
+            if language_ref is None:
+                language_ref = pycountry.languages.get(alpha_3=code.lower())
+
+            normalized_name = getattr(language_ref, "name", None) or code
+            alternate_names: List[str] = []
+            alpha_2 = getattr(language_ref, "alpha_2", None)
+            alpha_3 = getattr(language_ref, "alpha_3", None)
+            if isinstance(alpha_2, str) and alpha_2.strip():
+                alternate_names.append(alpha_2.lower())
+            if isinstance(alpha_3, str) and alpha_3.strip() and alpha_3.lower() not in alternate_names:
+                alternate_names.append(alpha_3.lower())
+            if not alternate_names:
+                alternate_names = [code]
+
+            scope = getattr(language_ref, "scope", None)
+            lang_type = getattr(language_ref, "type", None)
+            description = None
+            if scope or lang_type:
+                parts = []
+                if scope:
+                    parts.append(str(scope))
+                if lang_type:
+                    parts.append(str(lang_type))
+                description = f"ISO language ({', '.join(parts)})"
+
+            language = Language(
+                identifier=[AI4LifeHelper.generate_mlentory_entity_hash_id("Language", code)],
+                name=str(normalized_name),
+                url=None,
+                alternateName=alternate_names,
+                description=description,
+                extraction_metadata={
+                    "extraction_method": "lingua-language-detector+pycountry",
+                    "confidence": per_code_confidence.get(code, 0.0),
+                },
+            )
+            normalized_languages.append(language.model_dump(mode="json", by_alias=True))
+        except Exception as exc:
+            validation_errors.append(
+                {
+                    "_index": idx,
+                    "language_code": code,
+                    "_error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    with open(output_path, "w", encoding="utf-8") as file_handle:
+        json.dump(normalized_languages, file_handle, indent=2, ensure_ascii=False)
+
+    if validation_errors:
+        errors_path = Path(normalized_folder) / "languages_normalization_errors.json"
+        with open(errors_path, "w", encoding="utf-8") as file_handle:
+            json.dump(validation_errors, file_handle, indent=2, ensure_ascii=False)
+        logger.warning(
+            "Normalized %d/%d languages with %d errors (see %s)",
+            len(normalized_languages),
+            len(unique_codes),
+            len(validation_errors),
+            errors_path,
+        )
+    else:
+        logger.info("Normalized %d/%d languages. No errors.", len(normalized_languages), len(unique_codes))
+
+    logger.info("Wrote normalized AI4Life languages to %s", output_path)
     return str(output_path)
 
 
@@ -564,10 +765,14 @@ def merge_ai4life_partial_schemas(
         merged_data.pop("_index", None)
         merged_data.pop("_error", None)
 
-        # Entity linking (AI4Life only has datasets/keywords/licenses)
+        # Entity linking (AI4Life has datasets/keywords/licenses/tasks/sharedby)
         datasets = links.get("datasets") or []
         keywords = links.get("keywords") or []
         licenses = links.get("licenses") or []
+        tasks = links.get("tasks") or []
+        sharedby = links.get("sharedby") or []
+        inlanguage = links.get("inLanguage") or []
+        sources = links.get("sources") or []
 
         # Map to FAIR4ML MLModel fields
         if datasets:
@@ -584,6 +789,14 @@ def merge_ai4life_partial_schemas(
 
         if licenses:
             merged_data["license"] = str(licenses[0])  # MLModel.license is a single string
+        if tasks:
+            merged_data["mlTask"] = list(tasks)
+        if sharedby:
+            merged_data["sharedBy"] = str(sharedby[0])  # MLModel.sharedBy is a single string
+        if inlanguage:
+            merged_data["inLanguage"] = list(inlanguage)
+        if sources:
+            merged_data["source"] = str(sources[0])  # MLModel.source is a single string
 
         # Minimal required fields
         if not merged_data.get("name"):
@@ -940,6 +1153,223 @@ def ai4life_keywords_normalized(
         logger.info("Normalized %d/%d keywords. No errors.", len(normalized), len(raw_keywords))
 
     return str(out_path)
+
+
+@asset(
+    group_name="ai4life_transformation",
+    ins={
+        "tasks_data": AssetIn("ai4life_tasks_raw"),                 # (tasks_json_path, run_folder)
+        "run_folder_data": AssetIn("ai4life_normalized_model_folder"),  # (raw_models_json_path, normalized_folder)
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "transform"},
+)
+def ai4life_tasks_normalized(
+    tasks_data: Tuple[str, str],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Normalize AI4Life tasks to schema.org DefinedTerm-like format and write
+    <normalized_folder>/tasks.json with IRI keys.
+    """
+    tasks_json_path, _raw_run_folder = tasks_data
+    _raw_models_json_path, normalized_folder = run_folder_data
+
+    out_path = Path(normalized_folder) / "tasks.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not tasks_json_path:
+        logger.info("No tasks_json_path. Writing empty tasks.json")
+        out_path.write_text("[]", encoding="utf-8")
+        return str(out_path)
+
+    logger.info("Loading AI4Life tasks from %s", tasks_json_path)
+    with open(tasks_json_path, "r", encoding="utf-8") as f:
+        raw_tasks = json.load(f)
+
+    if isinstance(raw_tasks, dict):
+        raw_tasks = [raw_tasks]
+
+    if not isinstance(raw_tasks, list):
+        raise ValueError(f"Expected list in {tasks_json_path}, got {type(raw_tasks).__name__}")
+
+    normalized: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    for idx, rec in enumerate(raw_tasks):
+        if not isinstance(rec, dict):
+            errors.append({"_index": idx, "_error": f"record is not a dict: {type(rec).__name__}"})
+            continue
+
+        task_name = str(rec.get("name") or rec.get("task") or "").strip() or f"task_{idx}"
+        mlentory_id = str(rec.get("mlentory_id", "")).strip() or None
+
+        identifiers: List[str] = []
+        if mlentory_id:
+            identifiers.append(mlentory_id)
+        raw_task_url = rec.get("url")
+        if isinstance(raw_task_url, str):
+            candidate_url = raw_task_url.strip()
+            task_url = candidate_url if candidate_url and candidate_url.lower() != "none" else None
+        else:
+            task_url = None
+        if task_url:
+            identifiers.append(task_url)
+
+        extraction_meta = rec.get("extraction_metadata") or {}
+        if not isinstance(extraction_meta, dict):
+            extraction_meta = {}
+
+        payload: Dict[str, Any] = {
+            "identifier": identifiers,
+            "name": task_name,
+            "url": task_url,
+            "term_code": task_name,
+            "extraction_metadata": extraction_meta,
+        }
+
+        try:
+            obj = DefinedTerm(**payload)
+            normalized.append(obj.model_dump(mode="json", by_alias=True))
+        except ValidationError as ve:
+            errors.append(
+                {
+                    "task": task_name,
+                    "_index": idx,
+                    "_error": "DefinedTerm validation failed",
+                    "details": ve.errors(),
+                }
+            )
+        except Exception as e:
+            errors.append(
+                {
+                    "task": task_name,
+                    "_index": idx,
+                    "_error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(normalized, f, indent=2, ensure_ascii=False)
+
+    if errors:
+        err_path = Path(normalized_folder) / "tasks_normalization_errors.json"
+        with open(err_path, "w", encoding="utf-8") as f:
+            json.dump(errors, f, indent=2, ensure_ascii=False)
+        logger.warning(
+            "Normalized %d/%d tasks. Errors: %d (see %s)",
+            len(normalized),
+            len(raw_tasks),
+            len(errors),
+            err_path,
+        )
+    else:
+        logger.info("Normalized %d/%d tasks. No errors.", len(normalized), len(raw_tasks))
+
+    return str(out_path)
+
+
+@asset(
+    group_name="ai4life_transformation",
+    ins={
+        "sharedby_data": AssetIn("ai4life_sharedby_raw"),              # (sharedby_json_path, run_folder)
+        "run_folder_data": AssetIn("ai4life_normalized_model_folder"), # (raw_models_json_path, normalized_folder)
+    },
+    tags={"pipeline": "ai4life_etl", "stage": "transform"},
+)
+def ai4life_sharedby_normalized(
+    sharedby_data: Tuple[str, str],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Normalize AI4Life sharedBy entities to schema.org DefinedTerm-like format and write
+    <normalized_folder>/sharedby.json with IRI keys.
+    """
+    sharedby_json_path, _raw_run_folder = sharedby_data
+    _raw_models_json_path, normalized_folder = run_folder_data
+
+    out_path = Path(normalized_folder) / "sharedby.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not sharedby_json_path:
+        logger.info("No sharedby_json_path. Writing empty sharedby.json")
+        out_path.write_text("[]", encoding="utf-8")
+        return str(out_path)
+
+    logger.info("Loading AI4Life sharedBy entities from %s", sharedby_json_path)
+    with open(sharedby_json_path, "r", encoding="utf-8") as f:
+        raw_sharedby = json.load(f)
+
+    if isinstance(raw_sharedby, dict):
+        raw_sharedby = [raw_sharedby]
+    if not isinstance(raw_sharedby, list):
+        raise ValueError(f"Expected list in {sharedby_json_path}, got {type(raw_sharedby).__name__}")
+
+    normalized: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    for idx, rec in enumerate(raw_sharedby):
+        if not isinstance(rec, dict):
+            errors.append({"_index": idx, "_error": f"record is not a dict: {type(rec).__name__}"})
+            continue
+
+        name = str(rec.get("name", "")).strip() or f"sharedby_{idx}"
+        mlentory_id = str(rec.get("mlentory_id", "")).strip() or None
+        extraction_meta = rec.get("extraction_metadata") or {}
+        if not isinstance(extraction_meta, dict):
+            extraction_meta = {}
+
+        payload: Dict[str, Any] = {
+            "identifier": [mlentory_id] if mlentory_id else [],
+            "name": name,
+            "url": None,
+            "term_code": name,
+            "description": "Entity representing who shared/published the model.",
+            "in_defined_term_set": ["https://ai4life.eurobioimaging.eu/"],
+            "extraction_metadata": extraction_meta,
+        }
+
+        try:
+            obj = DefinedTerm(**payload)
+            normalized.append(obj.model_dump(mode="json", by_alias=True))
+        except ValidationError as ve:
+            errors.append(
+                {
+                    "sharedby": name,
+                    "_index": idx,
+                    "_error": "DefinedTerm validation failed",
+                    "details": ve.errors(),
+                }
+            )
+        except Exception as e:
+            errors.append(
+                {
+                    "sharedby": name,
+                    "_index": idx,
+                    "_error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(normalized, f, indent=2, ensure_ascii=False)
+
+    if errors:
+        err_path = Path(normalized_folder) / "sharedby_normalization_errors.json"
+        with open(err_path, "w", encoding="utf-8") as f:
+            json.dump(errors, f, indent=2, ensure_ascii=False)
+        logger.warning(
+            "Normalized %d/%d sharedBy entities. Errors: %d (see %s)",
+            len(normalized),
+            len(raw_sharedby),
+            len(errors),
+            err_path,
+        )
+    else:
+        logger.info("Normalized %d/%d sharedBy entities. No errors.", len(normalized), len(raw_sharedby))
+
+    return str(out_path)
+
 
 @asset(
     group_name="ai4life_transformation",

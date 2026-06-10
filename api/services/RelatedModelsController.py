@@ -10,8 +10,8 @@ from typing import List, Dict, Any, Tuple
 import re
 from api.dbHandler.SQLHandler import SQLHandler
 from api.dbHandler.IndexHandler import IndexHandler
-from api.controllers.EntityController import EntityController
-from api.controllers.SearchController import SearchController
+from api.services.entity_service import EntityService
+from api.services.search_service import SearchService
 from api.services.elasticsearch_service import elasticsearch_service
 
 class RelatedModelsController:
@@ -27,8 +27,8 @@ class RelatedModelsController:
         self, 
         sqlHandler: SQLHandler,
         indexHandler: IndexHandler, 
-        entityController: EntityController,
-        searchController: SearchController
+        entityService: EntityService,
+        searchService: SearchService
     ):
         """
         Initialize the RelatedModelsController.
@@ -36,12 +36,13 @@ class RelatedModelsController:
         Args:
             sqlHandler (SQLHandler): Handler for SQL database operations.
             indexHandler (IndexHandler): Handler for Elasticsearch operations.
-            entityController (EntityController): Controller for entity operations.
+            entityService (EntityService): Service for entity operations.
+            searchService (SearchService): Service for search operations.   
         """
         self.sqlHandler = sqlHandler
         self.indexHandler = indexHandler
-        self.entityController = entityController
-        self.searchController = searchController
+        self.entityService = entityService
+        self.searchService = searchService
 
     
     def get_related_models_by_property(self, property_id: str, limit: int = 10, offset: int = 0) -> Tuple[int, Dict[str, Dict[str, Any]]]:
@@ -81,7 +82,7 @@ class RelatedModelsController:
         models_dict = {}
         for _, row in models_uris.iterrows():
             model_uri = row["model_uri"]
-            # model_details = self.searchController.search_model_by_id(model_uri, extended=True)[0]
+            # model_details = self.searchService.search_model_by_id(model_uri, extended=True)[0]
             model_details = elasticsearch_service.get_model_by_id(model_uri)[0]
             type_value = model_details["type"][0]
             if "MLModel" in type_value or "Run" in type_value or "AI4Life_Model" in type_value:
@@ -108,7 +109,7 @@ class RelatedModelsController:
             >>> print(model["name"])
         """
         # Search for the model using the search functionality with extended info to ensure all fields are included
-        # reference_models = self.searchController.search_model_by_id(model_id, extended=True)
+        # reference_models = self.searchService.search_model_by_id(model_id, extended=True)
         reference_models = elasticsearch_service.get_model_by_id(model_id)
         
         if not reference_models:

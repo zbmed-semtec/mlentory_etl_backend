@@ -1,5 +1,5 @@
 """
-ModelContextProcessor module for handling ML model context processing for LLM queries.
+ModelContextService module for handling ML model context processing for LLM queries.
 
 This module provides functionality to format model information for LLM context,
 create specialized prompt templates, and handle model comparison operations.
@@ -13,9 +13,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class ModelContextProcessor:
+class ModelContextService:
     """
-    Processor for ML model context formatting and prompt template creation.
+    Service for ML model context formatting and prompt template creation.
     
     This class handles the transformation of model details into structured formats
     suitable for LLM processing, and creates specialized prompt templates for
@@ -24,7 +24,7 @@ class ModelContextProcessor:
     
     def __init__(self):
         """
-        Initialize the ModelContextProcessor.
+        Initialize the ModelContextService.
         
         Args:
             None
@@ -63,7 +63,7 @@ class ModelContextProcessor:
         # Define priority properties for formatting
         self.priority_props = ["MLtask", "license", "keywords"]
         
-        logger.info("ModelContextProcessor initialized")
+        logger.info("ModelContextService initialized")
     
     def format_model_details(self, model_details: Dict[str, Any], include_raw_json: bool = False) -> str:
         """
@@ -284,7 +284,10 @@ class ModelContextProcessor:
         """
         if not model_details_list:
             raise ValueError("Model details list cannot be empty")
-            
+        
+
+        print(model_names)
+
         if len(model_details_list) != len(model_names):
             raise ValueError("Model details list and names list must be the same length")
             

@@ -45,7 +45,7 @@ from api.services.model_service import model_service
 from api.services.ro_crate_service import ro_crate_service
 from api.services.metadata_service import metadata_service
 
-from api.controllers.RelatedModelsController import RelatedModelsController
+from api.services.RelatedModelsController import RelatedModelsController
 
 logger = logging.getLogger(__name__)
 
