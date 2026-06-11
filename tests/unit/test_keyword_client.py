@@ -66,7 +66,7 @@ class TestHFKeywordClient:
         assert nlp_row["source"] == "curated_csv"
 
     def test_get_keywords_metadata_missing_from_curated(self, keyword_client):
-        """Test retrieving keywords not in curated CSV (should fallback to Wikipedia)."""
+        """Test retrieving keywords not in curated CSV (should fallback to Wikidata)."""
         keywords = ["nonexistent_keyword_12345"]
         result_df = keyword_client.get_keywords_metadata(keywords)
 
@@ -74,8 +74,8 @@ class TestHFKeywordClient:
         row = result_df.iloc[0]
 
         assert row["keyword"] == "nonexistent_keyword_12345"
-        # Should either be None (not found) or have Wikipedia data
-        assert row["source"] in ["not_found", "wikipedia"]
+        # Should either be None (not found) or have Wikidata data
+        assert row["source"] in ["not_found", "wikidata"]
 
     def test_get_keywords_metadata_mixed(self, keyword_client):
         """Test retrieving mix of curated and non-curated keywords."""
@@ -90,7 +90,7 @@ class TestHFKeywordClient:
 
         # Unknown keyword should have different source
         unknown_row = result_df[result_df["keyword"] == "some_unknown_keyword"].iloc[0]
-        assert unknown_row["source"] in ["not_found", "wikipedia"]
+        assert unknown_row["source"] in ["not_found", "wikidata"]
 
     def test_csv_with_invalid_json_aliases(self, temp_csv_path):
         """Test handling of CSV with invalid JSON in aliases column."""
@@ -113,51 +113,53 @@ bad_json_kw,"Definition","[invalid json"
         assert len(result_df) == 0
         assert isinstance(result_df, pd.DataFrame)
 
-    def test_wikipedia_fallback_simulation(self, keyword_client, monkeypatch):
-        """Test that Wikipedia fallback is attempted for unknown keywords."""
-        # Mock the Wikipedia API to simulate a successful lookup
-        def mock_wiki_page(self, title):
-            class MockPage:
-                def __init__(self):
-                    self.title = title
-                    self.summary = "This is a mock Wikipedia summary for testing."
-                    self.fullurl = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+    def test_wikidata_enrichment_success(self, keyword_client, monkeypatch):
+        """Test that Wikidata enrichment returns correct data for found keywords."""
+        def mock_enrich(keyword):
+            return {
+                "keyword": keyword,
+                "mlentory_id": f"mlentory:keyword:{keyword}",
+                "definition": "A mock Wikidata description for testing.",
+                "source": "wikidata",
+                "url": "http://www.wikidata.org/entity/Q12345",
+                "aliases": ["alias1", "Test Label"],
+                "wikidata_qid": "Q12345",
+                "enriched": True,
+                "entity_type": "Keyword",
+                "platform": "HF",
+                "extraction_metadata": {
+                    "extraction_method": "Wikidata API + Semantic Search",
+                    "confidence": 0.85,
+                    "wikidata_type": "artificial intelligence",
+                    "type_qids": ["Q11660"],
+                },
+            }
 
-                def exists(self):
-                    return True
+        monkeypatch.setattr(keyword_client, "_enrich_keyword", mock_enrich)
 
-            return MockPage()
-
-        monkeypatch.setattr(keyword_client.wiki, 'page', mock_wiki_page)
-
-        keywords = ["test_wikipedia_fallback"]
+        keywords = ["test_wikidata_enrichment"]
         result_df = keyword_client.get_keywords_metadata(keywords)
 
         assert len(result_df) == 1
         row = result_df.iloc[0]
 
-        assert row["keyword"] == "test_wikipedia_fallback"
-        assert row["source"] == "wikipedia"
-        assert "mock Wikipedia summary" in row["definition"]
-        assert row["url"].startswith("https://en.wikipedia.org")
+        assert row["keyword"] == "test_wikidata_enrichment"
+        assert row["source"] == "wikidata"
+        assert "mock Wikidata description" in row["definition"]
+        assert row["url"] == "http://www.wikidata.org/entity/Q12345"
+        assert row["wikidata_qid"] == "Q12345"
 
-    def test_wikipedia_page_not_found(self, keyword_client, monkeypatch):
-        """Test handling when Wikipedia page doesn't exist."""
-        def mock_wiki_page(self, title):
-            class MockPage:
-                def exists(self):
-                    return False
-            return MockPage()
+    def test_wikidata_enrichment_not_found(self, keyword_client, monkeypatch):
+        """Test handling when Wikidata returns no results for a keyword."""
+        monkeypatch.setattr(keyword_client, "_enrich_keyword", lambda kw: None)
 
-        monkeypatch.setattr(keyword_client.wiki, 'page', mock_wiki_page)
-
-        keywords = ["nonexistent_wikipedia_page_12345"]
+        keywords = ["nonexistent_keyword_12345"]
         result_df = keyword_client.get_keywords_metadata(keywords)
 
         assert len(result_df) == 1
         row = result_df.iloc[0]
 
-        assert row["keyword"] == "nonexistent_wikipedia_page_12345"
+        assert row["keyword"] == "nonexistent_keyword_12345"
         assert row["source"] == "not_found"
         assert row["definition"] is None
 
