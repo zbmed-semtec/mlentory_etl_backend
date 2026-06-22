@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
 
 from api.schemas.responses import (
@@ -44,9 +45,16 @@ from api.services.model_service import model_service
 from api.services.ro_crate_service import ro_crate_service
 from api.services.metadata_service import metadata_service
 
+from api.services.RelatedModelsController import RelatedModelsController
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Controller dependencies
+def get_related_models_controller():
+    from api.main import relatedModelsController
+    return relatedModelsController
 
 
 @router.get("/models", response_model=PaginatedResponse[ModelListItem])
@@ -440,6 +448,55 @@ async def get_model_full_history(
     except Exception as e:
         logger.error(f"Error getting model history for {model_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/models/related")
+async def get_related_models(
+    reference_model_id: str = Query(..., description="ID of the reference model"),
+    extended: bool = Query(default=False, description="Whether to include extended information for the results"),
+    limit_per_category: int = Query(default=10, ge=1, le=50, description="Maximum number of models to return per category"),
+    related_models_controller: RelatedModelsController = Depends(get_related_models_controller),
+
+):
+    """
+    Get models related to a reference model based on different criteria.
+    
+    Args:
+        reference_model_id: ID of the reference model to find related models for
+        extended: Whether to include extended information for the results
+        limit_per_category: Maximum number of models to return per category
+        related_models_controller: Injected related models controller
+
+        
+    Returns:
+        Dict containing:
+            - 'reference_model': Details of the reference model
+            - 'related_models': Dictionary with categories of related models:
+                - 'sameAuthorModels': Models by the same author(s)
+                - 'similarTaskModels': Models with similar ML tasks
+                - 'differentSizeModels': Models that are different sizes/versions of similar models
+                - 'sameBaseModels': Models based on the same base models
+                - 'relatedKeywordModels': Models with overlapping keywords
+            - 'total_related': Total number of related models found across all categories
+        
+    Raises:
+        HTTPException: If reference model not found or other errors occur
+        
+    Example:
+        /models/related?reference_model_id=<model_id>&limit_per_category=5
+    """
+    try:
+        results = related_models_controller.get_all_related_models(
+            reference_model_id=reference_model_id,
+            extended=extended,
+            limit_per_category=limit_per_category
+        )
+        return results
+        
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error retrieving related models: {str(e)}")
 
 @router.get("/models/{model_id}/with_extraction_metadata", response_model=ModelDetail)
 async def get_model_detail_with_metadata(
