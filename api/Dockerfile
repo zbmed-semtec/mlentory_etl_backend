@@ -17,15 +17,17 @@ RUN apt-get update && apt-get install -y \
 
 # Copy pyproject.toml and install dependencies
 COPY ./pyproject.toml ./
-RUN pip install --no-cache-dir --upgrade pip && \
+# Conda base images ship an old attrs; upgrading pip alone breaks poetry/cffi installs.
+RUN pip install --no-cache-dir --upgrade "attrs>=23.2.0" "cffi>=1.15" && \
+    pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir poetry && \
     poetry config virtualenvs.create false && \
     poetry install --no-interaction --no-ansi --no-root --only main && \
     pip install --no-cache-dir faiss-gpu==1.7.2
 # Copy application code
 COPY . ./api/
-COPY ../etl_loaders/ ./etl_loaders/
-COPY ../schemas/ ./schemas/
+COPY etl_loaders/ ./etl_loaders/
+COPY schemas/ ./schemas/
 
 # Expose API port
 EXPOSE 8000
