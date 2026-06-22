@@ -76,7 +76,7 @@ services:
       - "8192"
       - --enforce-eager
       - --dtype
-      - float16
+      - float32
       - --trust-remote-code
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=5)\""]
