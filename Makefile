@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env stella-init stella-up stella-down wait-stella wait-vllm check-vllm-env
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env
 
 # Default target
 .DEFAULT_GOAL := help
@@ -141,11 +141,63 @@ stella-up: ensure-env ## Start STELLA services and initialize when USE_STELLA=tr
 
 stella-init: ## Initialize STELLA databases (idempotent)
 	@echo "$(BLUE)Initializing STELLA services...$(NC)"
+	@$(MAKE) stella-sync-db-passwords
 	@sudo docker exec stella-app flask init-db || true
-	@sudo docker exec stella-app flask seed-db || true
 	@sudo docker exec stella-server flask init-db || true
-	@sudo docker exec stella-server flask seed-db || true
+	@$(MAKE) stella-seed-if-needed
+	@$(MAKE) stella-warmup
 	@echo "$(GREEN)STELLA services initialized!$(NC)"
+
+stella-seed-if-needed: ## Seed STELLA databases only when empty (avoids duplicate-key errors)
+	@if sudo docker exec stella-app-db psql -U postgres -p 5430 -d postgres -tAc \
+		"SELECT 1 FROM systems LIMIT 1" 2>/dev/null | grep -q 1; then \
+		echo "$(YELLOW)  − stella-app already seeded — skipping seed-db$(NC)"; \
+	else \
+		echo "$(BLUE)  Seeding stella-app database...$(NC)"; \
+		sudo docker exec stella-app flask seed-db || true; \
+	fi
+	@if sudo docker exec stella-server-db psql -U postgres -p 5432 -d postgres -tAc \
+		"SELECT 1 FROM roles WHERE name='Admin' LIMIT 1" 2>/dev/null | grep -q 1; then \
+		echo "$(YELLOW)  − stella-server already seeded — skipping seed-db$(NC)"; \
+	else \
+		echo "$(BLUE)  Seeding stella-server database...$(NC)"; \
+		sudo docker exec stella-server flask seed-db || true; \
+	fi
+
+stella-warmup: ## Preload MLentory search paths used by STELLA rankers (avoids first-request timeouts)
+	@echo "$(BLUE)Warming up STELLA search paths...$(NC)"
+	@for i in $$(seq 1 60); do \
+		if sudo docker exec stella-app curl -sf http://mlentory-api:8000/health >/dev/null 2>&1; then \
+			break; \
+		fi; \
+		if [ "$$i" -eq 60 ]; then \
+			echo "$(YELLOW)mlentory-api not ready — skipping STELLA warmup$(NC)"; \
+			exit 0; \
+		fi; \
+		sleep 2; \
+	done
+	@sudo docker exec stella-app curl -sf \
+		'http://mlentory-base:5000/mlentory-api:8000/api/v1/models?query=warmup&limit=1&page=1' \
+		>/dev/null 2>&1 \
+		&& echo "$(GREEN)  ✓ baseline ranker warmed up$(NC)" \
+		|| echo "$(YELLOW)  ! baseline ranker warmup failed (non-fatal)$(NC)"
+	@sudo docker exec stella-app curl -sf --max-time 120 \
+		'http://mlentory-experiment:5000/mlentory-api:8000/api/v1/models?query=warmup&limit=1&page=1' \
+		>/dev/null 2>&1 \
+		&& echo "$(GREEN)  ✓ experiment ranker warmed up$(NC)" \
+		|| echo "$(YELLOW)  ! experiment ranker warmup failed (non-fatal)$(NC)"
+
+stella-sync-db-passwords: ## Align STELLA DB passwords with .env (fixes stale Docker volumes)
+	@STELLA_APP_PW=$$(grep -E '^STELLA_POSTGRES_PW=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "'); \
+	STELLA_SERVER_PW=$$(grep -E '^STELLA_SERVER_POSTGRES_PW=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "'); \
+	if [ -n "$$STELLA_APP_PW" ] && sudo docker inspect stella-app-db >/dev/null 2>&1; then \
+		echo "$(BLUE)Syncing stella-app-db password from .env...$(NC)"; \
+		sudo docker exec stella-app-db psql -U postgres -p 5430 -c "ALTER USER postgres PASSWORD '$$STELLA_APP_PW';" >/dev/null 2>&1 || true; \
+	fi; \
+	if [ -n "$$STELLA_SERVER_PW" ] && sudo docker inspect stella-server-db >/dev/null 2>&1; then \
+		echo "$(BLUE)Syncing stella-server-db password from .env...$(NC)"; \
+		sudo docker exec stella-server-db psql -U postgres -p 5432 -c "ALTER USER postgres PASSWORD '$$STELLA_SERVER_PW';" >/dev/null 2>&1 || true; \
+	fi
 
 stella-down: ## Stop STELLA services
 	@echo "$(BLUE)Stopping STELLA services...$(NC)"
