@@ -36,7 +36,6 @@ from etl_extractors.hf import HFHelper
 from etl_extractors.hf.hf_citation_normalization import normalize_citations_from_chunk
 from etl_extractors.hf.hf_parameter_count_inference import infer_parameter_count_labels
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
-from etl_transformers.hf.map_llm_schema_properties import map_llm_schema_properties
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
 from schemas.croissant import CroissantDataset
@@ -622,76 +621,12 @@ def hf_create_translation_mapping(
     return str(output_path)
 
 
-def build_partial_llm_properties(
-    raw_models: List[Dict[str, Any]],
-    llm_schema_by_model: Dict[str, Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """Build indexed partial records from per-model LLM schema extraction output."""
-    partials: List[Dict[str, Any]] = []
-    for idx, raw_model in enumerate(raw_models):
-        model_id = raw_model.get("modelId", f"unknown_{idx}")
-        llm_record = llm_schema_by_model.get(model_id, {})
-        partial: Dict[str, Any] = {
-            "_model_id": model_id,
-            "_index": idx,
-        }
-        if isinstance(llm_record, dict):
-            partial.update(llm_record)
-        partials.append(partial)
-    return partials
-
-
-@asset(
-    group_name="hf_transformation",
-    ins={
-        "models_data": AssetIn("hf_normalized_run_folder"),
-        "llm_schema_path": AssetIn("hf_llm_schema_properties"),
-    },
-    tags={"pipeline": "hf_etl", "stage": "transform"},
-)
-def hf_extract_llm_properties(
-    models_data: Tuple[str, str],
-    llm_schema_path: str,
-) -> str:
-    """
-    Stage LLM schema extraction results for merge into normalized MLModels.
-
-    Reads ``llm_schema_properties.json`` from the raw run folder and writes
-    ``partial_llm_properties.json`` indexed by model order.
-    """
-    raw_data_json_path, normalized_folder = models_data
-
-    with open(raw_data_json_path, "r", encoding="utf-8") as f:
-        raw_models = json.load(f)
-    if not isinstance(raw_models, list):
-        raise ValueError(f"Expected list of models at {raw_data_json_path}")
-
-    llm_schema_by_model: Dict[str, Dict[str, Any]] = {}
-    llm_path = Path(llm_schema_path)
-    if llm_path.is_file():
-        with open(llm_path, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
-        if isinstance(loaded, dict):
-            llm_schema_by_model = loaded
-    else:
-        logger.warning("LLM schema properties file not found: %s", llm_schema_path)
-
-    partials = build_partial_llm_properties(raw_models, llm_schema_by_model)
-    output_path = Path(normalized_folder) / "partial_llm_properties.json"
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(partials, f, indent=2, ensure_ascii=False, default=_json_default)
-
-    logger.info("Saved %s LLM partial property records to %s", len(partials), output_path)
-    return str(output_path)
-
-
 @asset(
     group_name="hf_transformation",
     ins={
         "models_data": AssetIn("hf_normalized_run_folder"),
         "basic_properties": AssetIn("hf_extract_basic_properties"),
         "entity_linking": AssetIn("hf_entity_linking"),
-        "llm_properties": AssetIn("hf_extract_llm_properties"),
     },
     tags={"pipeline": "hf_etl", "stage": "transform"}
 )
@@ -699,7 +634,6 @@ def hf_models_normalized(
     models_data: Tuple[str, str],
     basic_properties: str,
     entity_linking: str,
-    llm_properties: str,
 ) -> Tuple[str, str]:
     """
     Merge partial schemas and create final FAIR4ML MLModel objects.
@@ -711,7 +645,6 @@ def hf_models_normalized(
         models_data: Tuple of (raw_data_json_path, normalized_folder)
         basic_properties: Path to basic properties partial schema
         entity_linking: Path to entity linking JSON file
-        llm_properties: Path to partial LLM properties JSON file
 
     Returns:
         Path to the saved normalized models JSON file
@@ -740,15 +673,6 @@ def hf_models_normalized(
 
     logger.info(f"Loaded entity linking data for {len(entity_linking_data)} models")
 
-    with open(llm_properties, "r", encoding="utf-8") as f:
-        llm_props_list = json.load(f)
-    llm_props_by_index = {
-        item["_index"]: item
-        for item in llm_props_list
-        if isinstance(item, dict) and "_index" in item
-    }
-    logger.info("Loaded %s LLM partial property records", len(llm_props_by_index))
-
     # Create index mapping for efficient merging
     basic_props_by_index = {item["_index"]: item for item in basic_props}
     
@@ -758,7 +682,6 @@ def hf_models_normalized(
         basic_props_by_index,
         entity_linking_data,
         raw_models,
-        llm_props_by_index,
     )
     
     # Validate and create MLModel instances
@@ -803,13 +726,11 @@ def merge_model_partial_schemas(
     basic_props_by_index: Dict[int, Dict[str, Any]],
     entity_linking_data: Dict[str, Dict[str, Any]],
     raw_models: List[Dict[str, Any]],
-    llm_props_by_index: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Merge partial schemas and create final FAIR4ML MLModel objects.
     """
     merged_schemas: List[Dict[str, Any]] = []
-    llm_props_by_index = llm_props_by_index or {}
     
     for idx, raw_model in enumerate(raw_models):
         model_id = raw_model.get("modelId", f"unknown_{idx}")
@@ -839,15 +760,6 @@ def merge_model_partial_schemas(
                 merged["inLanguage"] = model_entities.get("inLanguage", [])
                 merged["mlTask"] = model_entities["tasks"]
                 merged["sharedBy"] = model_entities["sharedby"][0] if len(model_entities["sharedby"]) > 0 else merged.get("sharedBy")
-
-            llm_record = llm_props_by_index.get(idx, {})
-            if llm_record:
-                llm_overlay = map_llm_schema_properties(llm_record, existing_partial=merged)
-                if "extraction_metadata" in llm_overlay:
-                    merged_meta = dict(merged.get("extraction_metadata", {}))
-                    merged_meta.update(llm_overlay.pop("extraction_metadata"))
-                    merged["extraction_metadata"] = merged_meta
-                merged.update(llm_overlay)
 
             merged_schemas.append(merged)
             

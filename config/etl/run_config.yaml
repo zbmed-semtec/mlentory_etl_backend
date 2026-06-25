@@ -30,12 +30,6 @@ platforms:
     enrichment_threads: 4
     # Offset for pagination (if applicable)
     offset: 100
-    # LLM schema extraction from model cards (6 FAIR4ML/INSILICO properties)
-    enable_llm_schema_extraction: false
-    llm_schema_batch_size: 20
-    llm_schema_max_tokens: 512
-    llm_schema_concurrency: 4
-    # llm_schema_metadata_dir defaults to config/hf_schema_extraction (project root)
 
   # OpenML Configuration
   openml:

@@ -8,7 +8,6 @@ Secrets (Neo4j, Elasticsearch credentials) remain in .env files.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -16,11 +15,6 @@ import yaml
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
-
-
-def _default_llm_schema_metadata_dir() -> str:
-    """Default directory for LLM schema extraction CSV config (questions + templates)."""
-    return str(Path(__file__).parent.parent / "config" / "hf_schema_extraction")
 
 
 # ========== Configuration Models ==========
@@ -47,29 +41,6 @@ class HuggingFaceConfig(BaseModel):
     base_model_iterations: int = Field(default=1, ge=0)
     enrichment_threads: int = Field(default=4, ge=1)
     offset: int = Field(default=0, ge=0)
-    enable_llm_schema_extraction: bool = Field(
-        default=False,
-        description="Run LLM-based schema property extraction from model cards",
-    )
-    llm_schema_batch_size: int = Field(
-        default=20,
-        ge=1,
-        description="Number of models processed per LLM extraction batch",
-    )
-    llm_schema_max_tokens: int = Field(
-        default=512,
-        ge=1,
-        description="Max tokens per LLM property extraction response",
-    )
-    llm_schema_concurrency: int = Field(
-        default=4,
-        ge=1,
-        description="Max parallel vLLM requests per model during schema extraction",
-    )
-    llm_schema_metadata_dir: str = Field(
-        default_factory=_default_llm_schema_metadata_dir,
-        description="Directory containing llm_questions.csv and llm_templates.csv",
-    )
 
 
 class OpenMLConfig(BaseModel):
@@ -204,18 +175,6 @@ class ConfigLoader:
 def get_hf_config() -> HuggingFaceConfig:
     """Get HuggingFace platform configuration."""
     return ConfigLoader.get_config().platforms.huggingface
-
-
-def is_llm_schema_extraction_enabled() -> bool:
-    """
-    Whether LLM schema property extraction should run.
-
-    ``HF_ENABLE_LLM_SCHEMA_EXTRACTION`` env var overrides ``run_config.yaml`` when set.
-    """
-    env_val = os.getenv("HF_ENABLE_LLM_SCHEMA_EXTRACTION")
-    if env_val is not None and env_val.strip() != "":
-        return env_val.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-    return get_hf_config().enable_llm_schema_extraction
 
 
 def get_openml_config() -> OpenMLConfig:
