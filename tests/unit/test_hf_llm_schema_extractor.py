@@ -90,6 +90,7 @@ class TestHFLLMSchemaExtractor:
             client=mock_client,
             prompt_builder=prompt_builder,
             preprocess_cards=False,
+            concurrency=1,
         )
         extractor.prompt_builder.questions = {
             "fair4ml:domain": prompt_builder.questions["fair4ml:domain"],
@@ -130,6 +131,7 @@ class TestHFLLMSchemaExtractor:
             client=mock_client,
             prompt_builder=prompt_builder,
             preprocess_cards=True,
+            concurrency=1,
         )
 
         results = extractor.extract_properties({"org/test-model": SAMPLE_CARD})
@@ -154,6 +156,7 @@ class TestHFLLMSchemaExtractor:
             client=mock_client,
             prompt_builder=prompt_builder,
             preprocess_cards=True,
+            concurrency=1,
         )
 
         results = extractor.extract_properties({"org/empty": "   "})
@@ -161,3 +164,25 @@ class TestHFLLMSchemaExtractor:
 
         mock_client.chat_completion.assert_not_called()
         assert model_result["fair4ml:description"] is None
+
+    def test_concurrent_property_extraction_uses_thread_pool(
+        self,
+        prompt_builder: LLMSchemaPromptBuilder,
+    ):
+        mock_client = MagicMock()
+        mock_client.model_name = "mock-model"
+        mock_client.chat_completion.return_value = '{"result": "ok"}'
+
+        extractor = HFLLMSchemaExtractor(
+            client=mock_client,
+            prompt_builder=prompt_builder,
+            preprocess_cards=False,
+            concurrency=4,
+        )
+
+        results = extractor.extract_properties({"org/test-model": SAMPLE_CARD})
+        model_result = results["org/test-model"]
+
+        assert mock_client.chat_completion.call_count == len(prompt_builder.property_names)
+        for property_name in prompt_builder.property_names:
+            assert model_result[property_name] == "ok"

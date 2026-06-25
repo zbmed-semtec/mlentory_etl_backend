@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -42,8 +43,10 @@ class VLLMSchemaClient:
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
         self.api_key = api_key
-        self._client = client
-        self._owns_client = client is None
+        self._injected_client = client
+        self._thread_local = threading.local()
+        self._clients_lock = threading.Lock()
+        self._clients: list[httpx.Client] = []
 
     @classmethod
     def from_env(
@@ -62,14 +65,23 @@ class VLLMSchemaClient:
         )
 
     def _get_client(self) -> httpx.Client:
-        if self._client is None:
-            self._client = httpx.Client(timeout=self.timeout_seconds)
-        return self._client
+        if self._injected_client is not None:
+            return self._injected_client
+        client = getattr(self._thread_local, "client", None)
+        if client is None:
+            client = httpx.Client(timeout=self.timeout_seconds)
+            self._thread_local.client = client
+            with self._clients_lock:
+                self._clients.append(client)
+        return client
 
     def close(self) -> None:
-        if self._owns_client and self._client is not None:
-            self._client.close()
-            self._client = None
+        if self._injected_client is not None:
+            return
+        with self._clients_lock:
+            for client in self._clients:
+                client.close()
+            self._clients.clear()
 
     def __enter__(self) -> "VLLMSchemaClient":
         return self

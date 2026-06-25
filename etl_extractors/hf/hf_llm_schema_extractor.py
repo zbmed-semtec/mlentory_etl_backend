@@ -5,6 +5,8 @@ Orchestrate LLM-based schema property extraction from Hugging Face model cards.
 from __future__ import annotations
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Optional
 
 from etl.config import get_hf_config
@@ -30,12 +32,21 @@ class HFLLMSchemaExtractor:
         client: Optional[VLLMSchemaClient] = None,
         prompt_builder: Optional[LLMSchemaPromptBuilder] = None,
         preprocess_cards: bool = True,
+        concurrency: Optional[int] = None,
     ) -> None:
         cfg = get_hf_config()
         self.metadata_dir = metadata_dir or cfg.llm_schema_metadata_dir
         self.batch_size = cfg.llm_schema_batch_size
         self.max_tokens = cfg.llm_schema_max_tokens
         self.preprocess_cards = preprocess_cards
+        if concurrency is not None:
+            self.concurrency = concurrency
+        else:
+            env_concurrency = os.getenv("HF_LLM_SCHEMA_CONCURRENCY")
+            if env_concurrency is not None and env_concurrency.strip() != "":
+                self.concurrency = max(1, int(env_concurrency))
+            else:
+                self.concurrency = cfg.llm_schema_concurrency
 
         self.prompt_builder = prompt_builder or LLMSchemaPromptBuilder()
         if not self.prompt_builder.property_names:
@@ -111,14 +122,33 @@ class HFLLMSchemaExtractor:
 
         model_result: Dict[str, Any] = {EXTRACTION_METADATA_KEY: {}}
 
-        for property_name in self.prompt_builder.property_names:
-            value, meta = self._extract_single_property(
-                model_id=model_id,
-                property_name=property_name,
-                card_text=prepared_text,
-            )
-            model_result[property_name] = value
-            model_result[EXTRACTION_METADATA_KEY][property_name] = meta
+        property_names = list(self.prompt_builder.property_names)
+        if self.concurrency <= 1 or len(property_names) <= 1:
+            for property_name in property_names:
+                value, meta = self._extract_single_property(
+                    model_id=model_id,
+                    property_name=property_name,
+                    card_text=prepared_text,
+                )
+                model_result[property_name] = value
+                model_result[EXTRACTION_METADATA_KEY][property_name] = meta
+            return model_result
+
+        with ThreadPoolExecutor(max_workers=self.concurrency) as executor:
+            futures = {
+                executor.submit(
+                    self._extract_single_property,
+                    model_id=model_id,
+                    property_name=property_name,
+                    card_text=prepared_text,
+                ): property_name
+                for property_name in property_names
+            }
+            for future in as_completed(futures):
+                property_name = futures[future]
+                value, meta = future.result()
+                model_result[property_name] = value
+                model_result[EXTRACTION_METADATA_KEY][property_name] = meta
 
         return model_result
 

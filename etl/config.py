@@ -61,6 +61,11 @@ class HuggingFaceConfig(BaseModel):
         ge=1,
         description="Max tokens per LLM property extraction response",
     )
+    llm_schema_concurrency: int = Field(
+        default=4,
+        ge=1,
+        description="Max parallel vLLM requests per model during schema extraction",
+    )
     llm_schema_metadata_dir: str = Field(
         default_factory=_default_llm_schema_metadata_dir,
         description="Directory containing llm_questions.csv and llm_templates.csv",
