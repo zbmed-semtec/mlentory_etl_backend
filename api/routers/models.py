@@ -520,6 +520,7 @@ async def get_model_detail_with_metadata(
 
 # Specific routes MUST be defined before dynamic routes
 @router.get("/models/ro-crate")
+@router.get("/models/ro_crate")
 async def get_model_ro_crate(
     model_id: str = Query(..., description="Model ID (URI or compact ID)"),
 ) -> Dict[str, Any]:
