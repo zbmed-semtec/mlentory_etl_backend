@@ -24,6 +24,27 @@ def test_build_model_document_includes_llm_fields():
     assert doc.data_splits == "80/10/10 train/val/test"
     assert doc.adaption_techniques == "fine-tuning"
     assert doc.parameter_count == "7B"
+    assert doc.db_identifier == ["https://w3id.org/mlentory/model/hf/test-model"]
+    assert doc.mlentory_id
+    assert doc.meta.id == doc.mlentory_id
+
+
+def test_build_model_document_sets_mlentory_graph_id():
+    graph_id = "https://w3id.org/mlentory/mlentory_graph/abc123"
+    model = {
+        "https://schema.org/identifier": [
+            "https://doi.org/10.1234/example",
+            graph_id,
+        ],
+        "https://schema.org/name": "test-model",
+    }
+    doc = build_model_document(model, "hf_models", {})
+    assert doc.mlentory_id == graph_id
+    assert doc.db_identifier == [
+        "https://doi.org/10.1234/example",
+        graph_id,
+    ]
+    assert doc.meta.id == graph_id
 
 
 def test_extracted_data_from_indexed_model():

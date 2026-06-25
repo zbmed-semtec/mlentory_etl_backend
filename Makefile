@@ -341,7 +341,7 @@ hf-load: etl-check ## HF loading stage only (Neo4j, RDF)
 
 hf-index: etl-check ## HF Elasticsearch indexing only
 	@echo "$(BLUE)Running HF Elasticsearch indexing...$(NC)"
-	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="index"'
+	$(DAGSTER_ETL) --select 'hf_index_models_elasticsearch'
 
 hf-vector: etl-check ## HF vector backfill only
 	@echo "$(BLUE)Running HF vector backfill...$(NC)"
@@ -361,7 +361,7 @@ ai4life-load: etl-check ## AI4Life loading stage only (Neo4j, RDF)
 
 ai4life-index: etl-check ## AI4Life Elasticsearch indexing only
 	@echo "$(BLUE)Running AI4Life Elasticsearch indexing...$(NC)"
-	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="index"'
+	$(DAGSTER_ETL) --select 'ai4life_index_models_elasticsearch'
 
 ai4life-vector: etl-check ## AI4Life vector backfill only
 	@echo "$(BLUE)Running AI4Life vector backfill...$(NC)"
