@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
+from schemas.fair4ml.citation import SCHEMA_ORG_CITATION, ModelCitationWork
+
 
 class ValidPeriod(BaseModel):
     """
@@ -159,6 +161,15 @@ class MLModel(BaseModel):
         description="Reference publication for the model (schema:referencePublication)",
         alias="https://w3id.org/codemeta/referencePublication"
     )
+
+    citation: List[ModelCitationWork] = Field(
+        default_factory=list,
+        description=(
+            "Structured bibliographic references for the model (schema:citation); "
+            "JSON-LD CreativeWork-shaped entries, stored as model-local data"
+        ),
+        alias=SCHEMA_ORG_CITATION,
+    )
     
     # ========== ML Task & Category (fair4ml) ==========
     mlTask: Optional[list[str]] = Field(
@@ -171,7 +182,12 @@ class MLModel(BaseModel):
         description="Category/architecture of the model, e.g., 'transformer', 'CNN', 'LLM' (fair4ml:modelCategory)",
         alias="https://w3id.org/fair4ml/modelCategory"
     )
-    
+    domain: Optional[str] = Field(
+        default=None,
+        description="Application or subject-matter domain of the model (fair4ml:domain)",
+        alias="https://w3id.org/fair4ml/domain",
+    )
+
     # ========== Model Lineage (fair4ml) ==========
     baseModel: Optional[List[str]] = Field(
         default_factory=list,
@@ -239,7 +255,17 @@ class MLModel(BaseModel):
         description="Evaluation metrics and their values (fair4ml:evaluationMetrics)",
         alias="https://w3id.org/fair4ml/evaluationMetrics"
     )
-    
+    dataSplits: Optional[str] = Field(
+        default=None,
+        description="Dataset train/validation/test split strategy and values (insilico:dataSplits)",
+        alias="https://w3id.org/insilico/dataSplits",
+    )
+    adaptionTechniques: Optional[str] = Field(
+        default=None,
+        description="Training or fine-tuning adaptation technique (insilico:adaptionTechniques)",
+        alias="https://w3id.org/insilico/adaptionTechniques",
+    )
+
     # ========== Additional URLs (schema.org + codemeta) ==========
     discussionUrl: Optional[str] = Field(
         default=None,
@@ -268,7 +294,15 @@ class MLModel(BaseModel):
         description="Memory/storage requirements for the model (schema:memoryRequirements)",
         alias="https://schema.org/memoryRequirements"
     )
-    
+    parameterCount: Optional[str] = Field(
+        default=None,
+        description=(
+            "Approximate parameter count or scale label inferred from naming or documentation "
+            "(e.g., '7B', '540M') (fair4ml:parameterCount)"
+        ),
+        alias="https://w3id.org/fair4ml/parameterCount",
+    )
+
     # ========== Environmental Impact (fair4ml) ==========
     hasCO2eEmissions: Optional[str] = Field(
         default=None,

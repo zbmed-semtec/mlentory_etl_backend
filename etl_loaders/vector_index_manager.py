@@ -24,6 +24,32 @@ from etl_loaders.elasticsearch_store import ElasticsearchConfig, create_elastics
 logger = logging.getLogger(__name__)
 
 
+def _extracted_data_from_indexed_model(model_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Build extracted_data for searchable text from indexed model fields."""
+    extracted: Dict[str, Any] = {}
+
+    domain = model_data.get("domain")
+    if domain:
+        extracted["domain"] = domain
+
+    model_category = model_data.get("model_category") or model_data.get("architecture")
+    if model_category:
+        if isinstance(model_category, list):
+            extracted["architecture"] = ", ".join(str(c) for c in model_category if c)
+        else:
+            extracted["architecture"] = str(model_category)
+
+    adaption = model_data.get("adaption_techniques") or model_data.get("trainingType")
+    if adaption:
+        extracted["trainingType"] = adaption
+
+    data_splits = model_data.get("data_splits")
+    if data_splits:
+        extracted["data_splits"] = data_splits
+
+    return extracted
+
+
 class VectorIndexManager:
     """
     Manager for adding vector embeddings to existing Elasticsearch indices.
@@ -258,9 +284,11 @@ class VectorIndexManager:
                     "modalities": {"type": "keyword"},
                     "domain": {"type": "keyword"},
                     "architecture": {"type": "text"},
-                    "modelSize": {"type": "keyword"},
+                    "parameterCount": {"type": "text"},
                     "dataset": {"type": "text"},
                     "trainingType": {"type": "keyword"},
+                    "data_splits": {"type": "text"},
+                    "adaption_techniques": {"type": "keyword"},
                     
                     # MPNet vector field
                     "model_vector": {
@@ -373,10 +401,22 @@ class VectorIndexManager:
         if architecture:
             text_parts.append(f"The architecture is {architecture}.")
         
-        # Model size (extracted)
-        model_size = extracted_data.get('modelSize') or extracted_data.get('model_size')
-        if model_size:
-            text_parts.append(f"The model size is {model_size}.")
+        # Data splits (extracted)
+        data_splits = extracted_data.get('data_splits') or model_data.get('data_splits')
+        if data_splits:
+            text_parts.append(f"Data splits: {data_splits}.")
+        
+        # Parameter count scale label (extracted or from source doc)
+        # Canonical FAIR4ML-style field; ``model_data`` may still carry legacy ``modelSize`` from older indices
+        pc_label = (
+            extracted_data.get("parameterCount")
+            or model_data.get("parameterCount")
+            or model_data.get("modelSize")
+            or model_data.get("model_size")
+            or model_data.get("parameter_count")
+        )
+        if pc_label:
+            text_parts.append(f"The model has approximately {pc_label} parameters.")
         
         # Datasets
         datasets = model_data.get('datasets') or model_data.get('dataset')
@@ -488,9 +528,7 @@ class VectorIndexManager:
                         continue
                     
                     try:
-                        # For now, we don't have metadata extraction in etl_backend
-                        # So we'll use empty extracted_data
-                        extracted_data = {}
+                        extracted_data = _extracted_data_from_indexed_model(model_data)
                         
                         # Prepare searchable text using structured format
                         searchable_text = self.prepare_searchable_text(model_data, extracted_data)
@@ -502,11 +540,38 @@ class VectorIndexManager:
                         
                         # Generate embedding using integrated model
                         model_vector = self._encode_text(searchable_text)
-                        
+
+                        _skip_extracted = frozenset(
+                            {
+                                "parameterCount",
+                                "modelSize",
+                                "model_size",
+                                "parameter_count",
+                                "citation",
+                                "https://schema.org/citation",
+                            }
+                        )
+                        vector_doc = {
+                            k: v
+                            for k, v in extracted_data.items()
+                            if k not in _skip_extracted
+                        }
+                        pc_val = (
+                            extracted_data.get("parameterCount")
+                            or model_data.get("parameterCount")
+                            or model_data.get("modelSize")
+                            or model_data.get("model_size")
+                            or model_data.get("parameter_count")
+                        )
+                        if pc_val is not None:
+                            vector_doc["parameterCount"] = str(pc_val)
+                        if model_data.get("adaption_techniques"):
+                            vector_doc["adaption_techniques"] = model_data["adaption_techniques"]
+
                         # Prepare update document with extracted fields, vector, and searchable text
                         # Only update/add vector-related fields, keep existing document data intact
                         update_doc = {
-                            **extracted_data,  # Extracted fields (empty for now)
+                            **vector_doc,
                             "model_vector": model_vector,
                             "searchable_text": searchable_text,  # Store the text used for embedding
                             "vector_created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),

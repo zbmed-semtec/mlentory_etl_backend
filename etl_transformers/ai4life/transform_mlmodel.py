@@ -17,6 +17,7 @@ from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 import pycountry
 import json
 from typing import Any, List, Dict
+from .ai4life_citations import normalize_citations_from_ai4life_raw
 from etl_transformers.common.utils import (
     extract_normalized_doi,
     build_identifier,
@@ -174,8 +175,8 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     author = _pick_first_author_name(raw_model.get("author")) or shared_by
     
     modelCategory = str(raw_model.get("modelArchitecture", "")).strip()
-    referencePublication = str(raw_model.get("referencePublication", "")).strip()
     intentedUse = str(raw_model.get("intendedUse", "")).strip()
+    citation = normalize_citations_from_ai4life_raw(raw_model)
 
     date_created = str(raw_model.get("dateCreated", "")).strip()
     date_modified = str(raw_model.get("dateModified", "")).strip()
@@ -201,8 +202,8 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "author": author,
         "sharedBy": shared_by,
         "modelCategory": modelCategory,
-        "referencePublication": referencePublication,
-        "intendedUse":intentedUse,
+        "citation": citation,
+        "intendedUse": intentedUse,
         "dateCreated": date_created,
         "dateModified": date_modified,
         "datePublished": date_published,
@@ -300,11 +301,14 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
             source_field="modelCategory",
             notes="Often missing in AI4Life",
         ),
-        "referencePublication": _create_extraction_metadata(
+        "citation": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
             confidence=1.0,
-            source_field="referencePublication",
-            notes="Often missing in AI4Life",
+            source_field="citation, referencePublication",
+            notes=(
+                "schema.org citation from manifest.cite and Zenodo DOI URL; "
+                "referencePublication not emitted on MLModel (aligned with HF)"
+            ),
         ),
         "intendedUse": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",

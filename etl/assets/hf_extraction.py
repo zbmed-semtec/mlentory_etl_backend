@@ -12,6 +12,7 @@ import pandas as pd
 from dagster import asset, AssetIn
 
 from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper
+from etl_extractors.hf.hf_citation_normalization import select_citation_chunk_per_model
 from etl.config import get_hf_config
 
 
@@ -544,44 +545,17 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
         chunks_data: Tuple of ({model_id: list_of_chunks}, run_folder)
 
     Returns:
-        Tuple of ({model_id: identified_chunk}, run_folder)
+        Path to ``chunks_citation.json`` (per-model selected chunk dict or null)
     """
     chunks_dict, run_folder = chunks_data
-    enrichment = HFEnrichment()
-    output_root = Path(run_folder).parent.parent
-
-    json_path = enrichment.identifiers["citation"].identify_from_chunks(chunks_dict, output_root)
-
-    # Move to run folder with clean name
+    selected = select_citation_chunk_per_model(chunks_dict)
     final_path = Path(run_folder) / "chunks_citation.json"
-    Path(json_path).rename(final_path)
-    
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(final_path, "w", encoding="utf-8") as f:
+        json.dump(selected, f, indent=2, ensure_ascii=False)
+
     logger.info(f"Citation chunks saved to {final_path}")
     return str(final_path)
-
-@asset(
-    group_name="hf_enrichment",
-    ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl", "stage": "extract"}
-)
-def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, str | None], str]:
-    """
-    Identify model size per model from raw HF models.
-
-    Args:
-        models_data: Tuple of (models_json_path, run_folder)
-
-    Returns:
-        Tuple of ({model_id: model_size(e.g. 7B, 540M)}, run_folder)
-    """
-    models_json_path, run_folder = models_data
-    enrichment = HFEnrichment()
-    models_df = HFHelper.load_models_dataframe(models_json_path)
-
-    model_sizes = enrichment.identifiers["modelsize"].identify_per_model(models_df)
-    logger.info(f"Identified model size for {len(model_sizes)} models")
-
-    return (model_sizes, run_folder)
 
 @asset(
     group_name="hf_enrichment",
