@@ -1,5 +1,5 @@
 import mistune
-from html_to_markdown import convert as convert_to_md
+from markdownify import markdownify as md
 import logging
 from datetime import datetime
 import graphviz
@@ -9,9 +9,9 @@ import uuid
 
 class MDParserChunker:
 
-    def __init__(self):
+    def __init__(self, logger=None):
 
-        self.logger = None # TODO: Add logger support
+        self.logger = logger # TODO: implement logging in the class methods
 
     def generate_ast(self, model_card):
         """
@@ -70,7 +70,7 @@ class MDParserChunker:
                 if not html_str.strip():
                     return []
 
-                md_str = convert_to_md(html_str)
+                md_str = md(html_str)
                 sub_ast = mistune_generator(md_str)
 
                 unwrapped_nodes = []
@@ -234,8 +234,7 @@ class MDParserChunker:
                         granular_type = "code"
 
                     elif child_node.get("section_type") in TABLE_TYPES:
-                        # implement table chunking logic
-                        granular_text = "TABLE (TO BE IMPLEMENTED)"
+                        granular_text = _get_all_text(child_node)
                         granular_type = "table"
 
                     else:
