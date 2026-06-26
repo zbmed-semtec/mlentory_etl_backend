@@ -66,7 +66,6 @@ services:
         --max-model-len 65536
         --enable-prefix-caching
         --trust-remote-code
-        --chat-template /app/metadata/tool_chat_template_gemma4.jinja
         --reasoning-parser gemma4
         --reasoning-config '{"reasoning_start_str":"<|channel>","reasoning_end_str":"<channel|>"}'
       restart: unless-stopped

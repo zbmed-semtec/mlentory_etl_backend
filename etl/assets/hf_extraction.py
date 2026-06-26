@@ -11,7 +11,8 @@ import pandas as pd
 
 from dagster import asset, AssetIn
 
-from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper, LLMSchemaPropertyExtractor, LLMConfig
+from etl import LLMConfig
+from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper, HFLLMSchemaPropertyExtractor
 from etl.config import get_hf_config
 
 
@@ -610,23 +611,20 @@ def hf_llm_schema_extractor(chunks_data: Tuple[Dict[str, List[dict]], str]) -> T
     for model_id, chunks in chunks_dict.items():
         preprocessed_chunks[model_id] = preprocess_chunks(chunks)
 
-    llm_extractor = LLMSchemaPropertyExtractor(logger=logger)
-    llm_extractor.load_metadata(metadata_dir=str(LLMConfig.DIR_METADATA))
-    llm_extractor.load_llm(llm_kwargs=LLMConfig.LLM_KWARGS)
+    config = LLMConfig()
+    llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=config)
+    llm_extractor.load_metadata()
+    llm_extractor.load_llm()
     llm_extractor.extract_properties(preprocessed_chunks, 
-                                     batch_size=LLMConfig.BATCH_SIZE,
-                                     return_result=False,
-                                     sampler_kwargs=LLMConfig.SAMPLER_KWARGS,
-                                     chat_template_kwargs=LLMConfig.CHAT_TEMPLATE_KWARGS,
-                                     connection_retry_delay=LLMConfig.CONNECTION_RETRY_DELAY)
+                                     return_result=False)
+    result = llm_extractor.parse_llm_output()
     
-    # Move to run folder with clean name
     final_path = Path(run_folder) / "llm_extraction_results.json"
     with open(final_path, "w", encoding="utf-8") as f:
-        json.dump(llm_extractor.extraction_results, f, indent=4)
+        json.dump(result, f, indent=4)
     
     logger.info(f"LLM extraction results saved to {final_path}")
-    return (llm_extractor.extraction_results, str(final_path))
+    return (result, str(final_path))
 
 @asset(
     group_name="hf_enrichment",
