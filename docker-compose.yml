@@ -40,8 +40,9 @@ services:
   vllm:
     container_name: vllm
     hostname: vllm
-    # v0.8.x legacy engine supports Tesla V100 (sm_70); latest vLLM v1 engine does not
-    image: vllm/vllm-openai:v0.8.5
+    # Gemma 4 requires the gemma4 image tag (standard :latest lacks gemma4 reasoning support)
+    image: vllm/vllm-openai:gemma4
+    shm_size: 16gb
     ports:
       - "8003:8000"  # Map container port 8000 to host port 8003
     volumes:
@@ -58,25 +59,32 @@ services:
               capabilities: [gpu]
               count: all
     environment:
-      - VLLM_USE_V1=0
       - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
     command:
       - --model
-      - ${VLLM_MODEL:-google/gemma-3-4b-it}
+      - ${VLLM_MODEL:-google/gemma-4-E4B-it}
       - --host
       - 0.0.0.0
       - --port
       - "8000"
       - --served-model-name
-      - ${VLLM_MODEL:-google/gemma-3-4b-it}
-      - --limit-mm-per-prompt
-      - image=0
+      - ${VLLM_MODEL:-google/gemma-4-E4B-it}
+      - --max-num-seqs
+      - "256"
+      - --gpu-memory-utilization
+      - "0.80"
       - --max-model-len
-      - "8192"
-      - --enforce-eager
+      - "32768"
+      - --enable-prefix-caching
+      - --trust-remote-code
+      - --reasoning-parser
+      - gemma4
       - --dtype
       - float32
-      - --trust-remote-code
+      - --tensor-parallel-size
+      - "2"
+      - --reasoning-config
+      - '{"reasoning_start_str":"<|channel>","reasoning_end_str":"<channel|>"}'
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=5)\""]
       interval: 30s

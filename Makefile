@@ -27,7 +27,7 @@ ensure-env: ## Ensure .env exists (copy from .env.example if missing)
 	fi
 
 check-vllm-env: ## Verify HuggingFace token is set when using gated models
-	@VLLM_MODEL=$$(grep -E '^VLLM_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' || echo google/gemma-3-4b-it); \
+	@VLLM_MODEL=$$(grep -E '^VLLM_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' || echo google/gemma-4-E4B-it); \
 	HF_TOKEN_LEN=$$(awk -F= '/^HUGGINGFACE_API_TOKEN=/{print length($$2)}' .env 2>/dev/null || echo 0); \
 	if [ "$$HF_TOKEN_LEN" -eq 0 ]; then \
 		echo "$(YELLOW)WARNING: HUGGINGFACE_API_TOKEN is empty in .env$(NC)"; \
@@ -37,7 +37,7 @@ check-vllm-env: ## Verify HuggingFace token is set when using gated models
 	fi
 
 wait-vllm: ## Wait for vLLM to serve /v1/models (model load can take several minutes)
-	@echo "$(BLUE)Waiting for vLLM to be ready (google/gemma-3-4b-it — load may take several minutes)...$(NC)"
+	@echo "$(BLUE)Waiting for vLLM to be ready (google/gemma-4-E4B-it — load may take several minutes)...$(NC)"
 	@for i in $$(seq 1 90); do \
 		if curl -sf http://localhost:8003/v1/models >/dev/null 2>&1; then \
 			echo "$(GREEN)vLLM is ready$(NC)"; \
