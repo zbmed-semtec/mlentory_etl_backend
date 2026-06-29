@@ -12,6 +12,7 @@ def test_build_model_document_includes_llm_fields():
         "https://schema.org/identifier": ["https://w3id.org/mlentory/model/hf/test-model"],
         "https://schema.org/name": "test-model",
         "https://schema.org/description": "LLM summary",
+        "https://schema.org/abstract": "Original readme excerpt",
         "https://w3id.org/fair4ml/domain": "healthcare",
         "https://w3id.org/fair4ml/modelCategory": ["transformer"],
         "https://w3id.org/insilico/dataSplits": "80/10/10 train/val/test",
@@ -19,6 +20,8 @@ def test_build_model_document_includes_llm_fields():
         "https://w3id.org/fair4ml/parameterCount": "7B",
     }
     doc = build_model_document(model, "hf_models", {})
+    assert doc.description == "LLM summary"
+    assert doc.abstract == "Original readme excerpt"
     assert doc.domain == "healthcare"
     assert doc.model_category == ["transformer"]
     assert doc.data_splits == "80/10/10 train/val/test"

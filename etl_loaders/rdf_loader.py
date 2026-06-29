@@ -62,6 +62,7 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         
         # Description & documentation
         "https://schema.org/description",
+        "https://schema.org/abstract",
         "https://schema.org/discussionUrl",
         "https://schema.org/archivedAt",
         "https://w3id.org/codemeta/readme",

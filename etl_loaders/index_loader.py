@@ -34,6 +34,7 @@ class ModelDocument(Document):
     db_identifier = Keyword(multi=True)  # all alternate IDs: DOI, arXiv, w3id, etc.
     name = Text(fields={"raw": Keyword()})
     description = Text()
+    abstract = Text()
     shared_by = Keyword()
     license = Keyword()
     ml_tasks = Keyword(multi=True)
@@ -101,6 +102,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     mlentory_id, db_identifier = _resolve_model_identifiers(model)
     name = model.get("https://schema.org/name")
     description = model.get("https://schema.org/description")
+    abstract = model.get("https://schema.org/abstract")
     shared_by = model.get("https://w3id.org/fair4ml/sharedBy")
 
     # Prefer FAIR4ML / CodeMeta license, fall back to schema.org if present
@@ -161,6 +163,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         db_identifier=db_identifier,
         name=str(name) if name is not None else "",
         description=str(description) if description is not None else "",
+        abstract=str(abstract) if abstract is not None else "",
         shared_by=str(shared_by) if shared_by is not None else "Unknown",
         license=str(license_value) if license_value is not None else "Unknown",
         ml_tasks=_extract_list(ml_tasks),

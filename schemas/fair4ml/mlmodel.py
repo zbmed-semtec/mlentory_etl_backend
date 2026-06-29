@@ -135,6 +135,11 @@ class MLModel(BaseModel):
         description="Full description of the model (schema:description)",
         alias="https://schema.org/description"
     )
+    abstract: Optional[str] = Field(
+        default=None,
+        description="Original model-card description before LLM summarization (schema:abstract)",
+        alias="https://schema.org/abstract",
+    )
     keywords: List[str] = Field(
         default_factory=list,
         description="Keywords or tags describing the model (schema:keywords)",

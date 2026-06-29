@@ -32,6 +32,24 @@ class TestMapLlmSchemaProperties:
         result = map_llm_schema_properties(_sample_llm_record(), existing)
 
         assert result["description"] == "A helpful chat model."
+        assert result["abstract"] == "raw readme text"
+
+    def test_description_override_skips_abstract_when_unchanged(self):
+        existing = {"description": "A helpful chat model."}
+        result = map_llm_schema_properties(_sample_llm_record(), existing)
+
+        assert result["description"] == "A helpful chat model."
+        assert "abstract" not in result
+
+    def test_description_override_preserves_existing_abstract(self):
+        existing = {
+            "description": "raw readme text",
+            "abstract": "already archived",
+        }
+        result = map_llm_schema_properties(_sample_llm_record(), existing)
+
+        assert result["description"] == "A helpful chat model."
+        assert "abstract" not in result
 
     def test_ml_task_kept_when_existing_tasks_present(self):
         existing = {"mlTask": ["text-generation"]}

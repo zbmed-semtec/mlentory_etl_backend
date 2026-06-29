@@ -11,6 +11,8 @@ def test_build_model_triples_includes_llm_string_properties():
     model = {
         "https://schema.org/name": "test-model",
         "https://schema.org/url": "https://huggingface.co/test-model",
+        "https://schema.org/description": "LLM summary",
+        "https://schema.org/abstract": "Original readme excerpt",
         "https://w3id.org/fair4ml/domain": "healthcare",
         "https://w3id.org/insilico/dataSplits": "80/10/10",
         "https://w3id.org/insilico/adaptionTechniques": "fine-tuning",
@@ -19,8 +21,11 @@ def test_build_model_triples_includes_llm_string_properties():
 
     FAIR4ML = Namespace("https://w3id.org/fair4ml/")
     INSILICO = Namespace("https://w3id.org/insilico/")
+    SCHEMA = Namespace("https://schema.org/")
 
     assert len(list(graph.triples((None, RDF.type, FAIR4ML.MLModel)))) == 1
+    assert list(graph.objects(None, SCHEMA.description)) == [Literal("LLM summary")]
+    assert list(graph.objects(None, SCHEMA.abstract)) == [Literal("Original readme excerpt")]
     assert list(graph.objects(None, FAIR4ML.domain)) == [Literal("healthcare")]
     assert list(graph.objects(None, INSILICO.dataSplits)) == [Literal("80/10/10")]
     assert list(graph.objects(None, INSILICO.adaptionTechniques)) == [Literal("fine-tuning")]

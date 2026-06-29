@@ -48,7 +48,7 @@ def map_llm_schema_properties(
     Overlay LLM schema extraction results onto an existing partial MLModel dict.
 
     Merge rules:
-    - ``description``: LLM value wins when present
+    - ``description``: LLM value wins when present; prior ``description`` is copied to ``abstract``
     - ``modelCategory``: LLM architecture string appended uniquely to list
     - ``domain``, ``dataSplits``, ``adaptionTechniques``: LLM value wins when present
     - ``mlTask``: keep existing HF pipeline_tag tasks; use LLM only when empty
@@ -70,6 +70,13 @@ def map_llm_schema_properties(
 
     description = llm_record.get("fair4ml:description")
     if _is_meaningful_llm_value(description):
+        prior_description = existing_partial.get("description")
+        if (
+            _is_meaningful_llm_value(prior_description)
+            and not existing_partial.get("abstract")
+            and str(prior_description).strip() != str(description).strip()
+        ):
+            result["abstract"] = str(prior_description).strip()
         result["description"] = description
         if "fair4ml:description" in llm_meta_by_property:
             extraction_metadata["description"] = _as_metadata_entry(
