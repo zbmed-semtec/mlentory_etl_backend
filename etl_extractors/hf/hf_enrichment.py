@@ -25,6 +25,7 @@ from .entity_identifiers import (
     LicenseIdentifier,
     TaskIdentifier,
     SharedByIdentifier,
+    ModelSizeIdentifier,
 )
 
 from .hf_extractor import HFExtractor
@@ -61,6 +62,7 @@ class HFEnrichment:
             "languages": LanguageIdentifier(),
             "tasks": TaskIdentifier(),
             "sharedby": SharedByIdentifier(),
+            "modelsize": ModelSizeIdentifier(),
         }
 
     def enrich_from_models_json(

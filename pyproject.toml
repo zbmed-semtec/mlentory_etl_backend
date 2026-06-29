@@ -48,7 +48,7 @@ fastapi = "^0.104.0"
 uvicorn = {extras = ["standard"], version = "^0.24.0"}
 mistune = "^3.0.2"
 graphviz = "^0.20.3"
-html-to-markdown = "^2.9.0"
+markdownify = "^1.2.2"
 spacy = "^3.8.0"
 langchain = "0.3.3"
 transformers = "^4.35.0"

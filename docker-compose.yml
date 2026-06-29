@@ -37,7 +37,6 @@ services:
       retries: 3
       start_period: 40s
 
-  # Add vLLM service for high-performance LLM inference
   vllm:
     container_name: vllm
     hostname: vllm
