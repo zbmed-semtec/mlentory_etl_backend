@@ -37,37 +37,38 @@ services:
       retries: 3
       start_period: 40s
 
-  # Add vLLM service for high-performance LLM inference
   vllm:
-    container_name: vllm
-    hostname: vllm
-    image: vllm/vllm-openai:latest
-    ports:
-      - "8003:8000"  # Map container port 8000 to host port 8003
-    volumes:
-      - ../deploy/vllm_models:/root/.cache/huggingface  # Cache for model storage
-    networks:
-      - mlentory-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              capabilities: [gpu]
-              count: all
-    environment:
-      - VLLM_MODEL=${VLLM_MODEL:-google/gemma-3-4b-it}  # Default model
-      - VLLM_HOST=0.0.0.0
-      - VLLM_PORT=8000
-      - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
-    command: ["--model", "${VLLM_MODEL:-google/gemma-3-4b-it}", "--host", "0.0.0.0", "--port", "8000"]
-    # healthcheck:
-    #   test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 20
-    #   start_period: 600s
-    restart: unless-stopped
+      container_name: vllm
+      hostname: vllm
+      image: vllm/vllm-openai:latest
+      ports:
+        - "8003:8000"
+      volumes:
+        - ../deploy/vllm_models:/root/.cache/huggingface
+        - ./etl_extractors/hf/hf_llm_extractor_resources:/app/metadata:ro
+      networks:
+        - mlentory-network
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                capabilities: [gpu]
+                count: all
+      environment:
+        - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
+      command: >
+        --model google/gemma-4-E4B-it
+        --host 0.0.0.0
+        --port 8000
+        --max-num-seqs 625
+        --gpu-memory-utilization 0.80
+        --max-model-len 65536
+        --enable-prefix-caching
+        --trust-remote-code
+        --reasoning-parser gemma4
+        --reasoning-config '{"reasoning_start_str":"<|channel>","reasoning_end_str":"<channel|>"}'
+      restart: unless-stopped
 
   elasticsearch:
     profiles: ["etl", "api", "complete", "mcp"]

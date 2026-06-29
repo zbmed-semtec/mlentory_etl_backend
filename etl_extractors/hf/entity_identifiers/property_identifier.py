@@ -88,28 +88,61 @@ class ModelSizeIdentifier(EntityIdentifier):
         # not used for this step, so just return an empty set
         return set()
 
-    def identify_per_model(self, models_df: pd.DataFrame) ->  Dict[str, str | None]:
+    def identify_per_model(self, models_df: pd.DataFrame) -> Dict[str, Dict[str, str | None] | None]:
         """
-        Identifies model size from huggingface model card ID
+        Identifies model size from huggingface model card ID.
+        Standardized to always return a dictionary of counts.
+        """
+        def format_params(param_count: int) -> str:
+            """Formats parameter count into human-readable string with suffixes."""
+            units = {
+                1_000_000_000_000: "T",
+                1_000_000_000: "B",
+                1_000_000: "M",
+                1_000: "K"
+            }
 
-        Returns:
-            Dict of model_id : model_size
-        """
-        model_sizes: Dict[str,  str | None] = {}
+            for threshold, suffix in units.items():
+                if param_count >= threshold:
+                    value = round(param_count / threshold, 2)
+                    return f"{value:g}{suffix}"
+            
+            return str(param_count)
+        
+        model_sizes: Dict[str, Dict[str, str | None] | None] = {}
 
         if models_df.empty:
             return model_sizes
 
         for _, row in models_df.iterrows():
-            model_id = row.get("modelId", "")
-            if not model_id:
+            logger.info(f"Processing model row: {row}")
+            full_id = row.get("modelId", "")
+            if not full_id:
                 continue
+
+            model_st = row.get("safetensors", {})
             
-            regex = r"\b(\d+(\.\d+)?[BM])\b"
-            model_id = model_id.split("/")[1]
-            match = re.search(regex, model_id, re.IGNORECASE)
-            size = match.group(1) if match else None
-            model_sizes[model_id] = size
+            # if safetensors metadata exists
+            if model_st:
+                params = model_st.get("parameters", {})
+                if params:
+                    # individual parameter counts available (fp32, fp16, etc.)
+                    model_sizes[full_id] = {k: format_params(v) for k, v in params.items()}
+                else:
+                    # only total parameter count available
+                    total_size = model_st.get("total", 0)
+                    model_sizes[full_id] = {"total": format_params(total_size) if total_size > 0 else None}
+            
+            # fallback to regex parsing of model ID
+            else:
+                short_name = full_id.split("/")[-1]
+                regex = r"(\d+(\.\d+)?[BM])"
+                match = re.search(regex, short_name, re.IGNORECASE)
+                
+                if match:
+                    model_sizes[full_id] = {"total": match.group(1).upper()}
+                else:
+                    model_sizes[full_id] = None
 
         logger.info("Identified sizes for %d models", len(model_sizes))
         return model_sizes
