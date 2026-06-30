@@ -127,10 +127,14 @@ async def search_models_with_facets(
         examples=['["mlTask", "license", "keywords", "datasets"]'],
     ),
     facet_size: int = Query(20, ge=1, le=100, description="Maximum values per facet (max 100)"),
-    facet_query: str = Query(
+        facet_query: str = Query(
         '{}',
         description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
         examples=['{"keywords": "medical", "mlTask": "text"}'],
+    ),
+    exclude_ids: str = Query(
+        '[]',
+        description="JSON array of model identifiers to exclude (e.g. STELLA page-1 results on later pages)",
     ),
 ) -> FacetedSearchResponse:
     """
@@ -178,6 +182,7 @@ async def search_models_with_facets(
         filter_dict = json.loads(filters) if filters else {}
         facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "platform"]
         facet_query_dict = json.loads(facet_query) if facet_query else {}
+        exclude_id_list = json.loads(exclude_ids) if exclude_ids else []
 
         # Validate inputs
         if not isinstance(filter_dict, dict):
@@ -186,6 +191,8 @@ async def search_models_with_facets(
             raise ValueError("Facets must be a JSON array/list")
         if not isinstance(facet_query_dict, dict):
             raise ValueError("Facet query must be a JSON object/dictionary")
+        if not isinstance(exclude_id_list, list):
+            raise ValueError("exclude_ids must be a JSON array/list")
 
         for key, values in filter_dict.items():
             if not isinstance(values, list):
@@ -200,6 +207,7 @@ async def search_models_with_facets(
             facets=facets_list,
             facet_size=facet_size,
             facet_query=facet_query_dict,
+            exclude_ids=exclude_id_list,
         )
 
         # Get facet configuration for requested facets
@@ -520,6 +528,7 @@ async def get_model_detail_with_metadata(
 
 # Specific routes MUST be defined before dynamic routes
 @router.get("/models/ro-crate")
+@router.get("/models/ro_crate")
 async def get_model_ro_crate(
     model_id: str = Query(..., description="Model ID (URI or compact ID)"),
 ) -> Dict[str, Any]:

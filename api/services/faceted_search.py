@@ -314,7 +314,8 @@ class FacetedSearchMixin:
         page_size: int = 50,
         facets: Optional[List[str]] = None,
         facet_size: int = 20,
-        facet_query: Optional[Dict[str, str]] = None
+        facet_query: Optional[Dict[str, str]] = None,
+        exclude_ids: Optional[List[str]] = None,
     ) -> Tuple[List[ModelListItem], int, Dict[str, List[FacetValue]]]:
         """
         Search for models with faceted navigation support.
@@ -337,7 +338,12 @@ class FacetedSearchMixin:
         """
         # Ensure page_size is within bounds
         page_size = min(max(page_size, 1), 1000)
-        from_offset = (page - 1) * page_size
+        # Page 1 may be served by STELLA; ES pages 2+ exclude those ids and continue
+        # from the start of the ES ranking (page 2 -> offset 0, page 3 -> offset RPP, ...).
+        if exclude_ids and page > 1:
+            from_offset = max(0, (page - 2) * page_size)
+        else:
+            from_offset = (page - 1) * page_size
 
         # Default facets if none specified
         if facets is None:
@@ -357,6 +363,12 @@ class FacetedSearchMixin:
         if filters:
             must_conditions.extend(self._build_filter_conditions(filters))
 
+        bool_query: Dict[str, Any] = {
+            "must": must_conditions if must_conditions else [{"match_all": {}}],
+        }
+        if exclude_ids:
+            bool_query["must_not"] = [{"terms": {"db_identifier": exclude_ids}}]
+
         # Build aggregations
         aggs = self._build_facet_aggregations(facets, facet_size, facet_query)
 
@@ -366,9 +378,7 @@ class FacetedSearchMixin:
             "size": page_size,
             "track_total_hits": True,
             "query": {
-                "bool": {
-                    "must": must_conditions if must_conditions else [{"match_all": {}}]
-                }
+                "bool": bool_query
             },
             "aggs": aggs,
             "_source": [
