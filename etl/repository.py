@@ -4,7 +4,7 @@ Dagster repository definition.
 This is the main entrypoint for the Dagster instance.
 """
 
-from dagster import repository, load_assets_from_modules
+from dagster import Definitions, repository, load_assets_from_modules
 
 from etl.assets import hf_extraction as hf_extraction_module
 from etl.assets import hf_transformation as hf_transformation_module
@@ -15,30 +15,28 @@ from etl.assets import ai4life_extraction as ai4life_assets_module
 from etl.assets import ai4life_transformation as ai4life_transformation_module
 from etl.assets import vector_indexing as vector_indexing_module
 
+_ASSET_MODULES = [
+    hf_extraction_module,
+    hf_transformation_module,
+    hf_loading_module,
+    ai4life_loading_module,
+    openml_assets_module,
+    ai4life_assets_module,
+    ai4life_transformation_module,
+    vector_indexing_module,
+]
+
+_all_assets = load_assets_from_modules(_ASSET_MODULES)
+
+defs = Definitions(assets=_all_assets)
+
+
 @repository
 def mlentory_etl_repository():
     """
-    The main Dagster repository for MLentory ETL.
-    
-    Returns:
-        list: List of jobs and schedules
+    The main Dagster repository for MLentory ETL (legacy ``@repository`` entry).
+
+    Prefer loading ``defs`` (``Definitions``) from this module for Dagster 1.4+.
     """
-    hf_extraction_assets = load_assets_from_modules([hf_extraction_module])
-    hf_transformation_assets = load_assets_from_modules([hf_transformation_module])
-    hf_loading_assets = load_assets_from_modules([hf_loading_module])
-    ai4life_loading_assets = load_assets_from_modules([ai4life_loading_module])
-    openml_assets = load_assets_from_modules([openml_assets_module])
-    ai4life_assets = load_assets_from_modules([ai4life_assets_module])
-    ai4life_transformation_assets = load_assets_from_modules([ai4life_transformation_module])
-    vector_indexing_assets = load_assets_from_modules([vector_indexing_module])
-    return [
-        *hf_extraction_assets,
-        *hf_transformation_assets,
-        *hf_loading_assets,
-        *ai4life_loading_assets,
-        *openml_assets,
-        *ai4life_assets,
-        *ai4life_transformation_assets,
-        *vector_indexing_assets,
-    ]
+    return list(_all_assets)
 

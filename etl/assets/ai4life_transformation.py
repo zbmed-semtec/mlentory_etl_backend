@@ -173,8 +173,8 @@ def ai4life_extract_basic_properties(models_data: Tuple[str, str]) -> str:
                     "url": "",
                     "author": "",
                     "sharedBy": "",
-                    "modelCategory":"",
-                    "referencePublication":"",
+                    "modelCategory": "",
+                    "citation": [],
                     "intentedUse": "",
                     "dateCreated": "",
                     "dateModified": "",
@@ -225,7 +225,7 @@ def ai4life_extract_basic_properties(models_data: Tuple[str, str]) -> str:
                     "author": "",
                     "sharedBy": str(raw_model.get("sharedBy", "")).strip(),
                     "modelCategory": str(raw_model.get("modelArchitecture", "")).strip(),
-                    "referencePublication": str(raw_model.get("referencePublication", "")).strip(),
+                    "citation": [],
                     "intentedUse": str(raw_model.get("intendedUse", "")).strip(),
                     "dateCreated": str(raw_model.get("dateCreated", "")).strip(),
                     "dateModified": str(raw_model.get("dateModified", "")).strip(),
@@ -814,12 +814,11 @@ def merge_ai4life_partial_schemas(
         elif isinstance(mc, list):
             merged_data["modelCategory"] = [str(x) for x in mc if str(x).strip()]
 
-        # referencePublication is a List[str] in schema
-        rp = merged_data.get("referencePublication")
-        if isinstance(rp, str):
-            merged_data["referencePublication"] = [rp] if rp.strip() else []
-        elif isinstance(rp, list):
-            merged_data["referencePublication"] = [str(x) for x in rp if str(x).strip()]
+        merged_data.pop("referencePublication", None)
+
+        cit = merged_data.get("citation")
+        if cit is None or not isinstance(cit, list):
+            merged_data["citation"] = []
 
         # intendedUse is Optional[str]
         iu = merged_data.get("intendedUse")

@@ -4,7 +4,7 @@ Dagster assets for HuggingFace → FAIR4ML transformation.
 Pipeline:
 1) Read raw HF models from extraction (hf_models_with_ancestors.json)
 2) Create separate assets for each property group:
-   - hf_extract_basic_properties: Core identification, temporal, URLs
+   - hf_extract_basic_properties: Core identification, temporal, URLs, parameterCount (literal)
    - hf_extract_keywords_language: Tags → keywords, supportedLanguages
    - hf_extract_task_category: pipeline_tag, library_name → mlTask, modelCategory
    - hf_extract_license: License information
@@ -33,7 +33,10 @@ from pydantic import BaseModel, ValidationError
 from dagster import asset, AssetIn
 
 from etl_extractors.hf import HFHelper
+from etl_extractors.hf.hf_citation_normalization import normalize_citations_from_chunk
+from etl_extractors.hf.hf_parameter_count_inference import infer_parameter_count_labels
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
+from etl_transformers.hf.map_llm_schema_properties import map_llm_schema_properties
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
 from schemas.croissant import CroissantDataset
@@ -230,33 +233,59 @@ def hf_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
     group_name="hf_transformation",
     ins={
         "models_data": AssetIn("hf_normalized_run_folder"),
+        "citation_chunks": AssetIn("hf_identified_chunk_citation"),
     },
-    tags={"pipeline": "hf_etl", "stage": "transform"}
+    tags={"pipeline": "hf_etl", "stage": "transform"},
 )
 def hf_extract_basic_properties(
     models_data: Tuple[str, str],
+    citation_chunks: str,
 ) -> str:
     """
     Extract basic properties from HF models.
     
     Maps: modelId, author, createdAt, last_modified, card
-    To: identifier, name, url, author, sharedBy, dates, description, URLs
-    
+    To: identifier, name, url, author, sharedBy, dates, description, URLs,
+    plus parameterCount (scale label inferred from the model id when present),
+    and schema.org citation (normalized CreativeWork list, or ``[]``).
+
     Args:
         models_data: Tuple of (raw_data_json_path, normalized_folder)
-        
+        citation_chunks: Path to ``chunks_citation.json`` from extraction (same run)
+
     Returns:
         Path to saved partial schema JSON file
     """
     raw_data_json_path, normalized_folder = models_data
-    
+
+    citation_chunks_path = Path(citation_chunks)
+    chunk_by_model: Dict[str, Any] = {}
+    if citation_chunks_path.is_file():
+        with open(citation_chunks_path, "r", encoding="utf-8") as cf:
+            loaded_chunks = json.load(cf)
+        if isinstance(loaded_chunks, dict):
+            chunk_by_model = loaded_chunks
+        else:
+            logger.warning(
+                "Expected dict in citation chunks at %s; ignoring",
+                citation_chunks_path,
+            )
+    else:
+        logger.warning(
+            "Citation chunks file not found at %s; citation will be [] for all models",
+            citation_chunks_path,
+        )
+
     # Load raw models
     logger.info(f"Loading raw models from {raw_data_json_path}")
     with open(raw_data_json_path, 'r', encoding='utf-8') as f:
         raw_models = json.load(f)
     
     logger.info(f"Loaded {len(raw_models)} raw models")
-    
+
+    models_df = HFHelper.load_models_dataframe(raw_data_json_path)
+    parameter_counts_by_model = infer_parameter_count_labels(models_df)
+
     # Extract basic properties for each model
     partial_schemas: List[Dict[str, Any]] = []
     
@@ -270,7 +299,15 @@ def hf_extract_basic_properties(
             # Add model_id as key for merging later
             partial_data["_model_id"] = model_id
             partial_data["_index"] = idx
-            
+
+            pc_val = parameter_counts_by_model.get(model_id)
+            if pc_val:
+                partial_data["parameterCount"] = pc_val
+
+            partial_data["citation"] = normalize_citations_from_chunk(
+                model_id, chunk_by_model.get(model_id)
+            )
+
             partial_schemas.append(partial_data)
             
             if (idx + 1) % 100 == 0:
@@ -288,6 +325,11 @@ def hf_extract_basic_properties(
                 "name": model_id,
                 "url": ""
             })
+            err_entry = partial_schemas[-1]
+            pc_val = parameter_counts_by_model.get(model_id)
+            if pc_val:
+                err_entry["parameterCount"] = pc_val
+            err_entry["citation"] = []
     
     logger.info(f"Extracted basic properties for {len(partial_schemas)} models")
     
@@ -342,10 +384,11 @@ def hf_entity_linking(
         articles_mapping: Tuple of ({model_id: [arxiv_ids]}, run_folder)
         keywords_mapping: Tuple of ({model_id: [keywords]}, run_folder)
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
+        base_models_mapping: Tuple of ({model_id: [base_model_ids]}, run_folder)
         languages_mapping: Tuple of ({model_id: [language codes from tags]}, run_folder)
         readme_languages_mapping: Tuple of ({model_id: [{code, confidence}]}, run_folder)
         tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
-        base_models_mapping: Tuple of ({model_id: [base_model_ids]}, run_folder)
+        sharedby_mapping: Tuple of ({model_id: [sharedby_ids]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
 
     Returns:
@@ -579,6 +622,88 @@ def hf_create_translation_mapping(
     return str(output_path)
 
 
+def build_partial_llm_properties(
+    raw_models: List[Dict[str, Any]],
+    llm_schema_by_model: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Build indexed partial records from per-model LLM schema extraction output."""
+    partials: List[Dict[str, Any]] = []
+    for idx, raw_model in enumerate(raw_models):
+        model_id = raw_model.get("modelId", f"unknown_{idx}")
+        llm_record = llm_schema_by_model.get(model_id, {})
+        partial: Dict[str, Any] = {
+            "_model_id": model_id,
+            "_index": idx,
+        }
+        if isinstance(llm_record, dict):
+            partial.update(llm_record)
+        partials.append(partial)
+    return partials
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={"llm_extraction": AssetIn("hf_llm_schema_extractor")},
+    tags={"pipeline": "hf_etl", "stage": "transform"},
+)
+def hf_llm_schema_properties(llm_extraction: Tuple[Dict[str, Dict[str, str]], str]) -> str:
+    """
+    Expose the path to LLM schema extraction results for downstream transform.
+
+    Reads ``llm_extraction_results.json`` written by ``hf_llm_schema_extractor``.
+    """
+    _, llm_schema_path = llm_extraction
+    path = Path(llm_schema_path)
+    if not path.is_file():
+        logger.warning("LLM schema properties file not found: %s", llm_schema_path)
+    else:
+        logger.info("Using LLM schema properties at %s", llm_schema_path)
+    return str(llm_schema_path)
+
+
+@asset(
+    group_name="hf_transformation",
+    ins={
+        "models_data": AssetIn("hf_normalized_run_folder"),
+        "llm_schema_path": AssetIn("hf_llm_schema_properties"),
+    },
+    tags={"pipeline": "hf_etl", "stage": "transform"},
+)
+def hf_extract_llm_properties(
+    models_data: Tuple[str, str],
+    llm_schema_path: str,
+) -> str:
+    """
+    Stage LLM schema extraction results for merge into normalized MLModels.
+
+    Reads ``llm_extraction_results.json`` and writes ``partial_llm_properties.json``
+    indexed by model order.
+    """
+    raw_data_json_path, normalized_folder = models_data
+
+    with open(raw_data_json_path, "r", encoding="utf-8") as f:
+        raw_models = json.load(f)
+    if not isinstance(raw_models, list):
+        raise ValueError(f"Expected list of models at {raw_data_json_path}")
+
+    llm_schema_by_model: Dict[str, Dict[str, Any]] = {}
+    llm_path = Path(llm_schema_path)
+    if llm_path.is_file():
+        with open(llm_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            llm_schema_by_model = loaded
+    else:
+        logger.warning("LLM schema properties file not found: %s", llm_schema_path)
+
+    partials = build_partial_llm_properties(raw_models, llm_schema_by_model)
+    output_path = Path(normalized_folder) / "partial_llm_properties.json"
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(partials, f, indent=2, ensure_ascii=False, default=_json_default)
+
+    logger.info("Saved %s LLM partial property records to %s", len(partials), output_path)
+    return str(output_path)
+
 
 @asset(
     group_name="hf_transformation",
@@ -586,6 +711,7 @@ def hf_create_translation_mapping(
         "models_data": AssetIn("hf_normalized_run_folder"),
         "basic_properties": AssetIn("hf_extract_basic_properties"),
         "entity_linking": AssetIn("hf_entity_linking"),
+        "llm_properties": AssetIn("hf_extract_llm_properties"),
     },
     tags={"pipeline": "hf_etl", "stage": "transform"}
 )
@@ -593,6 +719,7 @@ def hf_models_normalized(
     models_data: Tuple[str, str],
     basic_properties: str,
     entity_linking: str,
+    llm_properties: str,
 ) -> Tuple[str, str]:
     """
     Merge partial schemas and create final FAIR4ML MLModel objects.
@@ -604,7 +731,7 @@ def hf_models_normalized(
         models_data: Tuple of (raw_data_json_path, normalized_folder)
         basic_properties: Path to basic properties partial schema
         entity_linking: Path to entity linking JSON file
-
+        llm_properties: Path to partial LLM properties JSON file
 
     Returns:
         Path to the saved normalized models JSON file
@@ -633,12 +760,26 @@ def hf_models_normalized(
 
     logger.info(f"Loaded entity linking data for {len(entity_linking_data)} models")
 
+    with open(llm_properties, "r", encoding="utf-8") as f:
+        llm_props_list = json.load(f)
+    llm_props_by_index = {
+        item["_index"]: item
+        for item in llm_props_list
+        if isinstance(item, dict) and "_index" in item
+    }
+    logger.info("Loaded %s LLM partial property records", len(llm_props_by_index))
+
     # Create index mapping for efficient merging
     basic_props_by_index = {item["_index"]: item for item in basic_props}
     
     # Merge partial schemas
     logger.info("Merging partial schemas...")
-    merged_schemas = merge_model_partial_schemas(basic_props_by_index, entity_linking_data, raw_models)
+    merged_schemas = merge_model_partial_schemas(
+        basic_props_by_index,
+        entity_linking_data,
+        raw_models,
+        llm_props_by_index,
+    )
     
     # Validate and create MLModel instances
     logger.info("Validating merged schemas...")
@@ -678,11 +819,17 @@ def hf_models_normalized(
     
     return (str(output_path), str(normalized_folder))
 
-def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]], entity_linking_data: Dict[str, Dict[str, Any]], raw_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def merge_model_partial_schemas(
+    basic_props_by_index: Dict[int, Dict[str, Any]],
+    entity_linking_data: Dict[str, Dict[str, Any]],
+    raw_models: List[Dict[str, Any]],
+    llm_props_by_index: Optional[Dict[int, Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """
     Merge partial schemas and create final FAIR4ML MLModel objects.
     """
     merged_schemas: List[Dict[str, Any]] = []
+    llm_props_by_index = llm_props_by_index or {}
     
     for idx, raw_model in enumerate(raw_models):
         model_id = raw_model.get("modelId", f"unknown_{idx}")
@@ -706,15 +853,22 @@ def merge_model_partial_schemas(basic_props_by_index: Dict[int, Dict[str, Any]],
                 merged["testedOn"] = model_entities["datasets"]
                 merged["validatedOn"] = model_entities["datasets"]
                 merged["evaluatedOn"] = model_entities["datasets"]
-                merged["referencePublication"] = model_entities["articles"]
                 merged["keywords"] = model_entities["keywords"]
                 merged["baseModel"] = model_entities["base_models"]
                 merged["supportedLanguages"] = model_entities["languages"]
                 merged["inLanguage"] = model_entities.get("inLanguage", [])
                 merged["mlTask"] = model_entities["tasks"]
                 merged["sharedBy"] = model_entities["sharedby"][0] if len(model_entities["sharedby"]) > 0 else merged.get("sharedBy")
-                logger.info(f"Merged schemas for model {model_id}: {merged}")
-            
+
+            llm_record = llm_props_by_index.get(idx, {})
+            if llm_record:
+                llm_overlay = map_llm_schema_properties(llm_record, existing_partial=merged)
+                if "extraction_metadata" in llm_overlay:
+                    merged_meta = dict(merged.get("extraction_metadata", {}))
+                    merged_meta.update(llm_overlay.pop("extraction_metadata"))
+                    merged["extraction_metadata"] = merged_meta
+                merged.update(llm_overlay)
+
             merged_schemas.append(merged)
             
             if (idx + 1) % 100 == 0:

@@ -13,6 +13,7 @@ from dagster import asset, AssetIn
 
 from etl import LLMConfig
 from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper, HFLLMSchemaPropertyExtractor
+from etl_extractors.hf.hf_citation_normalization import select_citation_chunk_per_model
 from etl.config import get_hf_config
 
 
@@ -545,18 +546,15 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
         chunks_data: Tuple of ({model_id: list_of_chunks}, run_folder)
 
     Returns:
-        Tuple of ({model_id: identified_chunk}, run_folder)
+        Path to ``chunks_citation.json`` (per-model selected chunk dict or null)
     """
     chunks_dict, run_folder = chunks_data
-    enrichment = HFEnrichment()
-    output_root = Path(run_folder).parent.parent
-
-    json_path = enrichment.identifiers["citation"].identify_from_chunks(chunks_dict, output_root)
-
-    # Move to run folder with clean name
+    selected = select_citation_chunk_per_model(chunks_dict)
     final_path = Path(run_folder) / "chunks_citation.json"
-    Path(json_path).rename(final_path)
-    
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(final_path, "w", encoding="utf-8") as f:
+        json.dump(selected, f, indent=2, ensure_ascii=False)
+
     logger.info(f"Citation chunks saved to {final_path}")
     return str(final_path)
 
@@ -649,6 +647,7 @@ def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, Dic
     logger.info(f"Identified model size for {len(model_sizes)} models")
 
     return (model_sizes, run_folder)
+
 
 @asset(
     group_name="hf_enrichment",

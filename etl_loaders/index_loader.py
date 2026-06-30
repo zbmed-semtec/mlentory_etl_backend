@@ -23,13 +23,18 @@ from etl_loaders.load_helpers import LoadHelpers
 
 logger = logging.getLogger(__name__)
 
+IDENTIFIER_PREDICATE = "https://schema.org/identifier"
+MLENTORY_GRAPH_PREFIX = "https://w3id.org/mlentory/mlentory_graph/"
+
 
 class ModelDocument(Document):
     """Minimal model document for search indexing."""
 
-    db_identifier = Keyword()
+    mlentory_id = Keyword()  # single canonical w3id (mlentory graph URI)
+    db_identifier = Keyword(multi=True)  # all alternate IDs: DOI, arXiv, w3id, etc.
     name = Text(fields={"raw": Keyword()})
     description = Text()
+    abstract = Text()
     shared_by = Keyword()
     license = Keyword()
     ml_tasks = Keyword(multi=True)
@@ -41,6 +46,11 @@ class ModelDocument(Document):
     datecreated = Date()
     datemodified = Date()
     inLanguage = Keyword(multi=True)
+    domain = Keyword()
+    model_category = Keyword(multi=True)
+    data_splits = Text()
+    adaption_techniques = Keyword()
+    parameter_count = Keyword()
 
     class Index:
         # Default name; actual index is configured by caller/env.
@@ -57,10 +67,23 @@ def _extract_list(value: Any) -> List[str]:
     return [str(value)]
 
 
-def _extract_w3id_identifiers(value: Any) -> List[str]:
-    """Normalize identifier values and keep only w3id URIs."""
-    identifiers = _extract_list(value)
-    return [identifier for identifier in identifiers if identifier.startswith("https://w3id.org/")]
+def _resolve_model_identifiers(model: Dict[str, Any]) -> tuple[str, List[str]]:
+    """Split identifiers for Elasticsearch indexing.
+
+    Returns:
+        mlentory_id: One canonical w3id graph URI (minted if missing from the model).
+        db_identifier: Every value from schema.org/identifier — DOI, arXiv, w3id, etc.
+    """
+    db_identifier = _extract_list(model.get(IDENTIFIER_PREDICATE))
+
+    mlentory_id = next(
+        (iri for iri in db_identifier if iri.startswith(MLENTORY_GRAPH_PREFIX)),
+        LoadHelpers.mint_subject(model),
+    )
+    if not db_identifier:
+        db_identifier = [mlentory_id]
+
+    return mlentory_id, db_identifier
 
 
 def build_model_document(model: Dict[str, Any], index_name: str, translation_mapping: Dict[str, str]) -> ModelDocument:
@@ -76,14 +99,10 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         `ModelDocument` object.
     """
     
-    identifier = model.get("https://schema.org/identifier") or LoadHelpers.mint_subject(model)
-    normalized_identifiers = _extract_list(identifier)
-    w3id_identifiers = _extract_w3id_identifiers(identifier)
-    doc_id = w3id_identifiers[0] if w3id_identifiers else (
-        normalized_identifiers[0] if normalized_identifiers else LoadHelpers.mint_subject(model)
-    )
+    mlentory_id, db_identifier = _resolve_model_identifiers(model)
     name = model.get("https://schema.org/name")
     description = model.get("https://schema.org/description")
+    abstract = model.get("https://schema.org/abstract")
     shared_by = model.get("https://w3id.org/fair4ml/sharedBy")
 
     # Prefer FAIR4ML / CodeMeta license, fall back to schema.org if present
@@ -100,8 +119,12 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     datecreated = model.get("https://schema.org/dateCreated")
     datemodified = model.get("https://schema.org/dateModified")
     in_language = model.get("https://schema.org/inLanguage") or []
-    
-    
+    domain = model.get("https://w3id.org/fair4ml/domain")
+    model_category = model.get("https://w3id.org/fair4ml/modelCategory") or []
+    data_splits = model.get("https://w3id.org/insilico/dataSplits")
+    adaption_techniques = model.get("https://w3id.org/insilico/adaptionTechniques")
+    parameter_count = model.get("https://w3id.org/fair4ml/parameterCount")
+
     dataset_fields = [
         "https://w3id.org/fair4ml/trainedOn",
         "https://w3id.org/fair4ml/testedOn",
@@ -133,11 +156,14 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     shared_by = translation_mapping.get(shared_by, shared_by)
     source_name = translation_mapping.get(source_iri, source_iri)
     in_language = [translation_mapping.get(lang, lang) for lang in in_language]
+    model_category = [translation_mapping.get(cat, cat) for cat in _extract_list(model_category)]
     source_value = str(source_name) if source_name is not None else "Unknown"
     doc = ModelDocument(
-        db_identifier=w3id_identifiers,
+        mlentory_id=mlentory_id,
+        db_identifier=db_identifier,
         name=str(name) if name is not None else "",
         description=str(description) if description is not None else "",
+        abstract=str(abstract) if abstract is not None else "",
         shared_by=str(shared_by) if shared_by is not None else "Unknown",
         license=str(license_value) if license_value is not None else "Unknown",
         ml_tasks=_extract_list(ml_tasks),
@@ -149,7 +175,12 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         datecreated=datecreated,
         datemodified=datemodified,
         inLanguage=_extract_list(in_language),
-        meta={"id": str(doc_id)},
+        domain=str(domain) if domain is not None else None,
+        model_category=_extract_list(model_category),
+        data_splits=str(data_splits) if data_splits is not None else None,
+        adaption_techniques=str(adaption_techniques) if adaption_techniques is not None else None,
+        parameter_count=str(parameter_count) if parameter_count is not None else None,
+        meta={"id": mlentory_id},
     )
 
     # Ensure index name is bound correctly
