@@ -132,6 +132,16 @@ class FacetedSearchMixin:
                 default_size=5,
                 supports_search=False,
                 pinned=True
+            ),
+            "dateCreated": FacetConfig(
+                field="datecreated",
+                label="Date Created",
+                type="date",
+                icon="mdi-calendar-month-outline",
+                is_high_cardinality=False,
+                default_size=12,
+                supports_search=False,
+                pinned=True
             )
         }
 
@@ -347,7 +357,7 @@ class FacetedSearchMixin:
 
         # Default facets if none specified
         if facets is None:
-            facets = ["mlTask", "license", "keywords", "platform", "datasets"]
+            facets = ["mlTask", "license", "keywords", "platform", "dateCreated", "datasets"]
 
         filters = filters or {}
         facet_query = facet_query or {}
@@ -485,20 +495,32 @@ class FacetedSearchMixin:
             return [], None, False
 
         field_name = config.field
+        field_type = config.type
         current_filters = current_filters or {}
 
         # Build filter conditions (excluding self-filter); always require the
         # minimum metadata set so facet counts match the gated result list.
         must_conditions: List[Dict[str, Any]] = [self._minimum_metadata_bool_filter()]
-        for facet_key, values in current_filters.items():
-            if values and facet_key != field:
-                filter_config = facet_config.get(facet_key)
-                if filter_config:
-                    for value in values:
-                        must_conditions.append({"term": {filter_config.field: value}})
+        other_filters = {
+            facet_key: values
+            for facet_key, values in current_filters.items()
+            if values and facet_key != field
+        }
+        if other_filters:
+            must_conditions.extend(self._build_filter_conditions(other_filters))
 
-        # Build aggregation based on whether search is needed
-        if search_query:
+        # Build aggregation based on facet type and whether search is needed
+        if field_type == "date":
+            agg_config = {
+                "date_histogram": {
+                    "field": field_name,
+                    "calendar_interval": "month",
+                    "format": "yyyy-MM-dd",
+                    "order": {"_key": "desc"},
+                }
+            }
+            use_composite = False
+        elif search_query:
             # Use terms aggregation with include for search
             escaped_term = re.escape(search_query.lower())
             agg_config = {
