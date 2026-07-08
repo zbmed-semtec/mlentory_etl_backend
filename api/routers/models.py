@@ -122,7 +122,7 @@ async def search_models_with_facets(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(50, ge=1, le=1000, description="Results per page (max 1000)"),
     facets: str = Query(
-        '["mlTask", "license", "keywords", "datasets", "platform", "dateCreated"]',
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
         description="JSON array of facet field names to aggregate",
         examples=['["mlTask", "license", "keywords", "datasets"]'],
     ),
@@ -180,7 +180,7 @@ async def search_models_with_facets(
     try:
         # Parse JSON parameters
         filter_dict = json.loads(filters) if filters else {}
-        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "platform", "dateCreated"]
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "platform"]
         facet_query_dict = json.loads(facet_query) if facet_query else {}
         exclude_id_list = json.loads(exclude_ids) if exclude_ids else []
 
@@ -244,7 +244,7 @@ async def search_models_with_vector(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     limit: int = Query(50, ge=1, le=1000, description="Results per page (max 1000)"),
     facets: str = Query(
-        '["mlTask", "license", "keywords", "datasets", "platform", "dateCreated"]',
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
         description="JSON array of facet field names to aggregate",
         examples=['["mlTask", "license", "keywords"]'],
     ),
@@ -262,7 +262,7 @@ async def search_models_with_vector(
     """
     try:
         filter_dict = json.loads(filters) if filters else {}
-        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "datasets", "platform", "dateCreated"]
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "datasets", "platform"]
         facet_query_dict = json.loads(facet_query) if facet_query else {}
 
         if not isinstance(filter_dict, dict):
