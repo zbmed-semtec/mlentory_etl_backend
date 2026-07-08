@@ -180,7 +180,7 @@ async def search_models_with_facets(
     try:
         # Parse JSON parameters
         filter_dict = json.loads(filters) if filters else {}
-        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "platform"]
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "platform", "dateCreated"]
         facet_query_dict = json.loads(facet_query) if facet_query else {}
         exclude_id_list = json.loads(exclude_ids) if exclude_ids else []
 

@@ -132,6 +132,16 @@ class FacetedSearchMixin:
                 default_size=5,
                 supports_search=False,
                 pinned=True
+            ),
+            "dateCreated": FacetConfig(
+                field="datecreated",
+                label="Date Created",
+                type="date",
+                icon="mdi-calendar-month-outline",
+                is_high_cardinality=False,
+                default_size=12,
+                supports_search=False,
+                pinned=True
             )
         }
 
@@ -347,7 +357,7 @@ class FacetedSearchMixin:
 
         # Default facets if none specified
         if facets is None:
-            facets = ["mlTask", "license", "keywords", "platform", "datasets"]
+            facets = ["mlTask", "license", "keywords", "platform", "datasets", "dateCreated"]
 
         filters = filters or {}
         facet_query = facet_query or {}
@@ -490,12 +500,12 @@ class FacetedSearchMixin:
         # Build filter conditions (excluding self-filter); always require the
         # minimum metadata set so facet counts match the gated result list.
         must_conditions: List[Dict[str, Any]] = [self._minimum_metadata_bool_filter()]
-        for facet_key, values in current_filters.items():
-            if values and facet_key != field:
-                filter_config = facet_config.get(facet_key)
-                if filter_config:
-                    for value in values:
-                        must_conditions.append({"term": {filter_config.field: value}})
+        context_filters = {
+            facet_key: values
+            for facet_key, values in current_filters.items()
+            if values and facet_key != field
+        }
+        must_conditions.extend(self._build_filter_conditions(context_filters))
 
         # Build aggregation based on whether search is needed
         if search_query:
