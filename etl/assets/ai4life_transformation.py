@@ -180,6 +180,7 @@ def ai4life_extract_basic_properties(models_data: Tuple[str, str]) -> str:
                     "dateModified": "",
                     "datePublished": "",
                     "description": "",
+                    "abstract": "",
                     "discussionUrl": "",
                     "archivedAt": "",
                     "readme": "",
@@ -232,6 +233,7 @@ def ai4life_extract_basic_properties(models_data: Tuple[str, str]) -> str:
                     "datePublished": str(raw_model.get("datePublished", "")).strip()
                                    or str(raw_model.get("dateCreated", "")).strip(),
                     "description": str(raw_model.get("intendedUse", "")).strip(),
+                    "abstract": str(raw_model.get("documentation_content", "")).strip(),
                     "discussionUrl": str(raw_model.get("discussionUrl", "")).strip(),
                     "archivedAt": str(raw_model.get("url", "")).strip(),
                     "readme": str(raw_model.get("readme_file", "")).strip(),

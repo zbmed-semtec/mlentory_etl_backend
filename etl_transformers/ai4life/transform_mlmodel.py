@@ -188,6 +188,7 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
 
     description = str(raw_model.get("intendedUse", "")).strip()
     readme = validate_optional_url(raw_model.get("readme_file"))
+    abstract = AI4LifeHelper.resolve_abstract_content(raw_model)
     archived_at = _pick_archived_at(raw_model.get("archivedAt"), fallback=url)
 
     # Optional fields (often missing in AI4Life)
@@ -208,6 +209,7 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "dateModified": date_modified,
         "datePublished": date_published,
         "description": description,
+        "abstract": abstract,
         "discussionUrl": discussion_url,
         "archivedAt": archived_at,
         "readme": readme,
@@ -270,6 +272,12 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
             confidence=1.0,
             source_field="intendedUse",
             notes=None,
+        ),
+        "abstract": _create_extraction_metadata(
+            method="Fetched_from_AI4Life_documentation_url",
+            confidence=1.0,
+            source_field="readme_file",
+            notes="Full markdown content fetched from documentation URL",
         ),
         "discussionUrl": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",

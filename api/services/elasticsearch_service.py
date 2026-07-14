@@ -101,6 +101,7 @@ class ElasticsearchService(FacetedSearchMixin):
                 mlentory_id=mlentory_id,
                 name=hit.name or "",
                 description=hit.description,
+                abstract=getattr(hit, "abstract", None) or None,
                 sharedBy=hit.shared_by,  # Note: ES field is snake_case, but schema uses camelCase
                 license=hit.license,
                 mlTask=hit.ml_tasks or [],  # Note: ES field is snake_case, but schema uses camelCase
@@ -159,6 +160,7 @@ class ElasticsearchService(FacetedSearchMixin):
             mlentory_id=mlentory_id,
             name=hit["name"] or "",
             description=hit["description"],
+            abstract=hit.get("abstract") or None,
             sharedBy=hit["shared_by"],  # Note: ES field is snake_case, but schema uses camelCase
             license=hit["license"],
             mlTask=hit["ml_tasks"] or [],  # Note: ES field is snake_case, but schema uses camelCase

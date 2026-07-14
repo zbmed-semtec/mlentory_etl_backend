@@ -53,6 +53,10 @@ class ModelListItem(BaseModel):
     mlentory_id: str = Field(description="MLentory ID for the model")
     name: str = Field(description="Model name")
     description: Optional[str] = Field(description="Model description", default=None)
+    abstract: Optional[str] = Field(
+        description="Full model documentation or README content (schema:abstract)",
+        default=None,
+    )
     sharedBy: Optional[str] = Field(description="Entity that shared the model", default=None)
     license: Optional[str] = Field(description="Model license", default=None)
     mlTask: List[str] = Field(description="Machine learning tasks", default_factory=list)

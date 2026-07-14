@@ -22,7 +22,7 @@ from dagster import asset, AssetIn
 from etl_extractors.ai4life.ai4life_enrichment import AI4LifeEnrichment
 from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 from etl_extractors.ai4life.ai4life_extractor import AI4LifeExtractor
-from etl.config import get_ai4life_config
+from etl.config import get_ai4life_config, get_general_config
 
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,13 @@ def ai4life_models_raw(raw_data: Dict[str, Any]) -> Tuple[str, str]:
     """
     extractor = AI4LifeExtractor(records_data = raw_data['data'])
     models_df = extractor.extract_models()
+    model_records = models_df.to_dict(orient="records")
+    general_config = get_general_config()
+    AI4LifeHelper.enrich_models_with_documentation(
+        model_records,
+        max_workers=general_config.default_threads,
+    )
+    models_df = pd.DataFrame(model_records)
     
     # Save to JSON
     models_path = Path(raw_data['run_folder']) / "models.json"
