@@ -24,6 +24,7 @@ from dagster import asset, AssetIn
 from etl_extractors.hf import HFHelper
 from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 from etl_transformers.ai4life.transform_mlmodel import map_ai4life_basic_properties
+from etl_transformers.common.entity_link_metadata import apply_entity_link_extraction_metadata
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
 from schemas.croissant import CroissantDataset
@@ -775,27 +776,37 @@ def merge_ai4life_partial_schemas(
         sharedby = links.get("sharedby") or []
         inlanguage = links.get("inLanguage") or []
         sources = links.get("sources") or []
+        linked_fields: List[str] = []
 
         # Map to FAIR4ML MLModel fields
         if datasets:
             merged_data["evaluatedOn"] = list(datasets)
+            linked_fields.append("evaluatedOn")
 
         if keywords:
             existing = merged_data.get("keywords") or []
             if not isinstance(existing, list):
                 existing = []
             merged_data["keywords"] = list(dict.fromkeys(existing + list(keywords)))
+            linked_fields.append("keywords")
 
         if licenses:
             merged_data["license"] = str(licenses[0])  # MLModel.license is a single string
+            linked_fields.append("license")
         if tasks:
             merged_data["mlTask"] = list(tasks)
+            linked_fields.append("mlTask")
         if sharedby:
             merged_data["sharedBy"] = str(sharedby[0])  # MLModel.sharedBy is a single string
+            linked_fields.append("sharedBy")
         if inlanguage:
             merged_data["inLanguage"] = list(inlanguage)
+            linked_fields.append("inLanguage")
         if sources:
             merged_data["source"] = str(sources[0])  # MLModel.source is a single string
+            linked_fields.append("source")
+
+        apply_entity_link_extraction_metadata(merged_data, "ai4life", linked_fields)
 
         # Minimal required fields
         if not merged_data.get("name"):

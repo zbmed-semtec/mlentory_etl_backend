@@ -37,6 +37,7 @@ from etl_extractors.hf.hf_citation_normalization import normalize_citations_from
 from etl_extractors.hf.hf_parameter_count_inference import infer_parameter_count_labels
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from etl_transformers.hf.map_llm_schema_properties import map_llm_schema_properties
+from etl_transformers.common.entity_link_metadata import apply_entity_link_extraction_metadata
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
 from schemas.croissant import CroissantDataset
@@ -845,17 +846,37 @@ def merge_model_partial_schemas(
             # Add linked entities
             if model_id in entity_linking_data:
                 model_entities = entity_linking_data[model_id]
+                linked_fields: List[str] = []
 
-                # Add enriched datasets, articles, keywords, licenses
-                merged["license"] = model_entities["licenses"][0] if len(model_entities["licenses"]) > 0 else None
-                merged["source"] = model_entities["sources"][0] if len(model_entities["sources"]) > 0 else None
-                merged["evaluatedOn"] = model_entities["datasets"]
-                merged["keywords"] = model_entities["keywords"]
-                merged["baseModel"] = model_entities["base_models"]
-                merged["supportedLanguages"] = model_entities["languages"]
-                merged["inLanguage"] = model_entities.get("inLanguage", [])
-                merged["mlTask"] = model_entities["tasks"]
-                merged["sharedBy"] = model_entities["sharedby"][0] if len(model_entities["sharedby"]) > 0 else merged.get("sharedBy")
+                if model_entities["licenses"]:
+                    merged["license"] = model_entities["licenses"][0]
+                    linked_fields.append("license")
+                if model_entities["sources"]:
+                    merged["source"] = model_entities["sources"][0]
+                    linked_fields.append("source")
+                if model_entities["datasets"]:
+                    merged["evaluatedOn"] = model_entities["datasets"]
+                    linked_fields.append("evaluatedOn")
+                if model_entities["keywords"]:
+                    merged["keywords"] = model_entities["keywords"]
+                    linked_fields.append("keywords")
+                if model_entities["base_models"]:
+                    merged["baseModel"] = model_entities["base_models"]
+                    linked_fields.append("baseModel")
+                if model_entities["languages"]:
+                    merged["supportedLanguages"] = model_entities["languages"]
+                    linked_fields.append("supportedLanguages")
+                if model_entities.get("inLanguage"):
+                    merged["inLanguage"] = model_entities["inLanguage"]
+                    linked_fields.append("inLanguage")
+                if model_entities["tasks"]:
+                    merged["mlTask"] = model_entities["tasks"]
+                    linked_fields.append("mlTask")
+                if model_entities["sharedby"]:
+                    merged["sharedBy"] = model_entities["sharedby"][0]
+                    linked_fields.append("sharedBy")
+
+                apply_entity_link_extraction_metadata(merged, "hf", linked_fields)
 
             llm_record = llm_props_by_index.get(idx, {})
             if llm_record:
