@@ -235,21 +235,6 @@ class MLModel(BaseModel):
     )
     
     # ========== Training & Evaluation Data (fair4ml) ==========
-    trainedOn: List[str] = Field(
-        default_factory=list,
-        description="Dataset(s) used for training (fair4ml:trainedOn)",
-        alias="https://w3id.org/fair4ml/trainedOn"
-    )
-    testedOn: List[str] = Field(
-        default_factory=list,
-        description="Dataset(s) used for testing (fair4ml:testedOn)",
-        alias="https://w3id.org/fair4ml/testedOn"
-    )
-    validatedOn: List[str] = Field(
-        default_factory=list,
-        description="Dataset(s) used for validation (fair4ml:validatedOn)",
-        alias="https://w3id.org/fair4ml/validatedOn"
-    )
     evaluatedOn: List[str] = Field(
         default_factory=list,
         description="Dataset(s) used for evaluation/benchmarking (fair4ml:evaluatedOn)",

@@ -849,9 +849,6 @@ def merge_model_partial_schemas(
                 # Add enriched datasets, articles, keywords, licenses
                 merged["license"] = model_entities["licenses"][0] if len(model_entities["licenses"]) > 0 else None
                 merged["source"] = model_entities["sources"][0] if len(model_entities["sources"]) > 0 else None
-                merged["trainedOn"] = model_entities["datasets"]
-                merged["testedOn"] = model_entities["datasets"]
-                merged["validatedOn"] = model_entities["datasets"]
                 merged["evaluatedOn"] = model_entities["datasets"]
                 merged["keywords"] = model_entities["keywords"]
                 merged["baseModel"] = model_entities["base_models"]

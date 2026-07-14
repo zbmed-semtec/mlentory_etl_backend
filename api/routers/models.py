@@ -609,7 +609,7 @@ async def get_model_detail(
     resolve_properties: List[str] = Query(
         [],
         description="List of properties/relationships to resolve as full entities (e.g., 'schema__DefinedTerm', 'schema__author')",
-        examples=["schema__license", "schema__author", "fair4ml__trainedOn"],
+        examples=["schema__license", "schema__author", "fair4ml__evaluatedOn"],
     ),
 ) -> ModelDetail:
     """

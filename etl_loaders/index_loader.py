@@ -126,9 +126,6 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     parameter_count = model.get("https://w3id.org/fair4ml/parameterCount")
 
     dataset_fields = [
-        "https://w3id.org/fair4ml/trainedOn",
-        "https://w3id.org/fair4ml/testedOn",
-        "https://w3id.org/fair4ml/validatedOn",
         "https://w3id.org/fair4ml/evaluatedOn",
     ]
 

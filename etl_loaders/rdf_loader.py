@@ -105,9 +105,6 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
         # Base models
         "https://w3id.org/fair4ml/baseModel",
         # Datasets
-        "https://w3id.org/fair4ml/trainedOn",
-        "https://w3id.org/fair4ml/testedOn",
-        "https://w3id.org/fair4ml/validatedOn",
         "https://w3id.org/fair4ml/evaluatedOn",
     ]
     for related_entity in related_entities_lst:

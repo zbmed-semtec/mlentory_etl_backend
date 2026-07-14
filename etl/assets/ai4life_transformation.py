@@ -778,9 +778,6 @@ def merge_ai4life_partial_schemas(
 
         # Map to FAIR4ML MLModel fields
         if datasets:
-            merged_data["trainedOn"] = list(datasets)
-            merged_data["testedOn"] = list(datasets)
-            merged_data["validatedOn"] = list(datasets)
             merged_data["evaluatedOn"] = list(datasets)
 
         if keywords:

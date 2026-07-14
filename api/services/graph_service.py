@@ -51,9 +51,6 @@ class GraphService:
                 "schema__url",
                 "schema__identifier",
                 "fair4ml__evaluatedOn",
-                "fair4ml__validatedOn",
-                "fair4ml__testedOn",
-                "fair4ml__trainedOn",
                 "codemeta__referencePublication",
                 "fair4ml__sharedBy",
                 "schema__author",
@@ -81,7 +78,7 @@ class GraphService:
             entity_id: Compact alphanumeric identifier of the starting entity (no scheme).
             depth: Traversal depth (Currently supports 1 for direct neighbors).
             relationships: Optional list of relationship types to follow
-                (e.g., ["schema__license", "fair4ml__trainedOn"]).
+                (e.g., ["schema__license", "fair4ml__evaluatedOn"]).
             direction: Traversal direction (Ignored in this version, defaults to outgoing for properties).
             entity_label: Optional Neo4j label for the start node
                 (e.g., "MLModel").
@@ -610,9 +607,6 @@ class GraphService:
             # Dataset-related relationship types
             dataset_types = {
                 "fair4ml__baseModel",
-                "fair4ml__trainedOn",
-                "fair4ml__testedOn",
-                "fair4ml__validatedOn",
                 "fair4ml__evaluatedOn"
             }
             
