@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch wait-elasticsearch stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env
 
 # Default target
 .DEFAULT_GOAL := help
@@ -24,6 +24,56 @@ ensure-env: ## Ensure .env exists (copy from .env.example if missing)
 		echo "$(GREEN).env created from .env.example$(NC)"; \
 	else \
 		echo "$(GREEN).env already exists$(NC)"; \
+	fi
+
+# Elasticsearch runs as UID 1000 in the official image; create mount dirs before
+# docker compose so Docker does not create them as root on first start.
+DATA_DIR_UID := 1000
+DATA_DIR_GID := 1000
+ELASTICSEARCH_HOST_PORT := 9201
+
+prepare-data-dirs: ## Create Neo4j/Elasticsearch host data dirs with correct ownership
+	@echo "$(BLUE)Preparing data directories...$(NC)"
+	@mkdir -p \
+		./config/elasticsearch/data \
+		./config/neo4j/data \
+		./config/neo4j/logs \
+		./config/neo4j/plugins \
+		./config/neo4j/import \
+		./config/neo4j/conf
+	@sudo chown -R $(DATA_DIR_UID):$(DATA_DIR_GID) ./config/elasticsearch ./config/neo4j
+	@sudo chmod -R 775 ./config/elasticsearch ./config/neo4j
+	@echo "$(GREEN)Data directories ready (owner $(DATA_DIR_UID):$(DATA_DIR_GID))$(NC)"
+
+wait-elasticsearch: ## Wait for Elasticsearch cluster health on the host port
+	@echo "$(BLUE)Waiting for Elasticsearch on port $(ELASTICSEARCH_HOST_PORT)...$(NC)"
+	@for i in $$(seq 1 40); do \
+		if curl -sf "http://localhost:$(ELASTICSEARCH_HOST_PORT)/_cluster/health" >/dev/null 2>&1; then \
+			echo "$(GREEN)Elasticsearch is ready$(NC)"; \
+			exit 0; \
+		fi; \
+		if sudo docker inspect -f '{{.State.Status}}' mlentory-elasticsearch 2>/dev/null | grep -q exited; then \
+			echo "$(YELLOW)Elasticsearch container exited — last logs:$(NC)"; \
+			sudo docker logs mlentory-elasticsearch 2>&1 | tail -8; \
+			exit 1; \
+		fi; \
+		echo "  attempt $$i/40 (waiting 3s)..."; \
+		sleep 3; \
+	done; \
+	echo "$(YELLOW)Elasticsearch did not become ready — check: make logs-elasticsearch$(NC)"; \
+	exit 1
+
+ensure-elasticsearch: prepare-data-dirs ## Ensure Elasticsearch is running and healthy (fix perms + retry)
+	@if ! sudo docker inspect -f '{{.State.Running}}' mlentory-elasticsearch 2>/dev/null | grep -q true; then \
+		echo "$(YELLOW)Elasticsearch is not running — starting...$(NC)"; \
+		sudo docker compose --profile=complete up -d elasticsearch; \
+	fi
+	@if ! $(MAKE) wait-elasticsearch; then \
+		echo "$(YELLOW)Elasticsearch unhealthy — fixing data dir permissions and retrying...$(NC)"; \
+		sudo docker compose --profile=complete stop elasticsearch 2>/dev/null || true; \
+		$(MAKE) prepare-data-dirs; \
+		sudo docker compose --profile=complete up -d elasticsearch; \
+		$(MAKE) wait-elasticsearch; \
 	fi
 
 check-vllm-env: ## Verify HuggingFace token is set when using gated models
@@ -72,34 +122,34 @@ wait-stella: ## Wait for STELLA containers to be running
 	echo "$(YELLOW)STELLA containers did not become ready in time$(NC)"; \
 	exit 1
 
-up: ensure-env ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)
+up: ensure-env prepare-data-dirs ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)
 	@echo "$(BLUE)Starting MLentory ETL services...$(NC)"
 	@set -e; \
 	USE_STELLA=$$(grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' | tr '[:upper:]' '[:lower:]' || echo true); \
 	[ -n "$$USE_STELLA" ] || USE_STELLA=true; \
 	echo "USE_STELLA=$$USE_STELLA"; \
-	sudo chown -R 1000:1000 ./config; \
-	sudo chmod -R 775 ./config; \
 		$(MAKE) check-vllm-env; \
-		echo "$(BLUE)Step 1/3: Starting vLLM (LLM inference — may take several minutes on first run)...$(NC)"; \
+		echo "$(BLUE)Step 1/4: Starting vLLM (LLM inference — may take several minutes on first run)...$(NC)"; \
 		sudo docker compose up -d vllm; \
 		$(MAKE) wait-vllm; \
 	if [ "$$USE_STELLA" = "true" ]; then \
-		echo "$(BLUE)Step 2/3: Starting complete + STELLA profiles...$(NC)"; \
+		echo "$(BLUE)Step 2/4: Starting complete + STELLA profiles...$(NC)"; \
 		sudo docker compose --profile=complete --profile=stella up -d; \
 	else \
-		echo "$(BLUE)Step 2/3: Starting complete profile (STELLA disabled)...$(NC)"; \
+		echo "$(BLUE)Step 2/4: Starting complete profile (STELLA disabled)...$(NC)"; \
 		sudo docker compose --profile=complete up -d; \
 	fi; \
+	echo "$(BLUE)Step 3/4: Verifying Elasticsearch...$(NC)"; \
+	$(MAKE) ensure-elasticsearch; \
 	if [ "$$USE_STELLA" = "true" ]; then \
-		echo "$(BLUE)Step 3/3: Initializing STELLA...$(NC)"; \
+		echo "$(BLUE)Step 4/4: Initializing STELLA...$(NC)"; \
 		$(MAKE) wait-stella; \
 		$(MAKE) stella-init; \
 	fi
 	@echo "$(GREEN)Services started!$(NC)"
 	@echo "Dagster UI: http://localhost:3000"
 	@echo "Neo4j Browser: http://localhost:7474"
-	@echo "Elasticsearch: http://localhost:9200"
+	@echo "Elasticsearch: http://localhost:$(ELASTICSEARCH_HOST_PORT)"
 	@echo "vLLM: http://localhost:8003"
 	@echo "API: http://localhost:8008"
 	@if grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | grep -qi 'true'; then \
@@ -112,13 +162,14 @@ down: ## Stop all services (including STELLA when running)
 	sudo docker compose --profile=complete --profile=stella --profile=mcp down
 	@echo "$(GREEN)Services stopped!$(NC)"
 
-mcp-up: ## Start MCP API service only
+mcp-up: ensure-env prepare-data-dirs ## Start MCP API service only
 	@echo "$(BLUE)Starting MCP API service...$(NC)"
 	sudo docker compose --profile=mcp up -d
+	@$(MAKE) ensure-elasticsearch
 	@echo "$(GREEN)MCP API service started!$(NC)"
 	@echo "MCP API: http://localhost:8009"
 	@echo "Neo4j Browser: http://localhost:7474"
-	@echo "Elasticsearch: http://localhost:9200"
+	@echo "Elasticsearch: http://localhost:$(ELASTICSEARCH_HOST_PORT)"
 
 mcp-down: ## Stop MCP services
 	@echo "$(BLUE)Stopping MCP API services...$(NC)"
@@ -295,9 +346,13 @@ lint: format typecheck ## Run all linting and formatting
 
 DAGSTER_ETL := docker exec mlentory-dagster-webserver dagster asset materialize -f ./etl/repository.py
 
-etl-check: ## Verify Dagster container is running
+etl-check: ## Verify Dagster and Elasticsearch are running before ETL
 	@docker inspect -f '{{.State.Running}}' mlentory-dagster-webserver 2>/dev/null | grep -q true \
 		|| { echo "$(YELLOW)Dagster not running — run 'make up' first$(NC)"; exit 1; }
+	@docker inspect -f '{{.State.Running}}' mlentory-elasticsearch 2>/dev/null | grep -q true \
+		|| { echo "$(YELLOW)Elasticsearch not running — run 'make ensure-elasticsearch' or 'make up'$(NC)"; exit 1; }
+	@curl -sf "http://localhost:$(ELASTICSEARCH_HOST_PORT)/_cluster/health" >/dev/null 2>&1 \
+		|| { echo "$(YELLOW)Elasticsearch not reachable on port $(ELASTICSEARCH_HOST_PORT) — run 'make ensure-elasticsearch'$(NC)"; exit 1; }
 
 etl-run: etl-check ## Run full ETL pipeline for all sources (HF + AI4Life + OpenML)
 	@echo "$(BLUE)Running full ETL pipeline (all sources)...$(NC)"
@@ -377,13 +432,8 @@ run-by-tag: etl-check ## Run pipeline by tag (usage: make run-by-tag TAG="pipeli
 
 ##@ Setup
 
-init: ## Initialize the project (copy .env.example to .env)
-	@if [ -f .env ]; then \
-		echo "$(YELLOW).env file already exists. Skipping...$(NC)"; \
-	else \
-		cp .env.example .env; \
-		echo "$(GREEN).env file created! Please edit it with your configuration.$(NC)"; \
-	fi
+init: ensure-env prepare-data-dirs ## Initialize the project (.env + data directories)
+	@echo "$(GREEN)Project initialized. Edit .env if needed, then run 'make up'.$(NC)"
 
 setup: up ## Complete initial setup (.env + all services per USE_STELLA)
 	@echo "$(GREEN)Setup complete!$(NC)"
