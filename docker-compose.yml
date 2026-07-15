@@ -57,6 +57,7 @@ services:
                 count: all
       environment:
         - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
+        - VLLM_USE_V2_MODEL_RUNNER=0
       command: >
         --model google/gemma-4-E4B-it
         --host 0.0.0.0
