@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch wait-elasticsearch stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env
 
 # Default target
 .DEFAULT_GOAL := help
@@ -26,11 +26,14 @@ ensure-env: ## Ensure .env exists (copy from .env.example if missing)
 		echo "$(GREEN).env already exists$(NC)"; \
 	fi
 
-# Elasticsearch runs as UID 1000 in the official image; create mount dirs before
-# docker compose so Docker does not create them as root on first start.
-DATA_DIR_UID := 1000
-DATA_DIR_GID := 1000
+# Create mount dirs before docker compose so Docker does not create them as root.
+# Elasticsearch runs as UID 1000; Neo4j runs as UID 7474 in the official image.
+ELASTICSEARCH_UID := 1000
+ELASTICSEARCH_GID := 1000
+NEO4J_UID := 7474
+NEO4J_GID := 7474
 ELASTICSEARCH_HOST_PORT := 9201
+NEO4J_BROWSER_PORT := 7474
 
 prepare-data-dirs: ## Create Neo4j/Elasticsearch host data dirs with correct ownership
 	@echo "$(BLUE)Preparing data directories...$(NC)"
@@ -41,9 +44,11 @@ prepare-data-dirs: ## Create Neo4j/Elasticsearch host data dirs with correct own
 		./config/neo4j/plugins \
 		./config/neo4j/import \
 		./config/neo4j/conf
-	@sudo chown -R $(DATA_DIR_UID):$(DATA_DIR_GID) ./config/elasticsearch ./config/neo4j
-	@sudo chmod -R 775 ./config/elasticsearch ./config/neo4j
-	@echo "$(GREEN)Data directories ready (owner $(DATA_DIR_UID):$(DATA_DIR_GID))$(NC)"
+	@sudo chown -R $(ELASTICSEARCH_UID):$(ELASTICSEARCH_GID) ./config/elasticsearch
+	@sudo chmod -R 775 ./config/elasticsearch
+	@sudo chown -R $(NEO4J_UID):$(NEO4J_GID) ./config/neo4j
+	@sudo chmod -R 775 ./config/neo4j
+	@echo "$(GREEN)Data directories ready (Elasticsearch $(ELASTICSEARCH_UID):$(ELASTICSEARCH_GID), Neo4j $(NEO4J_UID):$(NEO4J_GID))$(NC)"
 
 wait-elasticsearch: ## Wait for Elasticsearch cluster health on the host port
 	@echo "$(BLUE)Waiting for Elasticsearch on port $(ELASTICSEARCH_HOST_PORT)...$(NC)"
@@ -74,6 +79,41 @@ ensure-elasticsearch: prepare-data-dirs ## Ensure Elasticsearch is running and h
 		$(MAKE) prepare-data-dirs; \
 		sudo docker compose --profile=complete up -d elasticsearch; \
 		$(MAKE) wait-elasticsearch; \
+	fi
+
+wait-neo4j: ## Wait for Neo4j browser endpoint on the host port
+	@echo "$(BLUE)Waiting for Neo4j on port $(NEO4J_BROWSER_PORT)...$(NC)"
+	@for i in $$(seq 1 40); do \
+		if curl -sf "http://localhost:$(NEO4J_BROWSER_PORT)" >/dev/null 2>&1; then \
+			echo "$(GREEN)Neo4j is ready$(NC)"; \
+			exit 0; \
+		fi; \
+		if sudo docker inspect -f '{{.State.Status}}' mlentory-neo4j 2>/dev/null | grep -q exited; then \
+			echo "$(YELLOW)Neo4j container exited — last logs:$(NC)"; \
+			sudo docker logs mlentory-neo4j 2>&1 | tail -8; \
+			exit 1; \
+		fi; \
+		echo "  attempt $$i/40 (waiting 3s)..."; \
+		sleep 3; \
+	done; \
+	echo "$(YELLOW)Neo4j did not become ready — check: make logs-neo4j$(NC)"; \
+	exit 1
+
+ensure-neo4j: prepare-data-dirs ## Ensure Neo4j is running and healthy (fix perms + retry)
+	@if ! sudo docker inspect -f '{{.State.Running}}' mlentory-neo4j 2>/dev/null | grep -q true; then \
+		echo "$(YELLOW)Neo4j is not running — starting...$(NC)"; \
+		sudo docker compose --profile=complete up -d neo4j; \
+	fi
+	@if ! $(MAKE) wait-neo4j; then \
+		echo "$(YELLOW)Neo4j unhealthy — fixing data dir permissions and retrying...$(NC)"; \
+		sudo docker compose --profile=complete stop neo4j 2>/dev/null || true; \
+		if sudo docker logs mlentory-neo4j 2>&1 | grep -qE 'AccessDenied|Transaction logs are missing'; then \
+			echo "$(YELLOW)Resetting corrupted Neo4j data from failed first start...$(NC)"; \
+			sudo rm -rf ./config/neo4j/data/*; \
+		fi; \
+		$(MAKE) prepare-data-dirs; \
+		sudo docker compose --profile=complete up -d neo4j; \
+		$(MAKE) wait-neo4j; \
 	fi
 
 check-vllm-env: ## Verify HuggingFace token is set when using gated models
@@ -139,8 +179,9 @@ up: ensure-env prepare-data-dirs ## Start all services (vLLM first, STELLA when 
 		echo "$(BLUE)Step 2/4: Starting complete profile (STELLA disabled)...$(NC)"; \
 		sudo docker compose --profile=complete up -d; \
 	fi; \
-	echo "$(BLUE)Step 3/4: Verifying Elasticsearch...$(NC)"; \
+	echo "$(BLUE)Step 3/4: Verifying Elasticsearch and Neo4j...$(NC)"; \
 	$(MAKE) ensure-elasticsearch; \
+	$(MAKE) ensure-neo4j; \
 	if [ "$$USE_STELLA" = "true" ]; then \
 		echo "$(BLUE)Step 4/4: Initializing STELLA...$(NC)"; \
 		$(MAKE) wait-stella; \
@@ -166,6 +207,7 @@ mcp-up: ensure-env prepare-data-dirs ## Start MCP API service only
 	@echo "$(BLUE)Starting MCP API service...$(NC)"
 	sudo docker compose --profile=mcp up -d
 	@$(MAKE) ensure-elasticsearch
+	@$(MAKE) ensure-neo4j
 	@echo "$(GREEN)MCP API service started!$(NC)"
 	@echo "MCP API: http://localhost:8009"
 	@echo "Neo4j Browser: http://localhost:7474"
@@ -269,12 +311,12 @@ logs-neo4j: ## View Neo4j logs
 logs-elasticsearch: ## View Elasticsearch logs
 	docker compose logs -f elasticsearch
 
-build: ## Build Docker images
+build: prepare-data-dirs ## Build Docker images
 	@echo "$(BLUE)Building Docker images...$(NC)"
 	docker compose --profile=complete build
 	@echo "$(GREEN)Build complete!$(NC)"
 
-rebuild: ## Rebuild Docker images without cache
+rebuild: prepare-data-dirs ## Rebuild Docker images without cache
 	@echo "$(BLUE)Rebuilding Docker images...$(NC)"
 	docker compose --profile=complete build --no-cache
 	@echo "$(GREEN)Rebuild complete!$(NC)"
