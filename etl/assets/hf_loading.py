@@ -287,6 +287,7 @@ def hf_index_models_elasticsearch(
     mlmodels_json_path, normalized_folder = normalized_models
     rdf_base_folder = Path(normalized_folder).parent.parent.parent / "3_rdf" / "hf"
     rdf_run_folder = rdf_base_folder / Path(normalized_folder).name
+    rdf_run_folder.mkdir(parents=True, exist_ok=True)
     translation_mapping_path = translation_mapping
     
     logger.info(
