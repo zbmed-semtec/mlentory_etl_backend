@@ -24,6 +24,7 @@ from dagster import asset, AssetIn
 from etl_extractors.hf import HFHelper
 from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 from etl_transformers.ai4life.transform_mlmodel import map_ai4life_basic_properties
+from etl_transformers.common.entity_link_metadata import apply_entity_link_extraction_metadata
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
 from schemas.croissant import CroissantDataset
@@ -173,13 +174,14 @@ def ai4life_extract_basic_properties(models_data: Tuple[str, str]) -> str:
                     "url": "",
                     "author": "",
                     "sharedBy": "",
-                    "modelCategory":"",
-                    "referencePublication":"",
+                    "modelCategory": "",
+                    "citation": [],
                     "intentedUse": "",
                     "dateCreated": "",
                     "dateModified": "",
                     "datePublished": "",
                     "description": "",
+                    "abstract": "",
                     "discussionUrl": "",
                     "archivedAt": "",
                     "readme": "",
@@ -225,13 +227,14 @@ def ai4life_extract_basic_properties(models_data: Tuple[str, str]) -> str:
                     "author": "",
                     "sharedBy": str(raw_model.get("sharedBy", "")).strip(),
                     "modelCategory": str(raw_model.get("modelArchitecture", "")).strip(),
-                    "referencePublication": str(raw_model.get("referencePublication", "")).strip(),
+                    "citation": [],
                     "intentedUse": str(raw_model.get("intendedUse", "")).strip(),
                     "dateCreated": str(raw_model.get("dateCreated", "")).strip(),
                     "dateModified": str(raw_model.get("dateModified", "")).strip(),
                     "datePublished": str(raw_model.get("datePublished", "")).strip()
                                    or str(raw_model.get("dateCreated", "")).strip(),
                     "description": str(raw_model.get("intendedUse", "")).strip(),
+                    "abstract": str(raw_model.get("documentation_content", "")).strip(),
                     "discussionUrl": str(raw_model.get("discussionUrl", "")).strip(),
                     "archivedAt": str(raw_model.get("url", "")).strip(),
                     "readme": str(raw_model.get("readme_file", "")).strip(),
@@ -773,30 +776,37 @@ def merge_ai4life_partial_schemas(
         sharedby = links.get("sharedby") or []
         inlanguage = links.get("inLanguage") or []
         sources = links.get("sources") or []
+        linked_fields: List[str] = []
 
         # Map to FAIR4ML MLModel fields
         if datasets:
-            merged_data["trainedOn"] = list(datasets)
-            merged_data["testedOn"] = list(datasets)
-            merged_data["validatedOn"] = list(datasets)
             merged_data["evaluatedOn"] = list(datasets)
+            linked_fields.append("evaluatedOn")
 
         if keywords:
             existing = merged_data.get("keywords") or []
             if not isinstance(existing, list):
                 existing = []
             merged_data["keywords"] = list(dict.fromkeys(existing + list(keywords)))
+            linked_fields.append("keywords")
 
         if licenses:
             merged_data["license"] = str(licenses[0])  # MLModel.license is a single string
+            linked_fields.append("license")
         if tasks:
             merged_data["mlTask"] = list(tasks)
+            linked_fields.append("mlTask")
         if sharedby:
             merged_data["sharedBy"] = str(sharedby[0])  # MLModel.sharedBy is a single string
+            linked_fields.append("sharedBy")
         if inlanguage:
             merged_data["inLanguage"] = list(inlanguage)
+            linked_fields.append("inLanguage")
         if sources:
             merged_data["source"] = str(sources[0])  # MLModel.source is a single string
+            linked_fields.append("source")
+
+        apply_entity_link_extraction_metadata(merged_data, "ai4life", linked_fields)
 
         # Minimal required fields
         if not merged_data.get("name"):
@@ -814,12 +824,11 @@ def merge_ai4life_partial_schemas(
         elif isinstance(mc, list):
             merged_data["modelCategory"] = [str(x) for x in mc if str(x).strip()]
 
-        # referencePublication is a List[str] in schema
-        rp = merged_data.get("referencePublication")
-        if isinstance(rp, str):
-            merged_data["referencePublication"] = [rp] if rp.strip() else []
-        elif isinstance(rp, list):
-            merged_data["referencePublication"] = [str(x) for x in rp if str(x).strip()]
+        merged_data.pop("referencePublication", None)
+
+        cit = merged_data.get("citation")
+        if cit is None or not isinstance(cit, list):
+            merged_data["citation"] = []
 
         # intendedUse is Optional[str]
         iu = merged_data.get("intendedUse")

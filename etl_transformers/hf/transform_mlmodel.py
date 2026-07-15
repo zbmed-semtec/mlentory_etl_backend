@@ -305,7 +305,7 @@ def normalize_hf_model(raw_model: Dict[str, Any]) -> MLModel:
     # - map_license(raw_model) for license extraction
     # - map_lineage(raw_model) for base_model → baseModel
     # - map_code_and_usage(raw_model) for code snippets and usage instructions
-    # - map_datasets(raw_model) for trainedOn, evaluatedOn, etc.
+    # - map_datasets(raw_model) for evaluatedOn, etc.
     # - map_ethics_and_risks(raw_model) for limitations, biases, etc.
     
     # Validate and return

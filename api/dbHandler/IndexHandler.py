@@ -184,7 +184,7 @@ class IndexHandler:
                 index_model_entity.license = value[0].lower()
             elif "keywords" in key:
                 index_model_entity.keywords.extend(value)
-            elif "trainedOn" in key:
+            elif "evaluatedOn" in key:
                 index_model_entity.relatedDatasets.extend(value)
             elif "dateCreated" in key:
                 index_model_entity.dateCreated = value[0]
@@ -222,9 +222,7 @@ class IndexHandler:
             elif "mlTask" in key:
                 value = [v.lower() for v in value]
                 index_model_entity.mlTask.extend(value)
-            elif "trainedOn" in key:
-                index_model_entity.relatedDatasets.update(value)
-            elif "testedOn" in key:
+            elif "evaluatedOn" in key:
                 index_model_entity.relatedDatasets.update(value)
             elif "keywords" in key:
                 index_model_entity.keywords.extend(value)
@@ -279,9 +277,7 @@ class IndexHandler:
             elif "mlTask" in key:
                 value = [v.lower() for v in value]
                 index_model_entity.mlTask.extend(value)
-            elif "trainedOn" in key:
-                index_model_entity.relatedDatasets.update(value)
-            elif "testedOn" in key:
+            elif "evaluatedOn" in key:
                 index_model_entity.relatedDatasets.update(value)
             elif "keywords" in key:
                 index_model_entity.keywords.extend(value)

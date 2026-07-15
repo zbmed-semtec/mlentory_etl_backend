@@ -100,7 +100,7 @@ async def get_related_entities(
 
 @router.get("/graph/grouped_facet_values", response_model=GroupedFacetValuesResponse)
 async def grouped_facet_values(entity_type: List = Query(
-    ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy", "fair4ml__trainedOn", "fair4ml__testedOn", "fair4ml__validatedOn", "fair4ml__evaluatedOn"], 
+    ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy", "fair4ml__evaluatedOn"], 
     description="Entity type to list"
 )) -> GroupedFacetValuesResponse:
     """
@@ -112,9 +112,8 @@ async def grouped_facet_values(entity_type: List = Query(
 
     Args:
         entity_type: A list of relationship types to include. Defaults to
-            ["fair4ml__mlTask", "schema__keywords", "schema__license", "fair4ml__sharedBy",
-            "fair4ml__trainedOn", "fair4ml__testedOn",
-            "fair4ml__validatedOn", "fair4ml__evaluatedOn"].
+            ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy",
+            "fair4ml__evaluatedOn"].
 
     Returns:
         GroupedFacetValuesResponse: Contains facets (grouped entities by relationship type)

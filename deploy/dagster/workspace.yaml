@@ -5,5 +5,5 @@ load_from:
   - python_module:
       module_name: etl.repository
       working_directory: /opt/dagster/app
-      attribute: mlentory_etl_repository
+      attribute: defs
 

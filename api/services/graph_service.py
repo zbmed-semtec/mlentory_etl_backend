@@ -51,9 +51,6 @@ class GraphService:
                 "schema__url",
                 "schema__identifier",
                 "fair4ml__evaluatedOn",
-                "fair4ml__validatedOn",
-                "fair4ml__testedOn",
-                "fair4ml__trainedOn",
                 "codemeta__referencePublication",
                 "fair4ml__sharedBy",
                 "schema__author",
@@ -81,7 +78,7 @@ class GraphService:
             entity_id: Compact alphanumeric identifier of the starting entity (no scheme).
             depth: Traversal depth (Currently supports 1 for direct neighbors).
             relationships: Optional list of relationship types to follow
-                (e.g., ["schema__license", "fair4ml__trainedOn"]).
+                (e.g., ["schema__license", "fair4ml__evaluatedOn"]).
             direction: Traversal direction (Ignored in this version, defaults to outgoing for properties).
             entity_label: Optional Neo4j label for the start node
                 (e.g., "MLModel").
@@ -432,7 +429,7 @@ class GraphService:
         
         result = {}
         
-        for entity_id in entity_ids:
+        for entity_id in self._expand_entity_id_params(entity_ids):
             # Build full URI
             entity_uri = self._build_entity_uri(entity_id)
             
@@ -457,10 +454,39 @@ class GraphService:
         Returns:
             Full URI string.
         """
-        if entity_id.startswith(("http://", "https://")):
-            return entity_id
-        
-        return f"https://w3id.org/mlentory/mlentory_graph/{entity_id}"
+        normalized = entity_id.strip()
+        if normalized.startswith("<") and normalized.endswith(">"):
+            normalized = normalized[1:-1].strip()
+
+        if normalized.startswith(("http://", "https://")):
+            return normalized
+
+        return f"https://w3id.org/mlentory/mlentory_graph/{normalized}"
+
+    def _expand_entity_id_params(self, entity_ids: List[str]) -> List[str]:
+        """
+        Normalize entity ID query params.
+
+        Some reverse proxies collapse repeated ``entity_ids`` keys into a single
+        comma-separated value; split those back into individual IDs.
+        """
+        expanded: List[str] = []
+        for entity_id in entity_ids:
+            if not entity_id:
+                continue
+
+            raw = entity_id.strip()
+            if not raw:
+                continue
+
+            if "," in raw and ("mlentory_graph/" in raw or raw.startswith("http")):
+                parts = [part.strip() for part in raw.split(",") if part.strip()]
+                expanded.extend(parts)
+            else:
+                expanded.append(raw)
+
+        # Preserve order while removing duplicates
+        return list(dict.fromkeys(expanded))
 
     def find_entity_uri_by_name(self, entity_name: str) -> Optional[Dict[str, Any]]:
         """
@@ -581,9 +607,6 @@ class GraphService:
             # Dataset-related relationship types
             dataset_types = {
                 "fair4ml__baseModel",
-                "fair4ml__trainedOn",
-                "fair4ml__testedOn",
-                "fair4ml__validatedOn",
                 "fair4ml__evaluatedOn"
             }
             

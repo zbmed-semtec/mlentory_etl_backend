@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 namespaces = {
     "schema": Namespace("https://schema.org/"),
     "fair4ml": Namespace("https://w3id.org/fair4ml/"),
+    "insilico": Namespace("https://w3id.org/insilico/"),
     "codemeta": Namespace("https://w3id.org/codemeta/"),
     "mlentory": Namespace("https://w3id.org/mlentory/"),
     "cr": Namespace("https://w3id.org/cr/"),
