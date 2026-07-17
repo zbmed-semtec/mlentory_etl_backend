@@ -7,7 +7,9 @@ from typing import Dict, Any
 class LLMConfig:
     dir_metadata: Path = Path(__file__).parent
     connection_retry_delay: int = 30 # seconds
-    batch_size: int = 125
+    gpu_kv_cache_size: int = 116000
+    reasoning_start_str: str = "<think>"
+    reasoning_end_str: str = "</think>"
 
     vllm_kwargs: Dict[str, Any] = field(default_factory=lambda: {
         "api_base_url": "http://vllm:8000/v1",

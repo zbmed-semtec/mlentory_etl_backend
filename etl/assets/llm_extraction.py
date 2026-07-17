@@ -6,7 +6,7 @@ import time
 import httpx
 
 import pandas as pd
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from transformers import AutoTokenizer
 from huggingface_hub import hf_hub_download
 from pathlib import Path
@@ -61,12 +61,13 @@ class LLMSchemaPropertyExtractor(ABC):
 
         hf_token = self.vllm_kwargs.get("api_key")
         
-        self.logger.info(f"Waiting for vLLM API to finish loading model.")
+        self.logger.info(f"Waiting for vLLM API to finish loading model. Check vllm status with: 'docker compose logs -f vllm'")
         self._wait_for_vllm_ready()
 
-        self.logger.info(f"Connecting to vLLM API at {self.vllm_kwargs.get('api_base_url')}...")
+        host_url = self.vllm_kwargs.get("api_base_url", "http://vllm:8000/v1")
+        self.logger.info(f"Connecting to vLLM API at {host_url}...")
         self.client = OpenAI(
-            base_url=self.vllm_kwargs.get("api_base_url", "http://vllm:8000/v1"),
+            base_url=host_url,
             api_key=hf_token
         )
 
@@ -127,6 +128,6 @@ class LLMSchemaPropertyExtractor(ABC):
         pass
 
     @abstractmethod
-    def parse_llm_output(self) -> Dict[str, Any]:
+    def parse_llm_output(self, reasoning_start_str: str, reasoning_end_str: str) -> Dict[str, Any]:
         """Parses the raw output from the LLM into a structured dictionary."""
         pass
