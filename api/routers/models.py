@@ -31,6 +31,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
 
 from api.schemas.responses import (
+    FacetedRelatedModelsResponse,
     FacetedSearchResponse,
     FacetValuesResponse,
     ModelDetail,
@@ -497,6 +498,77 @@ async def get_related_models(
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error retrieving related models: {str(e)}")
+
+@router.get("/models/related/faceted", response_model=FacetedRelatedModelsResponse)
+async def search_related_models_with_facets(
+    reference_model_id: str = Query(..., description="ID of the reference model"),
+    extended: bool = Query(default=False, description="Whether to include extended information for the results"),
+    limit_per_category: int = Query(default=10, ge=1, le=50, description="Maximum number of models to return per category"),
+    related_models_controller: RelatedModelsController = Depends(get_related_models_controller),
+    filters: str = Query(
+        '{}',
+        description="JSON string of property filters (e.g., {'license': ['MIT', 'Apache-2.0']})",
+        examples=['{"license": ["MIT"], "mlTask": ["text-generation"]}'],
+    ),
+    facets: Optional[str] = Query(
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
+        description="JSON array of facet field names to aggregate",
+        examples=['["mlTask", "license", "keywords", "datasets"]'],
+    ),
+    facet_query: str = Query(
+        '{}',
+        description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
+        examples=['{"keywords": "medical", "mlTask": "text"}'],
+    ),
+) -> FacetedRelatedModelsResponse:
+    """
+    """
+    try:
+        # Parse JSON parameters
+        filter_dict = json.loads(filters) if filters else {}
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "platform"]
+        facet_query_dict = json.loads(facet_query) if facet_query else {}
+
+        # Validate inputs
+        if not isinstance(filter_dict, dict):
+            raise ValueError("Filters must be a JSON object/dictionary")
+        if not isinstance(facets_list, list):
+            raise ValueError("Facets must be a JSON array/list")
+        if not isinstance(facet_query_dict, dict):
+            raise ValueError("Facet query must be a JSON object/dictionary")
+
+        for key, values in filter_dict.items():
+            if not isinstance(values, list):
+                raise ValueError(f"Filter values for '{key}' must be a list")
+
+        # Execute faceted search
+        models, total_count, facet_results = related_models_controller.get_filtered_related_models(
+            reference_model_id=reference_model_id,
+            filters=filter_dict,
+            facets=facets_list,
+            facet_query=facet_query_dict,
+        )
+
+        # Get facet configuration for requested facets
+        all_facet_config = elasticsearch_service.get_facets_config()
+        facet_config = {k: v for k, v in all_facet_config.items() if k in facets_list}
+
+        return FacetedRelatedModelsResponse(
+            related_models={k: v for k, v in facet_results.items()},
+            total_related=total_count,
+            facet_results=facet_results,
+            filters=filter_dict,
+            facets={k: v for k, v in facet_results.items()},
+            facet_config=facet_config,
+        )   
+
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except json.JSONDecodeError as je:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
+    except Exception as e:
+        logger.error(f"Error in faceted search: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 @router.get("/models/{model_id}/with_extraction_metadata", response_model=ModelDetail)
 async def get_model_detail_with_metadata(
