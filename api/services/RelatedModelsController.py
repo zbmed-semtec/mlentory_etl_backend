@@ -363,7 +363,6 @@ class RelatedModelsController:
             same_base_models = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"baseModels": reference_base_models},
-                limit=limit + 1
             )
             
             return [
