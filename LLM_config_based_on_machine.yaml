@@ -1,0 +1,39 @@
+profiles:
+ 
+  "Tesla T4":
+    match:
+      gpu_name_contains: "T4"
+      min_gpu_count: 1
+      min_vram_gb_per_gpu: 15
+    llm:
+      image: "vllm/vllm-openai:latest"
+      model_name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
+      max_model_len: 32768
+      tensor_parallel_size: 1
+      gpu_kv_cache_size: 116000
+      reasoning_start_str: "<think>"
+      reasoning_end_str: "</think>"
+
+  "Tesla V100 32GB (2 GPUs)":
+    match:
+      gpu_name_contains: "V100"
+      min_gpu_count: 2
+      min_vram_gb_per_gpu: 31
+    llm:
+      image: "vllm/vllm-openai:v0.8.5"
+      model_name: "canxsaran/gemma-4-31b-it-GPTQ"
+      max_model_len: 65536
+      tensor_parallel_size: 2
+      gpu_kv_cache_size: 116000
+      reasoning_start_str: "<|channel>"
+      reasoning_end_str: "<channel|>"
+
+default:
+  llm:
+      image: "vllm/vllm-openai:latest"
+      model_name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
+      max_model_len: 32768
+      tensor_parallel_size: 1
+      gpu_kv_cache_size: 116000
+      reasoning_start_str: "<think>"
+      reasoning_end_str: "</think>"

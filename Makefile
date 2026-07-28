@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
 
 # Default target
 .DEFAULT_GOAL := help
@@ -8,6 +8,9 @@ BLUE := \033[0;34m
 GREEN := \033[0;32m
 YELLOW := \033[0;33m
 NC := \033[0m # No Color
+
+# GPU machine profile config
+LLM_CONFIG := LLM_config_based_on_machine.yaml
 
 ##@ Help
 
@@ -162,7 +165,12 @@ wait-stella: ## Wait for STELLA containers to be running
 	echo "$(YELLOW)STELLA containers did not become ready in time$(NC)"; \
 	exit 1
 
-up: ensure-env prepare-data-dirs ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)
+detect-profile: ## Detect GPU and update .env with the matching LLM profile
+	@echo "$(BLUE)Detecting GPU machine profile...$(NC)"
+	python3 scripts/detect_machine_profile.py --config $(LLM_CONFIG) --out .env
+	@echo "$(GREEN)Machine profile applied to .env$(NC)"
+
+up: ensure-env prepare-data-dirs detect-profile ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)
 	@echo "$(BLUE)Starting MLentory ETL services...$(NC)"
 	@set -e; \
 	USE_STELLA=$$(grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' | tr '[:upper:]' '[:lower:]' || echo true); \
@@ -510,4 +518,3 @@ version: ## Show version information
 	@echo "Version: 0.1.0"
 	@echo "Python: 3.11+"
 	@echo "Dagster: Latest"
-

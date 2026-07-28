@@ -40,7 +40,7 @@ services:
   vllm:
       container_name: vllm
       hostname: vllm
-      image: vllm/vllm-openai:latest
+      image: "${IMAGE}"
       ports:
         - "8003:8000"
       volumes:
@@ -59,17 +59,16 @@ services:
         - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
         - VLLM_USE_V2_MODEL_RUNNER=0
       command: >
-        --model Qwen/Qwen2.5-7B-Instruct-AWQ
+        --model "${MODEL_NAME}"
         --host 0.0.0.0
         --port 8000
-        --dtype half
         --max-num-seqs 600
         --gpu-memory-utilization 0.92
-        --max-model-len 32768
+        --max-model-len "${MAX_MODEL_LEN}"
         --enable-prefix-caching
         --trust-remote-code
         --language_model_only
-        --reasoning-config '{"reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
+        --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}"
       restart: unless-stopped
 
   elasticsearch:
