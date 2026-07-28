@@ -131,6 +131,14 @@ class FacetedSearchResponse(BaseModel):
     facets: Dict[str, List[FacetValue]] = Field(description="Facet aggregations with counts", default_factory=dict)
     facet_config: Dict[str, FacetConfig] = Field(description="Configuration for requested facets", default_factory=dict)
 
+class FacetedRelatedModelsResponse(BaseModel):
+    """Response for faceted search of related models."""
+
+    related_models: gitDict[str, List[ModelListItem]] = Field(description="Related models grouped by category")
+    total_related: int = Field(description="Total number of related models")
+    filters: Dict[str, List[str]] = Field(description="Applied filters", default_factory=dict)
+    facets: Dict[str, List[FacetValue]] = Field(description="Facet aggregations with counts", default_factory=dict)
+    facet_config: Dict[str, FacetConfig] = Field(description="Configuration for requested facets", default_factory=dict)
 
 class VectorFacetedSearchResponse(FacetedSearchResponse):
     """Faceted search response for vector endpoints (models include `score` + `searchable_text`)."""

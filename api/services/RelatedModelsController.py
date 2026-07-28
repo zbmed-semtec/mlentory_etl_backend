@@ -6,7 +6,7 @@ using different criteria such as same author, similar tasks, same base models,
 overlapping keywords, and different size variants.
 """
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 import re
 from api.dbHandler.SQLHandler import SQLHandler
 from api.dbHandler.IndexHandler import IndexHandler
@@ -363,7 +363,6 @@ class RelatedModelsController:
             same_base_models = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"baseModels": reference_base_models},
-                limit=limit + 1
             )
             
             return [
@@ -603,4 +602,83 @@ class RelatedModelsController:
             
         except Exception as e:
             print(f"Error finding related models: {e}")
+            raise
+
+    def get_filtered_related_models(
+        self, 
+        reference_model_id: str, 
+        filters: Dict[str, List[str]],
+        facets: Optional[List[str]] = None,
+        facet_query: Optional[Dict[str, str]] = None,
+        extended: bool = False, 
+        limit_per_category: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get related models filtered by specific properties.
+        
+        This method retrieves related models based on all criteria and applies
+        additional property filters to the results.
+        
+        Args:
+            reference_model_id (str): The ID of the reference model.
+            filters (Dict[str, List[str]]): Property filters to apply (e.g., {'license': ['MIT']}).
+            extended (bool): Whether to include extended information for the results.
+            limit_per_category (int): Maximum number of models to return per category.
+            
+        Returns:
+            Dict[str, Any]: Dictionary containing filtered related models categorized by relationship type.
+            
+        Raises:
+            ValueError: If reference model is not found.
+            Exception: If there's an error during any search operation.
+            
+        Example:
+            >>> result = controller.get_filtered_related_models(
+            ...     "model123", {"license": ["MIT"]}, limit_per_category=5
+            ... )
+            >>> print(f"Filtered same author: {len(result['related_models']['sameAuthorModels'])}")
+        """
+        try:
+            # Get all related models first
+            all_related = self.get_all_related_models(
+                reference_model_id, extended, limit_per_category
+            )
+            
+            # Apply filters to each category of related models
+            filtered_related = {}
+            for category, models in all_related["related_models"].items():
+                filtered_models = [
+                    model for model in models
+                    if all(
+                        getattr(model, prop, None) in values 
+                        for prop, values in filters.items()
+                    )
+                ]
+                filtered_related[category] = filtered_models
+
+            facet_results = {}
+            if facets:
+                # Apply facet filtering if specified
+                for facet in facets:
+                    facet_results[facet] = {}
+                    for category, models in filtered_related.items():
+                        facet_counts = {}
+                        for model in models:
+                            facet_value = getattr(model, facet, None)
+                            if facet_value:
+                                if isinstance(facet_value, list):
+                                    for val in facet_value:
+                                        facet_counts[val] = facet_counts.get(val, 0) + 1
+                                else:
+                                    facet_counts[facet_value] = facet_counts.get(facet_value, 0) + 1
+                        facet_results[facet][category] = facet_counts
+
+            return {
+                "related_models": filtered_related,
+                "total_related": sum(len(models) for models in filtered_related.values()),
+                "facet_results": facet_results
+            }
+            
+        except Exception as e:
+            print(f"Error finding filtered related models: {e}")
             raise
