@@ -98,6 +98,10 @@ class HealthResponse(BaseModel):
     version: str = Field(description="API version")
     elasticsearch: bool = Field(description="Elasticsearch connection status")
     neo4j: bool = Field(description="Neo4j connection status")
+    cuda: bool = Field(
+        description="Whether CUDA/GPU is available in this container",
+        default=False,
+    )
 
 
 class FacetValue(BaseModel):

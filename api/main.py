@@ -261,12 +261,41 @@ app.include_router(
 )
 
 
+def _cuda_available() -> bool:
+    """Return True when this container can use an NVIDIA GPU."""
+    try:
+        import torch
+
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            return True
+    except Exception as e:
+        logger.warning("CUDA torch probe failed: %s", e)
+
+    # Fallback probe used when NVML/torch visibility breaks in long-running containers.
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["nvidia-smi", "-L"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return result.returncode == 0 and "GPU" in (result.stdout or "")
+    except Exception as e:
+        logger.warning("CUDA nvidia-smi probe failed: %s", e)
+        return False
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """
     Health check endpoint.
 
-    Returns the status of database connections and overall service health.
+    Returns the status of database connections, CUDA availability, and overall
+    service health. Returns HTTP 503 when CUDA is required but unavailable so
+    container orchestrators can restart/recreate the API.
     """
     try:
         # Check Elasticsearch connection
@@ -289,15 +318,35 @@ async def health_check() -> HealthResponse:
         except Exception as e:
             logger.warning(f"Neo4j health check failed: {e}")
 
-        status = "healthy" if (es_healthy and neo4j_healthy) else "degraded"
+        cuda_healthy = _cuda_available()
+        require_cuda = os.environ.get("REQUIRE_CUDA_HEALTH", "true").lower() in {
+            "1",
+            "true",
+            "t",
+            "yes",
+            "y",
+            "on",
+        }
+
+        if require_cuda and not cuda_healthy:
+            logger.error("CUDA health check failed: GPU not available in API container")
+            raise HTTPException(
+                status_code=503,
+                detail="CUDA/GPU unavailable in API container",
+            )
+
+        status = "healthy" if (es_healthy and neo4j_healthy and cuda_healthy) else "degraded"
 
         return HealthResponse(
             status=status,
             version="1.0.0",
             elasticsearch=es_healthy,
             neo4j=neo4j_healthy,
+            cuda=cuda_healthy,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Health check failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Health check failed")
