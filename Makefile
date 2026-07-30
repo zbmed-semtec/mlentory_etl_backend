@@ -119,38 +119,38 @@ ensure-neo4j: prepare-data-dirs ## Ensure Neo4j is running and healthy (fix perm
 		$(MAKE) wait-neo4j; \
 	fi
 
-check-vllm-env: ## Verify HuggingFace token is set when using gated models
-	@VLLM_MODEL=$$(grep -E '^VLLM_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' || echo google/gemma-4-E4B-it); \
-	HF_TOKEN_LEN=$$(awk -F= '/^HUGGINGFACE_API_TOKEN=/{print length($$2)}' .env 2>/dev/null || echo 0); \
-	if [ "$$HF_TOKEN_LEN" -eq 0 ]; then \
-		echo "$(YELLOW)WARNING: HUGGINGFACE_API_TOKEN is empty in .env$(NC)"; \
-		echo "  The default model ($$VLLM_MODEL) is gated on HuggingFace."; \
-		echo "  Set HUGGINGFACE_API_TOKEN in .env (with model access), or set VLLM_MODEL to an open model."; \
-		exit 1; \
-	fi
+# check-vllm-env: ## Verify HuggingFace token is set when using gated models
+# 	@VLLM_MODEL=$$(grep -E '^VLLM_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' || echo google/gemma-4-E4B-it); \
+# 	HF_TOKEN_LEN=$$(awk -F= '/^HUGGINGFACE_API_TOKEN=/{print length($$2)}' .env 2>/dev/null || echo 0); \
+# 	if [ "$$HF_TOKEN_LEN" -eq 0 ]; then \
+# 		echo "$(YELLOW)WARNING: HUGGINGFACE_API_TOKEN is empty in .env$(NC)"; \
+# 		echo "  The default model ($$VLLM_MODEL) is gated on HuggingFace."; \
+# 		echo "  Set HUGGINGFACE_API_TOKEN in .env (with model access), or set VLLM_MODEL to an open model."; \
+# 		exit 1; \
+# 	fi
 
-wait-vllm: ## Wait for vLLM to serve /v1/models (model load can take several minutes)
-	@echo "$(BLUE)Waiting for vLLM to be ready (google/gemma-4-E4B-it — load may take several minutes)...$(NC)"
-	@for i in $$(seq 1 90); do \
-		if curl -sf http://localhost:8003/v1/models >/dev/null 2>&1; then \
-			echo "$(GREEN)vLLM is ready$(NC)"; \
-			exit 0; \
-		fi; \
-		LOGS=$$(sudo docker logs vllm 2>&1 | tail -30); \
-		echo "$$LOGS" | grep -q "gated repo" && { \
-			echo "$(YELLOW)vLLM failed: gated HuggingFace model — set HUGGINGFACE_API_TOKEN in .env$(NC)"; exit 1; }; \
-		echo "$$LOGS" | grep -q "no kernel image is available" && { \
-			echo "$(YELLOW)vLLM failed: GPU/kernel incompatible — use pinned vllm v0.8.5 image (see docker-compose.yml)$(NC)"; \
-			echo "$$LOGS" | tail -5; exit 1; }; \
-		echo "$$LOGS" | grep -q "Engine core initialization failed" && [ $$i -gt 15 ] && { \
-			echo "$(YELLOW)vLLM engine failed to start — last logs:$(NC)"; \
-			echo "$$LOGS" | tail -8; exit 1; }; \
-		echo "  attempt $$i/90 (waiting 20s)..."; \
-		sleep 20; \
-	done; \
-	echo "$(YELLOW)vLLM did not become ready in time — check: docker logs vllm$(NC)"; \
-	sudo docker logs vllm 2>&1 | tail -15; \
-	exit 1
+# wait-vllm: ## Wait for vLLM to serve /v1/models (model load can take several minutes)
+# 	@echo "$(BLUE)Waiting for vLLM to be ready (google/gemma-4-E4B-it — load may take several minutes)...$(NC)"
+# 	@for i in $$(seq 1 90); do \
+# 		if curl -sf http://localhost:8003/v1/models >/dev/null 2>&1; then \
+# 			echo "$(GREEN)vLLM is ready$(NC)"; \
+# 			exit 0; \
+# 		fi; \
+# 		LOGS=$$(sudo docker logs vllm 2>&1 | tail -30); \
+# 		echo "$$LOGS" | grep -q "gated repo" && { \
+# 			echo "$(YELLOW)vLLM failed: gated HuggingFace model — set HUGGINGFACE_API_TOKEN in .env$(NC)"; exit 1; }; \
+# 		echo "$$LOGS" | grep -q "no kernel image is available" && { \
+# 			echo "$(YELLOW)vLLM failed: GPU/kernel incompatible — use pinned vllm v0.8.5 image (see docker-compose.yml)$(NC)"; \
+# 			echo "$$LOGS" | tail -5; exit 1; }; \
+# 		echo "$$LOGS" | grep -q "Engine core initialization failed" && [ $$i -gt 15 ] && { \
+# 			echo "$(YELLOW)vLLM engine failed to start — last logs:$(NC)"; \
+# 			echo "$$LOGS" | tail -8; exit 1; }; \
+# 		echo "  attempt $$i/90 (waiting 20s)..."; \
+# 		sleep 20; \
+# 	done; \
+# 	echo "$(YELLOW)vLLM did not become ready in time — check: docker logs vllm$(NC)"; \
+# 	sudo docker logs vllm 2>&1 | tail -15; \
+# 	exit 1
 
 wait-stella: ## Wait for STELLA containers to be running
 	@echo "$(BLUE)Waiting for STELLA containers to be ready...$(NC)"

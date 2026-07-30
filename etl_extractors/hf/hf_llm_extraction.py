@@ -74,6 +74,9 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
         connection_retry_delay=self.config.connection_retry_delay
         vllm_version = self.config.vllm_image.split(":")[1]
 
+        if not self.config.enable_prefix_caching:
+            self.logger.warning("Model initialized without prefix caching. This will cause much slower inferencing.")
+
         # map sampler_kwargs to OpenAI parameters
         extra_body = {}
         if "repetition_penalty" in sampler_kwargs:

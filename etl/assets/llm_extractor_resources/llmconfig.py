@@ -6,13 +6,14 @@ from typing import Dict, Any
 @dataclass(frozen=True)
 class LLMConfig:
     dir_metadata: Path = Path(__file__).parent
-    connection_retry_delay: int = 30 # seconds
+    connection_retry_delay: int = 60 # seconds
     vllm_image: str = os.getenv("IMAGE", "vllm/vllm-openai:latest")
     gpu_kv_cache_size: int = int(os.getenv("GPU_KV_CACHE_SIZE", 100000))
     reasoning_start_str: str = os.getenv("REASONING_START_STR", "")
     reasoning_end_str: str = os.getenv("REASONING_END_STR", "")
     thinking_token_budget: int = int(os.getenv("THINKING_TOKEN_BUDGET", 512))
     enable_thinking: bool = os.getenv("ENABLE_THINKING", True)
+    enable_prefix_caching: bool = os.getenv("ENABLE_PREFIX_CACHING", True)
 
     vllm_kwargs: Dict[str, Any] = field(default_factory=lambda: {
         "api_base_url": "http://vllm:8000/v1",

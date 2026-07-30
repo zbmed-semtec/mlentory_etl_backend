@@ -9,12 +9,15 @@ profiles:
       image: "vllm/vllm-openai:latest"
       model_name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
       max_model_len: 32768
+      max_num_seqs: 600
       tensor_parallel_size: 1
       gpu_kv_cache_size: 116000
       reasoning_start_str: "<think>"
       reasoning_end_str: "</think>"
-      enable_thinking: true
       thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: true
+      extra_args: ""
 
   "Tesla V100 32GB (2 GPUs)":
     match:
@@ -23,22 +26,48 @@ profiles:
       min_vram_gb_per_gpu: 31
     llm:
       image: "vllm/vllm-openai:v0.8.5"
-      model_name: "canxsaran/gemma-4-31b-it-GPTQ"
-      max_model_len: 65536
+      model_name: "Qwen/Qwen2.5-1.5B"
+      max_model_len: 32768
+      max_num_seqs: 600
       tensor_parallel_size: 2
-      gpu_kv_cache_size: 108672
-      reasoning_start_str: "<channel|>"
-      reasoning_end_str: "<|channel>"
+      gpu_kv_cache_size: 360016
+      reasoning_start_str: "<think>"
+      reasoning_end_str: "</think>"
       thinking_token_budget: 768
       enable_thinking: true
-      extra_args: "--dtype float32 --limit-mm-per-prompt image=0"
+      enable_prefix_caching: false
+      extra_args: "--dtype float32"
+
+  "Tesla V100 32GB":
+    match:
+      gpu_name_contains: "V100"
+      min_gpu_count: 1
+      min_vram_gb_per_gpu: 31
+    llm:
+      image: "vllm/vllm-openai:v0.8.5"
+      model_name: "Qwen/Qwen2.5-1.5B"
+      max_model_len: 32768
+      max_num_seqs: 600
+      tensor_parallel_size: 1
+      gpu_kv_cache_size: 360016
+      reasoning_start_str: "<think>"
+      reasoning_end_str: "</think>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: false
+      extra_args: "--dtype float32"
 
 default:
   llm:
       image: "vllm/vllm-openai:latest"
       model_name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
       max_model_len: 32768
+      max_num_seqs: 600
       tensor_parallel_size: 1
       gpu_kv_cache_size: 116000
       reasoning_start_str: "<think>"
       reasoning_end_str: "</think>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: true
+      extra_args: ""

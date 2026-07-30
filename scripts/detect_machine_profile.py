@@ -84,8 +84,20 @@ def main():
     if llm_config is None:
         sys.exit(f"ERROR: no matching profile (and no default) for detected GPUs: {gpus}")
 
+    llm_config = dict(llm_config)  # copy so we don't mutate the loaded yaml
+    enable_prefix_caching = llm_config.pop("enable_prefix_caching", None)
+    extra_args = llm_config.pop("extra_args", "").strip()
+
     updates = {"MACHINE_PROFILE": profile_name}
     updates.update({k.upper(): v for k, v in llm_config.items()})
+
+    parts = []
+    if enable_prefix_caching is True:
+        parts.append("--enable-prefix-caching")
+    if extra_args:
+        parts.append(extra_args)
+    updates["EXTRA_VLLM_ARGS"] = " ".join(parts)
+
     update_env_file(args.out, updates)
 
     print(f"Matched profile '{profile_name}' -> updated {args.out}")
