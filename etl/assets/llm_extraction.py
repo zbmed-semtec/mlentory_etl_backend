@@ -83,8 +83,9 @@ class LLMSchemaPropertyExtractor(ABC):
 
         self.logger.info(f"Loaded LLM: {self.model_name} with context length: {self.llm_len}")
 
+        ### TODO: Remove this workaround once transformers >= 5 is used in vLLM
+        # workaround for Gemma4 on transformers < 5
         if "google/gemma-4" in self.model_name:
-            # workaround for Gemma4 on transformers < 5
             self.logger.info(f"Applying config workaround and loading local tokenizer for {self.model_name}...")
 
             try:
@@ -105,6 +106,7 @@ class LLMSchemaPropertyExtractor(ABC):
             trust_remote_code=True,
             token=hf_token
         )
+        ###
 
     def _wait_for_vllm_ready(self):
         """Poll /health until the server is ready or timeout is reached."""

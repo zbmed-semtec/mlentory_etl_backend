@@ -13,6 +13,8 @@ profiles:
       gpu_kv_cache_size: 116000
       reasoning_start_str: "<think>"
       reasoning_end_str: "</think>"
+      enable_thinking: true
+      thinking_token_budget: 768
 
   "Tesla V100 32GB (2 GPUs)":
     match:
@@ -24,9 +26,12 @@ profiles:
       model_name: "canxsaran/gemma-4-31b-it-GPTQ"
       max_model_len: 65536
       tensor_parallel_size: 2
-      gpu_kv_cache_size: 116000
-      reasoning_start_str: "<|channel>"
-      reasoning_end_str: "<channel|>"
+      gpu_kv_cache_size: 108672
+      reasoning_start_str: "<channel|>"
+      reasoning_end_str: "<|channel>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      extra_args: "--dtype float32 --limit-mm-per-prompt image=0"
 
 default:
   llm:

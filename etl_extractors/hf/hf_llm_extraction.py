@@ -5,7 +5,7 @@ from typing import Dict, Optional, Tuple, List, Any
 from itertools import islice
 import re
 
-import asyncio
+from packaging import version
 
 from etl import LLMSchemaPropertyExtractor
 
@@ -69,9 +69,10 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
             self.logger.error("Metadata not loaded, run load_metadata first.")
             return
 
-        sampler_kwargs=self.config.sampler_kwargs or {"max_tokens": 8096, "temperature": 0.1}
-        chat_template_kwargs=self.config.chat_template_kwargs or {"add_generation_prompt": True, "tokenize": False}
+        sampler_kwargs=self.config.sampler_kwargs
+        chat_template_kwargs=self.config.chat_template_kwargs
         connection_retry_delay=self.config.connection_retry_delay
+        vllm_version = self.config.vllm_image.split(":")[1]
 
         # map sampler_kwargs to OpenAI parameters
         extra_body = {}
@@ -81,8 +82,13 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
             extra_body["skip_special_tokens"] = sampler_kwargs["skip_special_tokens"]
         if "thinking_token_budget" in sampler_kwargs:
             extra_body["thinking_token_budget"] = sampler_kwargs["thinking_token_budget"]
+
+        # structured outputs depending on vLLM version
         schema = self._load_structured_output_json()
-        extra_body["structured_outputs"] = {"json": schema}
+        if vllm_version == "latest" or version.parse(vllm_version) >= version.parse("v0.12.0"):
+            extra_body["structured_outputs"] = {"json": schema}
+        else:
+            extra_body["guided_json"] = {"guided_json": schema}
 
         total_models = len(model_cards)
         self.logger.info(f"Starting extraction. Processing {total_models} models in batches of {batch_size}...")
@@ -207,29 +213,37 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
         reasoning_start_str = self.config.reasoning_start_str
         reasoning_end_str = self.config.reasoning_end_str
 
+        if not reasoning_start_str or not reasoning_end_str:
+            self.logger.info("Reasoning start or end strings not set. Parsing raw output without reasoning tokens.")
+
         for m_id, p_dict in self.extraction_results.items():
             result[m_id] = {}
 
             for p_name, generated_text in p_dict.items():
-                if reasoning_start_str and reasoning_start_str not in generated_text: # llm did not think
-                    json_out = generated_text
-                elif not reasoning_end_str in generated_text:                # llm did not close thinking tokens properly
-                    json_out = re.findall(r'\{.*?\}', generated_text)
-                else:                                                   # normal case
+                json_string = ""
+                
+                if not reasoning_start_str or not reasoning_end_str or \
+                   reasoning_start_str not in generated_text or reasoning_end_str not in generated_text:
+                    matches = re.findall(r'\{.*?\}', generated_text, re.DOTALL)
+                    if matches:
+                        json_string = matches[0]
+                        
+                else:                                                 
                     ss = generated_text.split(reasoning_end_str)
-                    json_out = ss[1]
+                    matches = re.findall(r'\{.*?\}', ss[1], re.DOTALL)
+                    json_string = matches[0] if matches else ss[1]
 
                 try:
-                    parsed_dict = json.loads(json_out)
+                    parsed_dict = json.loads(json_string)
                         
                 except (json.JSONDecodeError, TypeError):
-                    self.logger.error(f"{self.model_name} failed to output correct json for property: {p_name}, model: {m_id}. Generated output: {generated_text}")
-                    parsed_dict = {}        # we drop the result
+                    self.logger.error(f"{self.model_name} failed to output correct json for property: {p_name}, model: {m_id}. Generated output: {generated_text}. Returning the raw output as is.")
+                    parsed_dict = {"result": generated_text}
 
-                if not parsed_dict.get("result", ""):
-                    self.logger.error(f"{self.model_name} failed to output correct json for property: {p_name}, model: {m_id}. Generated output: {generated_text}")
-                    parsed_dict = {}
-                    
+                if not isinstance(parsed_dict, dict) or not parsed_dict.get("result", ""):
+                    self.logger.error(f"{self.model_name} failed to output correct json for property: {p_name}, model: {m_id}. Generated output: {generated_text}. Unable to get a valid output for key 'result' from parsed json. Returning the raw output as is.")
+                    parsed_dict = {"result": generated_text}
+
                 result[m_id][p_name] = parsed_dict.get("result", "")
 
         return result
