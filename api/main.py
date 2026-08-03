@@ -74,6 +74,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import get_es_client, get_neo4j_config
+from etl_loaders.rdf_store import close_driver
 from api.routers.graph import router as graph_router
 from api.routers.llm import router as llm_router
 from api.routers.models import router as models_router
@@ -210,6 +211,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
     logger.info("Shutting down MLentory API")
+    close_driver()
 
 
 # Create FastAPI application
