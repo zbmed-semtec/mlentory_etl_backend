@@ -85,7 +85,7 @@ class LLMSchemaPropertyExtractor(ABC):
 
         ### TODO: Remove this workaround once transformers >= 5 is used in vLLM
         # workaround for Gemma4 on transformers < 5
-        if "google/gemma-4" in self.model_name:
+        if "gemma-4" in self.model_name:
             self.logger.info(f"Applying config workaround and loading local tokenizer for {self.model_name}...")
 
             try:

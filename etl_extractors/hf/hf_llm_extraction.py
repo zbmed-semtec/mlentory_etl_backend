@@ -91,6 +91,7 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
         if vllm_version == "latest" or version.parse(vllm_version) >= version.parse("v0.12.0"):
             extra_body["structured_outputs"] = {"json": schema}
         else:
+            self.logger.warning(f"vLLM version {vllm_version} does not support structured_outputs. Using guided_json instead.")
             extra_body["guided_json"] = {"guided_json": schema}
 
         total_models = len(model_cards)
