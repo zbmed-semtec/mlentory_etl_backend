@@ -440,39 +440,35 @@ class GraphService:
             # Return all properties
             return_clause = "properties(n)"
 
+        # Use :Resource so Neo4j can hit the uri index (unlabeled MATCH scans and
+        # dominated Extraction Info latency). Read node props without requiring an
+        # outgoing edge — leaf URL nodes were previously dropped by that join.
         props_query = f"""
-        UNWIND $uris as uri
-        MATCH (n {{uri: uri}})-[r]->(m)
-        RETURN n.uri as uri, {return_clause} as props
-        """
-        
-        rels_query = f"""
         UNWIND $uris AS uri
-        MATCH (n {{uri: uri}})-[r]->(m)
+        MATCH (n:Resource {{uri: uri}})
+        RETURN n.uri AS uri, {return_clause} AS props
+        """
+
+        rels_query = """
+        UNWIND $uris AS uri
+        MATCH (n:Resource {uri: uri})-[r]->(m)
         RETURN
           n.uri AS uri,
           type(r) AS rel_type,
           collect(DISTINCT m.uri) AS targets
         """
-        
-        response_data = {}
+
+        response_data: Dict[str, Dict[str, List[str]]] = {}
 
         try:
             results = _run_cypher(props_query, {"uris": clean_ids}, self.config)
             for record in results:
                 uri = record.get("uri")
-                props_raw = record.get("props", {})
-                relationships_raw = record.get("relationships", {})
-                # logger.info("\n--------------------------------\n")
-                # logger.info(f"Record: {record}")
-                # logger.info("\n--------------------------------\n")
-                targets_uri = record.get("targets_uri", {})
-                
+                props_raw = record.get("props") or {}
                 if not uri:
                     continue
-                    
-                # Normalize values to List[str]
-                normalized_props = {}
+
+                normalized_props: Dict[str, List[str]] = {}
                 for key, val in props_raw.items():
                     if val is None:
                         continue
@@ -480,20 +476,21 @@ class GraphService:
                         normalized_props[key] = [str(v) for v in val if v is not None]
                     else:
                         normalized_props[key] = [str(val)]
-                
+
                 response_data[uri] = normalized_props
-            
+
             results = _run_cypher(rels_query, {"uris": clean_ids}, self.config)
             for record in results:
                 uri = record.get("uri")
                 rel_type = record.get("rel_type")
                 targets = record.get("targets") or []
-                if not uri:
+                if not uri or not rel_type:
                     continue
-                
-                if uri in response_data:
-                    response_data[uri][rel_type] = targets
-            
+
+                if uri not in response_data:
+                    response_data[uri] = {}
+                response_data[uri][rel_type] = targets
+
             return response_data
 
         except Exception as e:
