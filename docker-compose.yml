@@ -40,7 +40,7 @@ services:
   vllm:
       container_name: vllm
       hostname: vllm
-      image: vllm/vllm-openai:latest
+      image: "${IMAGE}"
       ports:
         - "8003:8000"
       volumes:
@@ -59,16 +59,15 @@ services:
         - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
         - VLLM_USE_V2_MODEL_RUNNER=0
       command: >
-        --model google/gemma-4-E4B-it
+        --model "${MODEL_NAME}"
         --host 0.0.0.0
         --port 8000
-        --max-num-seqs 625
-        --gpu-memory-utilization 0.80
-        --max-model-len 65536
-        --enable-prefix-caching
+        --max-num-seqs "${MAX_NUM_SEQS}"
+        --gpu-memory-utilization 0.92
+        --max-model-len "${MAX_MODEL_LEN}"
         --trust-remote-code
-        --reasoning-parser gemma4
-        --reasoning-config '{"reasoning_start_str":"<|channel>","reasoning_end_str":"<channel|>"}'
+        --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}"
+        ${EXTRA_VLLM_ARGS}
       restart: unless-stopped
 
   elasticsearch:

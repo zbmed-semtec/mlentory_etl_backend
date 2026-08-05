@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
 
 # Default target
 .DEFAULT_GOAL := help
@@ -8,6 +8,9 @@ BLUE := \033[0;34m
 GREEN := \033[0;32m
 YELLOW := \033[0;33m
 NC := \033[0m # No Color
+
+# GPU machine profile config
+LLM_CONFIG := LLM_config_based_on_machine.yaml
 
 ##@ Help
 
@@ -116,38 +119,38 @@ ensure-neo4j: prepare-data-dirs ## Ensure Neo4j is running and healthy (fix perm
 		$(MAKE) wait-neo4j; \
 	fi
 
-check-vllm-env: ## Verify HuggingFace token is set when using gated models
-	@VLLM_MODEL=$$(grep -E '^VLLM_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' || echo google/gemma-4-E4B-it); \
-	HF_TOKEN_LEN=$$(awk -F= '/^HUGGINGFACE_API_TOKEN=/{print length($$2)}' .env 2>/dev/null || echo 0); \
-	if [ "$$HF_TOKEN_LEN" -eq 0 ]; then \
-		echo "$(YELLOW)WARNING: HUGGINGFACE_API_TOKEN is empty in .env$(NC)"; \
-		echo "  The default model ($$VLLM_MODEL) is gated on HuggingFace."; \
-		echo "  Set HUGGINGFACE_API_TOKEN in .env (with model access), or set VLLM_MODEL to an open model."; \
-		exit 1; \
-	fi
+# check-vllm-env: ## Verify HuggingFace token is set when using gated models
+# 	@VLLM_MODEL=$$(grep -E '^VLLM_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' || echo google/gemma-4-E4B-it); \
+# 	HF_TOKEN_LEN=$$(awk -F= '/^HUGGINGFACE_API_TOKEN=/{print length($$2)}' .env 2>/dev/null || echo 0); \
+# 	if [ "$$HF_TOKEN_LEN" -eq 0 ]; then \
+# 		echo "$(YELLOW)WARNING: HUGGINGFACE_API_TOKEN is empty in .env$(NC)"; \
+# 		echo "  The default model ($$VLLM_MODEL) is gated on HuggingFace."; \
+# 		echo "  Set HUGGINGFACE_API_TOKEN in .env (with model access), or set VLLM_MODEL to an open model."; \
+# 		exit 1; \
+# 	fi
 
-wait-vllm: ## Wait for vLLM to serve /v1/models (model load can take several minutes)
-	@echo "$(BLUE)Waiting for vLLM to be ready (google/gemma-4-E4B-it — load may take several minutes)...$(NC)"
-	@for i in $$(seq 1 90); do \
-		if curl -sf http://localhost:8003/v1/models >/dev/null 2>&1; then \
-			echo "$(GREEN)vLLM is ready$(NC)"; \
-			exit 0; \
-		fi; \
-		LOGS=$$(sudo docker logs vllm 2>&1 | tail -30); \
-		echo "$$LOGS" | grep -q "gated repo" && { \
-			echo "$(YELLOW)vLLM failed: gated HuggingFace model — set HUGGINGFACE_API_TOKEN in .env$(NC)"; exit 1; }; \
-		echo "$$LOGS" | grep -q "no kernel image is available" && { \
-			echo "$(YELLOW)vLLM failed: GPU/kernel incompatible — use pinned vllm v0.8.5 image (see docker-compose.yml)$(NC)"; \
-			echo "$$LOGS" | tail -5; exit 1; }; \
-		echo "$$LOGS" | grep -q "Engine core initialization failed" && [ $$i -gt 15 ] && { \
-			echo "$(YELLOW)vLLM engine failed to start — last logs:$(NC)"; \
-			echo "$$LOGS" | tail -8; exit 1; }; \
-		echo "  attempt $$i/90 (waiting 20s)..."; \
-		sleep 20; \
-	done; \
-	echo "$(YELLOW)vLLM did not become ready in time — check: docker logs vllm$(NC)"; \
-	sudo docker logs vllm 2>&1 | tail -15; \
-	exit 1
+# wait-vllm: ## Wait for vLLM to serve /v1/models (model load can take several minutes)
+# 	@echo "$(BLUE)Waiting for vLLM to be ready (google/gemma-4-E4B-it — load may take several minutes)...$(NC)"
+# 	@for i in $$(seq 1 90); do \
+# 		if curl -sf http://localhost:8003/v1/models >/dev/null 2>&1; then \
+# 			echo "$(GREEN)vLLM is ready$(NC)"; \
+# 			exit 0; \
+# 		fi; \
+# 		LOGS=$$(sudo docker logs vllm 2>&1 | tail -30); \
+# 		echo "$$LOGS" | grep -q "gated repo" && { \
+# 			echo "$(YELLOW)vLLM failed: gated HuggingFace model — set HUGGINGFACE_API_TOKEN in .env$(NC)"; exit 1; }; \
+# 		echo "$$LOGS" | grep -q "no kernel image is available" && { \
+# 			echo "$(YELLOW)vLLM failed: GPU/kernel incompatible — use pinned vllm v0.8.5 image (see docker-compose.yml)$(NC)"; \
+# 			echo "$$LOGS" | tail -5; exit 1; }; \
+# 		echo "$$LOGS" | grep -q "Engine core initialization failed" && [ $$i -gt 15 ] && { \
+# 			echo "$(YELLOW)vLLM engine failed to start — last logs:$(NC)"; \
+# 			echo "$$LOGS" | tail -8; exit 1; }; \
+# 		echo "  attempt $$i/90 (waiting 20s)..."; \
+# 		sleep 20; \
+# 	done; \
+# 	echo "$(YELLOW)vLLM did not become ready in time — check: docker logs vllm$(NC)"; \
+# 	sudo docker logs vllm 2>&1 | tail -15; \
+# 	exit 1
 
 wait-stella: ## Wait for STELLA containers to be running
 	@echo "$(BLUE)Waiting for STELLA containers to be ready...$(NC)"
@@ -162,7 +165,12 @@ wait-stella: ## Wait for STELLA containers to be running
 	echo "$(YELLOW)STELLA containers did not become ready in time$(NC)"; \
 	exit 1
 
-up: ensure-env prepare-data-dirs ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)
+detect-profile: ## Detect GPU and update .env with the matching LLM profile
+	@echo "$(BLUE)Detecting GPU machine profile...$(NC)"
+	python3 scripts/detect_machine_profile.py --config $(LLM_CONFIG) --out .env
+	@echo "$(GREEN)Machine profile applied to .env$(NC)"
+
+up: ensure-env prepare-data-dirs detect-profile ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)
 	@echo "$(BLUE)Starting MLentory ETL services...$(NC)"
 	@set -e; \
 	USE_STELLA=$$(grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' | tr '[:upper:]' '[:lower:]' || echo true); \
@@ -510,4 +518,3 @@ version: ## Show version information
 	@echo "Version: 0.1.0"
 	@echo "Python: 3.11+"
 	@echo "Dagster: Latest"
-
