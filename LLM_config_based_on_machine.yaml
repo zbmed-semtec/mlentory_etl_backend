@@ -1,0 +1,92 @@
+profiles:
+ 
+  "Tesla T4":
+    match:
+      gpu_name_contains: "T4"
+      min_gpu_count: 1
+      min_vram_gb_per_gpu: 15
+    llm:
+      image: "vllm/vllm-openai:latest"
+      model_name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
+      max_model_len: 32768
+      max_num_seqs: 600
+      tensor_parallel_size: 1
+      gpu_kv_cache_size: 116000
+      reasoning_start_str: "<think>"
+      reasoning_end_str: "</think>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: true
+      extra_args: ""
+
+  "Tesla V100 32GB (2 GPUs)":
+    match:
+      gpu_name_contains: "V100"
+      min_gpu_count: 2
+      min_vram_gb_per_gpu: 31
+    llm:
+      image: "vllm/vllm-openai:v0.8.5"
+      model_name: "Qwen/Qwen2.5-1.5B"
+      max_model_len: 32768
+      max_num_seqs: 600
+      tensor_parallel_size: 2
+      gpu_kv_cache_size: 360016
+      reasoning_start_str: "<think>"
+      reasoning_end_str: "</think>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: false
+      extra_args: "--dtype float32"
+
+  "Tesla V100 32GB":
+    match:
+      gpu_name_contains: "V100"
+      min_gpu_count: 1
+      min_vram_gb_per_gpu: 31
+    llm:
+      image: "vllm/vllm-openai:v0.8.5"
+      model_name: "Qwen/Qwen2.5-1.5B"
+      max_model_len: 32768
+      max_num_seqs: 600
+      tensor_parallel_size: 1
+      gpu_kv_cache_size: 360016
+      reasoning_start_str: "<think>"
+      reasoning_end_str: "</think>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: false
+      extra_args: "--dtype float32"
+
+  "RTX A6000":
+    match:
+      gpu_name_contains: "A6000"
+      min_gpu_count: 1
+      min_vram_gb_per_gpu: 44
+    llm:
+      image: "vllm/vllm-openai:latest"
+      model_name: "cyankiwi/gemma-4-31B-it-qat-AWQ-INT4"
+      max_model_len: 20480
+      max_num_seqs: 600
+      tensor_parallel_size: 1
+      gpu_kv_cache_size: 46982
+      reasoning_start_str: "<|channel>"
+      reasoning_end_str: "<channel|>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: true
+      extra_args: "--language-model-only"
+
+default:
+  llm:
+      image: "vllm/vllm-openai:latest"
+      model_name: "Qwen/Qwen2.5-7B-Instruct-AWQ"
+      max_model_len: 32768
+      max_num_seqs: 600
+      tensor_parallel_size: 1
+      gpu_kv_cache_size: 116000
+      reasoning_start_str: "<think>"
+      reasoning_end_str: "</think>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: true
+      extra_args: ""

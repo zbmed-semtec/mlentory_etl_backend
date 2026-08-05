@@ -613,8 +613,10 @@ def hf_llm_schema_extractor(chunks_data: Tuple[Dict[str, List[dict]], str]) -> T
     llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=config)
     llm_extractor.load_metadata()
     llm_extractor.load_llm()
+    batch_size = llm_extractor.estimate_max_concurrent_cards(preprocessed_chunks, typical_visible_output_tokens=150)
     llm_extractor.extract_properties(preprocessed_chunks, 
-                                     return_result=False)
+                                     return_result=False,
+                                     batch_size=batch_size)
     result = llm_extractor.parse_llm_output()
     
     final_path = Path(run_folder) / "llm_extraction_results.json"

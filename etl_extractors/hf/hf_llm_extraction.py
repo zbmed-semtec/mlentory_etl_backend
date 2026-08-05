@@ -1,26 +1,62 @@
 import os
 import json
 import time
-import subprocess
 from typing import Dict, Optional, Tuple, List, Any
-from logging import Logger
 from itertools import islice
 import re
 
-import pandas as pd
-from openai import OpenAI
-from transformers import AutoTokenizer
-from huggingface_hub import hf_hub_download
-from pathlib import Path
+from packaging import version
 
 from etl import LLMSchemaPropertyExtractor
 
 class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
 
+    def estimate_max_concurrent_cards(
+        self,
+        model_cards: Dict[str, str],
+        typical_visible_output_tokens: Optional[int] = None,
+        typical_thinking_tokens: Optional[int] = None,
+        safety_margin: float = 0.85,
+    ) -> int:
+        """
+        N_max ~= C / (P_avg + k * D_typical)
+ 
+        C = total KV cache pool in tokens
+        P_avg = average model-card prompt length in tokens
+        D_typical = typical decode length per property, i.e. visible_output + thinking tokens.
+        k = properties per card
+        """
+        if not model_cards:
+            return 1
+
+        gpu_kv_cache_tokens = self.config.gpu_kv_cache_size or 8096
+        sampler_kwargs = self.config.sampler_kwargs or {}
+        props_per_card = len(self.questions)
+ 
+        visible_tokens = typical_visible_output_tokens
+        if visible_tokens is None:
+            visible_tokens = sampler_kwargs.get("max_tokens", 8096)
+ 
+        thinking_tokens = typical_thinking_tokens
+        if thinking_tokens is None:
+            thinking_tokens = sampler_kwargs.get("thinking_token_budget", 768)
+ 
+        d_typical = visible_tokens + thinking_tokens
+ 
+        avg_prompt_tokens = sum(
+            len(self.tokenizer.encode(card)) for card in model_cards.values()
+        ) / len(model_cards)
+ 
+        per_card_tokens = avg_prompt_tokens + props_per_card * d_typical
+        n_max = int((gpu_kv_cache_tokens * safety_margin) / per_card_tokens)
+        self.logger.info(f"Estimated max concurrent cards: {max(1, n_max)}")
+        return max(1, n_max)
+
     def extract_properties(self,
                            model_cards: Dict[str, str],
                            system_prompt: str = "You are a helpful assistant designed to extract specific information based on provided criteria. Think carefully what the extraction task is, and then strictly answer as instructed.",
                            max_retry_per_batch: int = 3,
+                           batch_size: int = 10,
                            return_result: bool = True,
                            ground_truth_dir: Optional[str] = None,
                            ) -> Optional[Tuple[Dict, Dict]]:
@@ -33,13 +69,30 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
             self.logger.error("Metadata not loaded, run load_metadata first.")
             return
 
-        batch_size = self.config.batch_size
         sampler_kwargs=self.config.sampler_kwargs
         chat_template_kwargs=self.config.chat_template_kwargs
         connection_retry_delay=self.config.connection_retry_delay
+        vllm_version = self.config.vllm_image.split(":")[1]
 
-        chat_template_kwargs = chat_template_kwargs or {"add_generation_prompt": True, "tokenize": False}
-        sampler_kwargs = sampler_kwargs or {"max_tokens": 8096, "temperature": 0.1}
+        if not self.config.enable_prefix_caching:
+            self.logger.warning("Model initialized without prefix caching. This will cause much slower inferencing.")
+
+        # map sampler_kwargs to OpenAI parameters
+        extra_body = {}
+        if "repetition_penalty" in sampler_kwargs:
+            extra_body["repetition_penalty"] = sampler_kwargs["repetition_penalty"]
+        if "skip_special_tokens" in sampler_kwargs:
+            extra_body["skip_special_tokens"] = sampler_kwargs["skip_special_tokens"]
+        if "thinking_token_budget" in sampler_kwargs:
+            extra_body["thinking_token_budget"] = sampler_kwargs["thinking_token_budget"]
+
+        # structured outputs depending on vLLM version
+        schema = self._load_structured_output_json()
+        if vllm_version == "latest" or version.parse(vllm_version) >= version.parse("v0.12.0"):
+            extra_body["structured_outputs"] = {"json": schema}
+        else:
+            self.logger.warning(f"vLLM version {vllm_version} does not support structured_outputs. Using guided_json instead.")
+            extra_body["guided_json"] = {"guided_json": schema}
 
         total_models = len(model_cards)
         self.logger.info(f"Starting extraction. Processing {total_models} models in batches of {batch_size}...")
@@ -94,18 +147,6 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
                         remaining_prompts.append(prompt_str)
                         metadata_rest.append(meta)
 
-            # map sampler_kwargs to OpenAI parameters
-            extra_body = {}
-            if "repetition_penalty" in sampler_kwargs:
-                extra_body["repetition_penalty"] = sampler_kwargs["repetition_penalty"]
-            if "skip_special_tokens" in sampler_kwargs:
-                extra_body["skip_special_tokens"] = sampler_kwargs["skip_special_tokens"]
-            if "thinking_token_budget" in sampler_kwargs:
-                extra_body["thinking_token_budget"] = sampler_kwargs["thinking_token_budget"]
-
-            schema = self._load_structured_output_json()
-            extra_body["structured_outputs"] = {"json": schema}
-
             attempts = 0
             while attempts < max_retry_per_batch:
                 try:
@@ -159,7 +200,7 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
         self.logger.info(f"Completed extraction for {len(self.extraction_results)} model cards and {len(self.questions)} properties.")
         if return_result:
             return self.extraction_results, self.evaluation_results
-        
+
     def _load_structured_output_json(self) -> Dict[str, Any]:
         """Loads the structured output json into a dict"""
         
@@ -170,37 +211,43 @@ class HFLLMSchemaPropertyExtractor(LLMSchemaPropertyExtractor):
 
         return schema_dict
 
-    def _parse_gemma_output(self) -> Dict[str, Any]:
-        """Parses the raw text output from Gemma4 into a structured dictionary."""
+    def parse_llm_output(self) -> Dict[str, Any]:
+        """Parses the raw text output from the LLM into a structured dictionary."""
         result = {}
+        reasoning_start_str = self.config.reasoning_start_str
+        reasoning_end_str = self.config.reasoning_end_str
+
+        if not reasoning_start_str or not reasoning_end_str:
+            self.logger.info("Reasoning start or end strings not set. Parsing raw output without reasoning tokens.")
 
         for m_id, p_dict in self.extraction_results.items():
             result[m_id] = {}
 
             for p_name, generated_text in p_dict.items():
-                if "<channel|>" and "<|channel>" not in generated_text: # llm did not think
-                    json_out = generated_text
-                elif not "<channel|>" in generated_text:                # llm did not close thinking tokens properly
-                    json_out = re.findall(r'\{.*?\}', generated_text)
-                else:                                                   # normal case
-                    ss = generated_text.split('<channel|>')
-                    json_out = ss[1]
+                json_string = ""
+                
+                if not reasoning_start_str or not reasoning_end_str or \
+                   reasoning_start_str not in generated_text or reasoning_end_str not in generated_text:
+                    matches = re.findall(r'\{.*?\}', generated_text, re.DOTALL)
+                    if matches:
+                        json_string = matches[0]
+                        
+                else:                                                 
+                    ss = generated_text.split(reasoning_end_str)
+                    matches = re.findall(r'\{.*?\}', ss[1], re.DOTALL)
+                    json_string = matches[0] if matches else ss[1]
 
                 try:
-                    parsed_dict = json.loads(json_out)
+                    parsed_dict = json.loads(json_string)
                         
                 except (json.JSONDecodeError, TypeError):
-                    self.logger.error(f"Gemma4 failed to output correct json for property: {p_name}, model: {m_id}. Generated output: {generated_text}")
-                    parsed_dict = {}        # we drop the result
+                    self.logger.error(f"{self.model_name} failed to output correct json for property: {p_name}, model: {m_id}. Generated output: {generated_text}. Returning the raw output as is.")
+                    parsed_dict = {"result": generated_text}
 
-                if not parsed_dict.get("result", ""):
-                    self.logger.error(f"Gemma4 failed to output correct json for property: {p_name}, model: {m_id}. Generated output: {generated_text}")
-                    parsed_dict = {}
-                    
+                if not isinstance(parsed_dict, dict) or not parsed_dict.get("result", ""):
+                    self.logger.error(f"{self.model_name} failed to output correct json for property: {p_name}, model: {m_id}. Generated output: {generated_text}. Unable to get a valid output for key 'result' from parsed json. Returning the raw output as is.")
+                    parsed_dict = {"result": generated_text}
+
                 result[m_id][p_name] = parsed_dict.get("result", "")
 
         return result
-    
-    def parse_llm_output(self) -> Dict[str, Any]:
-        """Parses the raw text output from the LLM into a structured dictionary."""
-        return self._parse_gemma_output()
