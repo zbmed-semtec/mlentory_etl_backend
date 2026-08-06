@@ -174,6 +174,9 @@ services:
       - "8008:8000"
     env_file:
       - .env
+    environment:
+      # Fail /health (HTTP 503) when GPU is not visible so autoheal can recreate the API.
+      - REQUIRE_CUDA_HEALTH=${REQUIRE_CUDA_HEALTH:-true}
     volumes:
       - ./api:/app/api
       - ./etl_loaders:/app/etl_loaders
@@ -190,7 +193,33 @@ services:
     depends_on:
       - neo4j
       - elasticsearch
+    restart: unless-stopped
+    labels:
+      - autoheal=true
+    healthcheck:
+      # curl -f fails on HTTP 503 from /health when CUDA is missing.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Restarts containers labeled autoheal=true when their Docker healthcheck fails.
+  # Needed because Docker does not restart on "unhealthy" by itself.
+  autoheal:
+    profiles: ["api", "complete"]
+    image: willfarrell/autoheal:latest
+    container_name: mlentory-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=120
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - mlentory-network
 
   # =============================================================================
   # MLentory MCP API
