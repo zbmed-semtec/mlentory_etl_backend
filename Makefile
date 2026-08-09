@@ -287,6 +287,11 @@ stella-warmup: ## Preload MLentory search paths used by STELLA rankers (avoids f
 		>/dev/null 2>&1 \
 		&& echo "$(GREEN)  ✓ experiment ranker warmed up$(NC)" \
 		|| echo "$(YELLOW)  ! experiment ranker warmup failed (non-fatal)$(NC)"
+	@sudo docker exec stella-app curl -sf --max-time 120 \
+		'http://mlentory-api:8000/api/v1/stella/search_with_stella?query=warmup&page=1&limit=1&filters=%7B%7D&facets=%5B%22mlTask%22%5D&facet_query=%7B%7D&session_id=stella-warmup' \
+		>/dev/null 2>&1 \
+		&& echo "$(GREEN)  ✓ search_with_stella warmed up$(NC)" \
+		|| echo "$(YELLOW)  ! search_with_stella warmup failed (non-fatal)$(NC)"
 
 stella-sync-db-passwords: ## Align STELLA DB passwords with .env (fixes stale Docker volumes)
 	@STELLA_APP_PW=$$(grep -E '^STELLA_POSTGRES_PW=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "'); \
