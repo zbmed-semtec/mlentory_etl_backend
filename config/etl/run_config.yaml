@@ -53,3 +53,13 @@ platforms:
     # Parent ID for collection filtering
     parent_id: "bioimage-io/bioimage.io"
 
+   # Kaggle Configuration
+  kaggle:
+    
+    num_models: 50              # cap for testing; null = all
+    incremental: false
+    force_full_refresh: false
+    refresh_metadata: true
+    threads: 8
+   
+
