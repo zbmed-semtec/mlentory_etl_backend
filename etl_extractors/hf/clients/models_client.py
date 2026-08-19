@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional, List, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
@@ -36,19 +36,34 @@ class HFModelsClient:
             logger.info("Loading models from HuggingFace dataset")
             dataset = load_dataset(
                 "librarian-bots/model_cards_with_metadata",
-                revision="4e7edd391342ee5c182afd08a6f62bff38f44535",
+                revision="4e8142ec7e7a3fa66db67b0119eebdc0092cd67d",
             )["train"].to_pandas()
 
             logger.info("Loaded %s models from the dataset", len(dataset))
 
+            # Normalize timestamps: upstream parquet may store last_modified as strings.
+            if "last_modified" in dataset.columns:
+                dataset["last_modified"] = pd.to_datetime(
+                    dataset["last_modified"], utc=True, errors="coerce"
+                )
+
             if update_recent:
                 latest_modification = dataset["last_modified"].max()
-                recent_models = self.get_recent_models_metadata(
-                    limit, latest_modification, threads
-                )
-                dataset = pd.concat([dataset, recent_models], ignore_index=True)
-                if "modelId" in dataset.columns:
-                    dataset = dataset.drop_duplicates(subset=["modelId"], keep="last")
+                if pd.isna(latest_modification):
+                    logger.warning(
+                        "Could not determine latest modification time; skipping update_recent"
+                    )
+                else:
+                    recent_models = self.get_recent_models_metadata(
+                        limit, latest_modification.to_pydatetime(), threads
+                    )
+                    dataset = pd.concat([dataset, recent_models], ignore_index=True)
+                    if "modelId" in dataset.columns:
+                        dataset = dataset.drop_duplicates(subset=["modelId"], keep="last")
+                    if "last_modified" in dataset.columns:
+                        dataset["last_modified"] = pd.to_datetime(
+                            dataset["last_modified"], utc=True, errors="coerce"
+                        )
 
             # Always sort by last modification time when available so that
             # pagination via ``offset`` is deterministic.
@@ -81,7 +96,13 @@ class HFModelsClient:
         models = self.api.list_models(limit=limit, sort="lastModified", direction=-1, full=True)
 
         def process_model(model):
-            if model.last_modified <= latest_modification:
+            model_modified = model.last_modified
+            if model_modified is not None and getattr(model_modified, "tzinfo", None) is None:
+                model_modified = model_modified.replace(tzinfo=timezone.utc)
+            cutoff = latest_modification
+            if cutoff is not None and getattr(cutoff, "tzinfo", None) is None:
+                cutoff = cutoff.replace(tzinfo=timezone.utc)
+            if model_modified is None or cutoff is None or model_modified <= cutoff:
                 return None
             try:
                 card = ModelCard.load(model.modelId, token=self.token) if self.token else ModelCard.load(
