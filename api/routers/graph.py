@@ -256,35 +256,53 @@ async def get_models_by_entity_uri(
         ...,
         description="The full entity URI to find related models for "
         "(e.g. 'https://w3id.org/mlentory/mlentory_graph/<entity-id>')",
-    )
+    ),
+    limit: Optional[int] = Query(
+        None,
+        ge=1,
+        le=500,
+        description="Max number of models to return (omit for all remaining after offset)",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Number of models to skip for pagination",
+    ),
 ) -> RelatedModelsResponse:
     """
-    📋 Get all models related to an entity.
-    
-    Retrieves all ML models that are connected to the given entity URI via any relationship.
-    
+    Get models related to an entity (optionally paginated).
+
+    Retrieves ML models connected to the given entity URI. When ``limit`` is set,
+    only that page is returned; ``count`` is always the total match count.
+
     **Parameters:**
     - `entity_uri`: The entity URI to find related models for
-    
+    - `limit`: Optional page size
+    - `offset`: Optional page offset
+
     **Response:**
     - `entity_uri`: The queried entity URI
     - `models`: List of related models with properties and relationship types
-    - `count`: Total number of related models
+    - `count`: Total number of related models (not just this page)
 
     **Example:**
     ```
-    GET /api/v1/entities/related_models?entity_uri=https://w3id.org/mlentory/mlentory_graph/fd5b71...
+    GET /api/v1/graph/entities/related_models?entity_uri=https://w3id.org/mlentory/mlentory_graph/fd5b71...&limit=10&offset=0
     ```
     """
     try:
-        models = graph_service.get_models_by_entity_uri(entity_uri=entity_uri)
-        
+        models, total_count = graph_service.get_models_by_entity_uri(
+            entity_uri=entity_uri,
+            limit=limit,
+            offset=offset,
+        )
+
         return RelatedModelsResponse(
             entity_uri=entity_uri,
             models=models,
-            count=len(models)
+            count=total_count,
         )
-    
+
     except Exception as e:
         logger.error(f"Error getting models for entity URI: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
