@@ -49,6 +49,39 @@ class KaggleModelClient:
                 if v is not None and v != "" and v != p:
                     return v
         return None
+    
+    @classmethod
+    def _distinct(cls, instances: List[Dict[str, Any]], field: str) -> List[str]:
+        """Collect distinct non-empty values of `field` across model instances."""
+        values: List[str] = []
+        for inst in instances:
+            v = cls._to_str(inst.get(field, "")).strip()
+            if v and v not in values:
+                values.append(v)
+        return values
+    
+    @classmethod
+    def _distinct_frameworks(cls, instances: List[Dict[str, Any]]) -> List[str]:
+        """
+        Distinct framework display names, read from each instance URL.
+
+        The URL's third path segment ("TensorFlow2") is the only consistently
+        cased form Kaggle provides; the `framework` field varies by record.
+        """
+        marker = "/models/"
+        names: List[str] = []
+        for inst in instances:
+            url = cls._to_str(inst.get("url", ""))
+            name = ""
+            if url and marker in url:
+                parts = url.split(marker, 1)[1].strip("/").split("/")
+                if len(parts) >= 3:
+                    name = parts[2]
+            if not name:
+                name = cls._to_str(inst.get("framework", "")).strip()
+            if name and name not in names:
+                names.append(name)
+        return names
 
     @classmethod
     def _join_unique(cls, instances: List[Dict[str, Any]], field: str,
@@ -144,7 +177,7 @@ class KaggleModelClient:
         instances = instances if isinstance(instances, list) else []
         dict_instances = [i for i in instances if isinstance(i, dict)]
 
-        out["license"] = self._join_unique(dict_instances, "licenseName")
+        
         out["modelArchitecture"] = self._join_unique(dict_instances, "framework")
         out["modelInstanceType"] = self._join_unique(dict_instances, "modelInstanceType")
         out["num_instances"] = len(dict_instances)
@@ -164,6 +197,32 @@ class KaggleModelClient:
         versions = [i.get("versionNumber") for i in dict_instances
                     if isinstance(i.get("versionNumber"), int)]
         out["version"] = self._to_str(max(versions)) if versions else ""
+        
+        # license lives on instances, and a model can carry several. Keep the
+        # joined string for display, plus a JSON array so downstream consumers
+        # (the license identifier) can recover the individual values - license
+        # names are not safe to split on a comma.
+        out["license"] = self._join_unique(dict_instances, "licenseName")
+        distinct_licenses = self._distinct(dict_instances, "licenseName")
+        out["licenses"] = (
+            json.dumps(distinct_licenses, ensure_ascii=False) if distinct_licenses else ""
+        )
+        
+        # Kaggle reports framework inconsistently across records ("pyTorch",
+        # "keras", "MODEL_FRAMEWORK_TENSOR_FLOW_2"), while the instance URL
+        # always carries a clean display form. Keep the raw joined value for
+        # modelArchitecture, plus a JSON array of the clean names for the
+        # framework identifier - framework names are not safe to split on a
+        # comma.
+        out["modelArchitecture"] = self._join_unique(dict_instances, "framework")
+        distinct_frameworks = self._distinct_frameworks(dict_instances)
+        out["frameworks"] = (
+            json.dumps(distinct_frameworks, ensure_ascii=False)
+            if distinct_frameworks else ""
+        )
+        
+        out["modelInstanceType"] = self._join_unique(dict_instances, "modelInstanceType")
+        out["num_instances"] = len(dict_instances)
 
         # release notes: Kaggle has no versionNotes; the per-instance overview
         # is the closest equivalent

@@ -15,6 +15,8 @@ from etl.assets import ai4life_extraction as ai4life_assets_module
 from etl.assets import ai4life_transformation as ai4life_transformation_module
 from etl.assets import vector_indexing as vector_indexing_module
 from etl.assets import kaggle_extraction as kaggle_assets_module
+from etl.assets import kaggle_transformation as kaggle_trasformation_module
+from etl.assets import kaggle_loading as kaggle_loading_module
 
 
 _ASSET_MODULES = [
@@ -26,6 +28,8 @@ _ASSET_MODULES = [
     ai4life_assets_module,
     ai4life_transformation_module,
     kaggle_assets_module,
+    kaggle_trasformation_module,
+    kaggle_loading_module,
     vector_indexing_module,
 ]
 

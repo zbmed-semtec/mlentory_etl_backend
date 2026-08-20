@@ -202,3 +202,203 @@ def kaggle_instances_raw(
     return (str(instances_path), run_folder)
 
 
+ 
+@asset(
+    group_name="kaggle_enrichment",
+    ins={"models_data": AssetIn("kaggle_models_raw")},
+    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+)
+def kaggle_identified_licenses(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify license references per model from raw Kaggle models.
+ 
+    On Kaggle the license belongs to the instance rather than the model, and
+    one model can carry instances under different licenses, so a model may
+    map to several.
+ 
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+ 
+    Returns:
+        Dict of {model_id: [license_names]}
+    """
+    models_json_path, _ = models_data
+    enrichment = KaggleEnrichment()
+    models_df = KaggleHelper.load_models_dataframe(models_json_path)
+ 
+    model_licenses = enrichment.identifiers["licenses"].identify_per_model(models_df)
+    logger.info("Identified licenses for %d models", len(model_licenses))
+    return model_licenses
+
+@asset(
+    group_name="kaggle_enrichment",
+    tags={"pipeline": "Kaggle_etl"},
+    ins={
+        "raw_records": AssetIn("kaggle_raw_records"),
+        "identified_licenses": AssetIn("kaggle_identified_licenses"),
+    },
+)
+def kaggle_licenses_raw(
+    raw_records: Dict[str, Any],
+    identified_licenses: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Extract license records and save to licenses.json.
+    Returns (licenses_json_path, run_folder).
+    """
+    records = raw_records["data"]
+    run_folder = raw_records["run_folder"]
+ 
+    # Collect unique licenses
+    license_names: Set[str] = set()
+    for _, lic_list in identified_licenses.items():
+        license_names.update([x for x in lic_list if x])
+ 
+    if not license_names:
+        logger.info("No licenses to extract")
+        return ("", run_folder)
+ 
+    extractor = KaggleExtractor(records_data=records)
+    license_df = extractor.extract_specific_licenses(list(license_names))
+ 
+    license_path = Path(run_folder) / "licenses.json"
+    license_df.to_json(str(license_path), orient="records", indent=2)
+ 
+    logger.info("Saved %d licenses to %s", len(license_df), license_path)
+    return (str(license_path), run_folder)
+
+
+@asset(
+    group_name="kaggle_enrichment",
+    ins={"models_data": AssetIn("kaggle_models_raw")},
+    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+)
+def kaggle_identified_keywords(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify keyword references per model from raw Kaggle models.
+ 
+    Kaggle curates its tags, each carrying a stable ref ("nlp",
+    "classification") and a taxonomy path ("analysis > nlp"). This mapping is
+    what groups models by keyword downstream.
+ 
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+ 
+    Returns:
+        Dict of {model_id: [keyword_refs]}
+    """
+    models_json_path, _ = models_data
+    enrichment = KaggleEnrichment()
+    models_df = KaggleHelper.load_models_dataframe(models_json_path)
+ 
+    model_keywords = enrichment.identifiers["keywords"].identify_per_model(models_df)
+    logger.info("Identified keywords for %d models", len(model_keywords))
+    return model_keywords
+ 
+ 
+@asset(
+    group_name="kaggle_enrichment",
+    tags={"pipeline": "Kaggle_etl"},
+    ins={
+        "raw_records": AssetIn("kaggle_raw_records"),
+        "identified_keywords": AssetIn("kaggle_identified_keywords"),
+    },
+)
+def kaggle_keywords_raw(
+    raw_records: Dict[str, Any],
+    identified_keywords: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Build keyword entity records and save to keywords.json.
+ 
+    One row per distinct keyword: the same tag repeats identically across
+    every model that carries it, so keywords are de-duplicated by ref - one
+    node, many edges.
+ 
+    Returns (keywords_json_path, run_folder).
+    """
+    records = raw_records["data"]
+    run_folder = raw_records["run_folder"]
+ 
+    keyword_names: Set[str] = set()
+    for _, names in identified_keywords.items():
+        keyword_names.update([x for x in names if x])
+ 
+    if not keyword_names:
+        logger.info("No keywords to extract")
+        return ("", run_folder)
+ 
+    extractor = KaggleExtractor(records_data=records)
+    keywords_df = extractor.extract_specific_keywords(sorted(keyword_names))
+ 
+    keywords_path = Path(run_folder) / "keywords.json"
+    keywords_df.to_json(str(keywords_path), orient="records", indent=2)
+ 
+    logger.info("Saved %d keywords to %s", len(keywords_df), keywords_path)
+    return (str(keywords_path), run_folder)
+
+
+@asset(
+    group_name="kaggle_enrichment",
+    ins={"models_data": AssetIn("kaggle_models_raw")},
+    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+)
+def kaggle_identified_frameworks(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify framework references per model from raw Kaggle models.
+ 
+    On Kaggle the framework belongs to the instance rather than the model, and
+    one model can carry instances under different frameworks, so a model may
+    map to several.
+ 
+    Args:
+        models_data: Tuple of (models_json_path, run_folder)
+ 
+    Returns:
+        Dict of {model_id: [framework_names]}
+    """
+    models_json_path, _ = models_data
+    enrichment = KaggleEnrichment()
+    models_df = KaggleHelper.load_models_dataframe(models_json_path)
+ 
+    model_frameworks = enrichment.identifiers["frameworks"].identify_per_model(models_df)
+    logger.info("Identified frameworks for %d models", len(model_frameworks))
+    return model_frameworks
+ 
+ 
+@asset(
+    group_name="kaggle_enrichment",
+    tags={"pipeline": "Kaggle_etl"},
+    ins={
+        "raw_records": AssetIn("kaggle_raw_records"),
+        "identified_frameworks": AssetIn("kaggle_identified_frameworks"),
+    },
+)
+def kaggle_frameworks_raw(
+    raw_records: Dict[str, Any],
+    identified_frameworks: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Extract framework records and save to frameworks.json.
+    Returns (frameworks_json_path, run_folder).
+    """
+    records = raw_records["data"]
+    run_folder = raw_records["run_folder"]
+ 
+    # Collect unique frameworks
+    framework_names: Set[str] = set()
+    for _, fw_list in identified_frameworks.items():
+        framework_names.update([x for x in fw_list if x])
+ 
+    if not framework_names:
+        logger.info("No frameworks to extract")
+        return ("", run_folder)
+ 
+    extractor = KaggleExtractor(records_data=records)
+    framework_df = extractor.extract_specific_frameworks(list(framework_names))
+ 
+    framework_path = Path(run_folder) / "frameworks.json"
+    framework_df.to_json(str(framework_path), orient="records", indent=2)
+ 
+    logger.info("Saved %d frameworks to %s", len(framework_df), framework_path)
+    return (str(framework_path), run_folder)

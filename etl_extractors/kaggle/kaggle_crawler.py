@@ -142,9 +142,9 @@ class KaggleCrawler:
     """
 
     # Measured ceiling - see module docstring. Not exposed via config.
-    RPS = 2.0
+    RPS = 1.0
     MIN_RPS = 0.5
-    MAX_RPS = 3.0
+    MAX_RPS = 1.0
 
     def __init__(
         self,

@@ -1,4 +1,8 @@
 from .models_client import KaggleModelClient
 from .instances_client import KaggleInstancesClient
+from .licenses_client import KaggleLicenseClient
+from .keywords_client import KaggleKeywordsClient
+from .frameworks_client import KaggleFrameworkClient
 
-__all__ = ["KaggleModelClient", "KaggleInstancesClient"]
+__all__ = ["KaggleModelClient", "KaggleInstancesClient", "KaggleLicenseClient", 
+           "KaggleKeywordsClient","KaggleFrameworkClient"]

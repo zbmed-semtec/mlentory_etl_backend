@@ -65,6 +65,26 @@ class KaggleInstancesClient:
         return str(value)
 
     @staticmethod
+    def _display_name(variation: str, parent_title: str, framework: str) -> str:
+        """
+        Build a name that identifies the instance on its own.
+
+        Kaggle names the sole variation of a model "default", so that slug
+        carries no information. Anything else is a real variation name and is
+        used as-is.
+        """
+        generic = {"default", "", "1"}
+        if variation.lower() not in generic:
+            return variation
+
+        parts = [p for p in (parent_title, framework) if p]
+        if len(parts) == 2:
+            return f"{parts[0]} ({parts[1]})"
+        if parts:
+            return parts[0]
+        return variation
+
+    @staticmethod
     def _clean_framework(framework: str) -> str:
         """
         Turn Kaggle's framework enum into the form used in instance URLs.
@@ -161,7 +181,12 @@ class KaggleInstancesClient:
 
             # ---- schema-aligned fields ----
             out["slug"] = variation
-            out["name"] = variation
+            # A single-variation model always uses the slug "default", so the
+            # slug alone is not a usable display name - a catalog would show
+            # dozens of identical "default" entries with no way to tell them
+            # apart. Fall back to the parent title plus framework, keeping the
+            # real slug in the `slug` field.
+            out["name"] = self._display_name(variation, parent_title, framework_display)
             out["description"] = self._to_str(instance.get("overview", ""))
             out["modelArchitecture"] = framework
             # Kaggle reports framework as an enum ("MODEL_FRAMEWORK_TENSOR_FLOW_2")
