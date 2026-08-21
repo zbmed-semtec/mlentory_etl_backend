@@ -92,6 +92,153 @@ def _clean_framework(framework: str) -> str:
     return "".join(p.capitalize() for p in parts)
 
 
+
+def _adaption_technique(record: Dict[str, Any]) -> Optional[str]:
+    """
+    Return ``"fineTuned"`` when the instance carries Kaggle's ``fineTunable``
+    flag, else ``None``.
+
+    Note this is Kaggle's own field and it is set on most instances, so most
+    records will come out as fineTuned.
+    """
+    if record.get("fineTunable"):
+        return "fineTuned"
+    return None
+
+
+def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Map one Kaggle model instance onto the MLModel field set.
+
+    An instance is a downloadable artifact of a model - one per framework and
+    variation - and is emitted as an MLModel in its own right, alongside the
+    models themselves. Only the fields it genuinely owns are mapped: its own
+    name, overview, usage snippet, license, size and URL.
+
+    ``baseModel`` carries two kinds of link, real lineage first: the model an
+    instance was derived from (from ``baseModelInstanceInformation``), then
+    the parent model it belongs to. Both become ``fair4ml:baseModel`` edges,
+    which gives the graph a parent node with its variations as children.
+    """
+    instance_id = str(rec.get("instanceId", "")).strip()
+    mlentory_id = str(rec.get("mlentory_id", "")).strip()
+    parent_id = str(rec.get("parent_mlentory_id", "")).strip()
+    url = str(rec.get("url", "")).strip()
+
+    identifiers = [x for x in (mlentory_id,) if x]
+    urls = [x for x in (url,) if x]
+    if mlentory_id.startswith("https://w3id.org/mlentory/"):
+        urls.append(
+            mlentory_id.replace(
+                "https://w3id.org/mlentory/", "https://mlentory.zbmed.de/", 1
+            )
+        )
+
+    # Real lineage: base model reconstructed from the nested
+    # baseModelInstanceInformation object. The framework there uses the field
+    # spelling ("pyTorch"), so it is normalized to the URL form the instance
+    # ids are built from, or the hash would not match.
+    base_models: List[str] = []
+    base_info = rec.get("baseModelInstanceInformation")
+    if isinstance(base_info, str) and base_info.strip():
+        try:
+            base_info = json.loads(base_info)
+        except (ValueError, TypeError):
+            base_info = None
+    if isinstance(base_info, dict):
+        owner = base_info.get("owner")
+        owner_slug = ""
+        if isinstance(owner, dict):
+            owner_slug = str(owner.get("slug", "")).strip()
+        model_slug = str(base_info.get("modelSlug", "")).strip()
+        instance_slug = str(base_info.get("instanceSlug", "")).strip()
+        framework = _clean_framework(str(base_info.get("framework", "")).strip())
+        parts = [p for p in (owner_slug, model_slug, framework, instance_slug) if p]
+        if len(parts) == 4:
+            base_models.append(
+                KaggleHelper.generate_mlentory_entity_hash_id(
+                    "ModelInstance", "/".join(parts), platform="Kaggle"
+                )
+            )
+
+    external_base = str(rec.get("externalBaseModelUrl", "")).strip()
+    if external_base and external_base not in base_models:
+        base_models.append(external_base)
+
+    # The parent model this instance belongs to. Added last so real lineage
+    # stays at index 0 for anything that needs to tell the two apart.
+    if parent_id and parent_id not in base_models:
+        base_models.append(parent_id)
+
+    # The instance's own documentation. `overview` is the short summary Kaggle
+    # shows on the variation page; `usage` is the long form and is often
+    # richer than the parent model card. abstract holds both, matching what it
+    # means at model level: the complete original text for this record.
+    overview = str(rec.get("description", "")).strip()
+    usage = str(rec.get("usage", "")).strip()
+    full_card = "\n\n".join(part for part in (overview, usage) if part)
+
+    meta = {
+        "extraction_method": "Parsed_from_Kaggle_instances_json",
+        "confidence": 1.0,
+    }
+
+    return {
+        "identifier": identifiers,
+        "name": str(rec.get("name", "")).strip() or instance_id,
+        "url": list(dict.fromkeys(urls)),
+        "author": str(rec.get("sharedBy", "")).strip() or None,
+        "sharedBy": str(rec.get("sharedBy", "")).strip() or None,
+        "description": overview or None,
+        "abstract": full_card or None,
+        "license": str(rec.get("license", "")).strip() or None,
+        "modelCategory": [
+            x for x in (str(rec.get("frameworkName", "")).strip(),) if x
+        ],
+        "baseModel": base_models,
+        "adaptionTechniques": _adaption_technique(rec),
+        "usageInstructions": usage or None,
+        "memoryRequirements": str(rec.get("contentSize", "")).strip() or None,
+        "archivedAt": url or None,
+        "extraction_metadata": {
+            "identifier": {**meta, "source_field": "mlentory_id"},
+            "name": {**meta, "source_field": "slug"},
+            "sharedBy": {
+                **meta,
+                "source_field": "sharedBy",
+                "notes": "Owner carried down from the parent model",
+            },
+            "description": {**meta, "source_field": "overview"},
+            "abstract": {
+                **meta,
+                "source_field": "overview, usage",
+                "notes": "Full instance documentation before summarization",
+            },
+            "license": {**meta, "source_field": "licenseName"},
+            "modelCategory": {
+                **meta,
+                "source_field": "frameworkName",
+                "notes": "Framework read from the instance URL",
+            },
+            "baseModel": {
+                **meta,
+                "source_field": (
+                    "baseModelInstanceInformation, externalBaseModelUrl, "
+                    "parent_mlentory_id"
+                ),
+                "notes": "Real lineage first, then the parent model",
+            },
+            "adaptionTechniques": {
+                **meta,
+                "source_field": "fineTunable",
+            },
+            "usageInstructions": {**meta, "source_field": "usage"},
+            "memoryRequirements": {**meta, "source_field": "totalUncompressedBytes"},
+        },
+        "_model_id": instance_id,
+    }
+
+
 # ---------- normalized folder ----------
 
 @asset(
@@ -282,6 +429,7 @@ def kaggle_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
         "keywords_mapping": AssetIn("kaggle_identified_keywords"),
         "licenses_mapping": AssetIn("kaggle_identified_licenses"),
         "frameworks_mapping": AssetIn("kaggle_identified_frameworks"),
+        "sharedby_mapping": AssetIn("kaggle_identified_sharedby"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
     tags={"pipeline": "Kaggle_etl", "stage": "transform"},
@@ -290,6 +438,7 @@ def kaggle_entity_linking(
     keywords_mapping: Dict[str, List[str]],
     licenses_mapping: Dict[str, List[str]],
     frameworks_mapping: Dict[str, List[str]],
+    sharedby_mapping: Dict[str, List[str]],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
@@ -326,6 +475,7 @@ def kaggle_entity_linking(
         set(keywords_mapping.keys())
         | set(licenses_mapping.keys())
         | set(frameworks_mapping.keys())
+        | set(sharedby_mapping.keys())
     )
 
     entity_linking: Dict[str, Dict[str, List[str]]] = {}
@@ -334,6 +484,7 @@ def kaggle_entity_linking(
         keywords = keywords_mapping.get(model_id, []) or []
         licenses = licenses_mapping.get(model_id, []) or []
         frameworks = frameworks_mapping.get(model_id, []) or []
+        sharedby = sharedby_mapping.get(model_id, []) or []
 
         entity_linking[model_id] = {
             "keywords": [
@@ -347,6 +498,10 @@ def kaggle_entity_linking(
             "frameworks": [
                 KaggleHelper.generate_mlentory_entity_hash_id("Framework", x, platform="Kaggle")
                 for x in frameworks
+            ],
+            "sharedby": [
+                KaggleHelper.generate_mlentory_entity_hash_id("SharedBy", x, platform="Kaggle")
+                for x in sharedby
             ],
             "sources": list(kaggle_catalog_source_iris),
         }
@@ -386,6 +541,7 @@ def merge_kaggle_partial_schemas(
         keywords = links.get("keywords") or []
         licenses = links.get("licenses") or []
         frameworks = links.get("frameworks") or []
+        sharedby = links.get("sharedby") or []
         sources = links.get("sources") or []
         linked_fields: List[str] = []
 
@@ -404,6 +560,10 @@ def merge_kaggle_partial_schemas(
             # Frameworks replace the raw modelCategory strings with their IRIs
             merged_data["modelCategory"] = list(frameworks)
             linked_fields.append("modelCategory")
+
+        if sharedby:
+            merged_data["sharedBy"] = str(sharedby[0])  # MLModel.sharedBy is a single string
+            linked_fields.append("sharedBy")
 
         if sources:
             merged_data["source"] = str(sources[0])  # MLModel.source is a single string
@@ -434,6 +594,10 @@ def merge_kaggle_partial_schemas(
         iu = merged_data.get("intendedUse")
         if iu is not None and not isinstance(iu, str):
             merged_data["intendedUse"] = str(iu)
+
+        # Kaggle records lineage per instance, never on the model itself, so a
+        # parent model has no evidence it was adapted from anything.
+        merged_data.setdefault("adaptionTechniques", None)
 
         merged_items.append((model_id, merged_data))
 
@@ -486,6 +650,7 @@ def validate_kaggle_mlmodels(
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
         "basic_properties_path": AssetIn("kaggle_extract_basic_properties"),
         "entity_linking_path": AssetIn("kaggle_entity_linking"),
+        "instances_data": AssetIn("kaggle_instances_raw"),
     },
     tags={"pipeline": "Kaggle_etl", "stage": "transform"},
 )
@@ -493,14 +658,22 @@ def kaggle_model_normalized(
     run_folder_data: Tuple[str, str],
     basic_properties_path: str,
     entity_linking_path: str,
+    instances_data: Tuple[str, str],
 ) -> str:
     """
     Builds FAIR4ML-validated MLModel objects for Kaggle.
+
+    Both models and their instances land in ``mlmodels.json``. A Kaggle model
+    is a container and its instances are the downloadable artifacts - one per
+    framework and variation - and each is an MLModel in its own right. They
+    are distinguishable by ``baseModel``, which on an instance points at the
+    model it belongs to, and by ``adaptionTechniques``.
 
     Inputs:
       - run_folder_data: (raw_models_json_path, normalized_run_folder)
       - basic_properties_path: .../partial_basic_properties.json
       - entity_linking_path: .../entity_linking.json
+      - instances_data: (instances_json_path, raw_run_folder)
 
     Output:
       - .../mlmodels.json in the normalized_run_folder
@@ -571,10 +744,39 @@ def kaggle_model_normalized(
         all_model_ids=all_ids,
     )
 
+    # Instances are MLModels too, so they are validated and written into the
+    # same file rather than a separate one.
+    instances_json_path, _raw_run_folder = instances_data
+    raw_instances = _load_json_records(instances_json_path) if instances_json_path else []
+    logger.info("Loading %d Kaggle instances from %s", len(raw_instances), instances_json_path)
+
+    instance_items: List[Tuple[str, Dict[str, Any]]] = []
+    for rec in raw_instances:
+        mapped = normalize_kaggle_instance(rec)
+        instance_id = mapped.pop("_model_id", "") or f"instance_{len(instance_items)}"
+
+        # Entity linking only covers models.json, so an instance's sharedBy is
+        # still a plain name here. Mint the same IRI the models get, so both
+        # point at one shared node rather than a name and an IRI.
+        shared_by_name = str(mapped.get("sharedBy", "") or "").strip()
+        if shared_by_name:
+            mapped["sharedBy"] = KaggleHelper.generate_mlentory_entity_hash_id(
+                "SharedBy", shared_by_name, platform="Kaggle"
+            )
+
+        instance_items.append((instance_id, mapped))
+
+    merged_items.extend(instance_items)
+
     normalized_models, validation_errors = validate_kaggle_mlmodels(merged_items)
 
     if not normalized_models:
         raise RuntimeError("kaggle_model_normalized produced zero valid MLModels. Aborting run.")
+
+    logger.info(
+        "Normalized %d records (%d models + %d instances)",
+        len(normalized_models), len(all_ids), len(instance_items),
+    )
 
     output_path = normalized_folder_path / "mlmodels.json"
     with open(output_path, "w", encoding="utf-8") as f:
@@ -593,238 +795,6 @@ def kaggle_model_normalized(
 
     logger.info("Saved mlmodels.json to %s", output_path)
     return str(output_path)
-
-
-@asset(
-    group_name="kaggle_transformation",
-    ins={
-        "instances_data": AssetIn("kaggle_instances_raw"),
-        "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
-    },
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
-)
-def kaggle_instances_normalized(
-    instances_data: Tuple[str, str],
-    run_folder_data: Tuple[str, str],
-) -> str:
-    """
-    Normalize Kaggle model instances into FAIR4ML MLModel objects and write
-    <normalized_folder>/mlinstances.json.
-
-    An instance is a downloadable artifact of a model - one per framework and
-    variation - so only the fields it genuinely owns are mapped: its own name,
-    overview, usage snippet, license, size and URL.
-
-    ``baseModel`` carries two kinds of link, real lineage first: the model an
-    instance was derived from (from ``baseModelInstanceInformation``), then
-    the parent model it belongs to. Both land as ``fair4ml:baseModel`` edges,
-    which gives the graph a parent node with its variations as children -
-    "show me every variation of Gemma" - at the cost of not separating
-    "packaged from" from "derived from" in the predicate itself.
-    """
-    instances_json_path, _raw_run_folder = instances_data
-    _raw_models_json_path, normalized_folder = run_folder_data
-
-    out_path = Path(normalized_folder) / "mlinstances.json"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not instances_json_path:
-        logger.info("No instances_json_path. Writing empty mlinstances.json")
-        out_path.write_text("[]", encoding="utf-8")
-        return str(out_path)
-
-    raw_instances = _load_json_records(instances_json_path)
-    logger.info("Loading Kaggle instances from %s (%d records)", instances_json_path, len(raw_instances))
-
-    normalized: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
-
-    for idx, rec in enumerate(raw_instances):
-        instance_id = str(rec.get("instanceId", "")).strip() or f"instance_{idx}"
-
-        try:
-            mlentory_id = str(rec.get("mlentory_id", "")).strip()
-            parent_id = str(rec.get("parent_mlentory_id", "")).strip()
-            url = str(rec.get("url", "")).strip()
-
-            identifiers = [x for x in (mlentory_id,) if x]
-            urls = [x for x in (url,) if x]
-            if mlentory_id.startswith("https://w3id.org/mlentory/"):
-                urls.append(
-                    mlentory_id.replace(
-                        "https://w3id.org/mlentory/", "https://mlentory.zbmed.de/", 1
-                    )
-                )
-
-            # Real lineage only: base model reconstructed from the nested
-            # baseModelInstanceInformation object. The framework there uses the
-            # field spelling ("pyTorch"), so it is normalized to the URL form
-            # the instance ids are built from, or the hash would not match.
-            base_models: List[str] = []
-            base_info = rec.get("baseModelInstanceInformation")
-            if isinstance(base_info, str) and base_info.strip():
-                try:
-                    base_info = json.loads(base_info)
-                except (ValueError, TypeError):
-                    base_info = None
-            if isinstance(base_info, dict):
-                owner = base_info.get("owner")
-                owner_slug = ""
-                if isinstance(owner, dict):
-                    owner_slug = str(owner.get("slug", "")).strip()
-                model_slug = str(base_info.get("modelSlug", "")).strip()
-                instance_slug = str(base_info.get("instanceSlug", "")).strip()
-                framework = _clean_framework(str(base_info.get("framework", "")).strip())
-                parts = [p for p in (owner_slug, model_slug, framework, instance_slug) if p]
-                if len(parts) == 4:
-                    base_ref = "/".join(parts)
-                    base_models.append(
-                        KaggleHelper.generate_mlentory_entity_hash_id(
-                            "ModelInstance", base_ref, platform="Kaggle"
-                        )
-                    )
-
-            external_base = str(rec.get("externalBaseModelUrl", "")).strip()
-            if external_base and external_base not in base_models:
-                base_models.append(external_base)
-
-            # The parent model this instance belongs to. Added last so real
-            # lineage stays at index 0 for anything that needs to tell the two
-            # apart. Without it 57 of 58 instances have no edges at all and sit
-            # orphaned in the graph, so an imprecise edge beats none: this is
-            # what makes "show every variation of Gemma" answerable.
-            #
-            # The precise fix is schema:isPartOf added to the mapped property
-            # list in rdf_loader.build_model_triples - one IRI in a shared
-            # file - which would separate "packaged from" from "derived from".
-            if parent_id and parent_id not in base_models:
-                base_models.append(parent_id)
-
-            # The instance's own documentation. `overview` is the short
-            # summary Kaggle shows on the variation page; `usage` is the long
-            # form - intended uses, sample code, limitations, training notes -
-            # and is often richer than the parent model card. abstract holds
-            # both, matching what it means at model level: the complete
-            # original text for this record.
-            overview = str(rec.get("description", "")).strip()
-            usage = str(rec.get("usage", "")).strip()
-            full_card = "\n\n".join(part for part in (overview, usage) if part)
-
-            payload: Dict[str, Any] = {
-                "identifier": identifiers,
-                "name": str(rec.get("name", "")).strip() or instance_id,
-                "url": list(dict.fromkeys(urls)),
-                "author": str(rec.get("parent_name", "")).strip() or None,
-                "description": overview or None,
-                "abstract": full_card or None,
-                "license": str(rec.get("license", "")).strip() or None,
-                "modelCategory": [
-                    x for x in (str(rec.get("frameworkName", "")).strip(),) if x
-                ],
-                "baseModel": base_models,
-                "usageInstructions": usage or None,
-                "memoryRequirements": str(rec.get("contentSize", "")).strip() or None,
-                "archivedAt": url or None,
-                "metrics": {
-                    "version": rec.get("version"),
-                    "fineTunable": rec.get("fineTunable"),
-                    "parentModel": parent_id,
-                },
-                "extraction_metadata": {
-                    "identifier": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": "mlentory_id",
-                    },
-                    "name": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": "slug",
-                    },
-                    "description": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": "overview",
-                    },
-                    "abstract": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": "overview, usage",
-                        "notes": "Full instance documentation before summarization",
-                    },
-                    "license": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": "licenseName",
-                    },
-                    "modelCategory": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": "frameworkName",
-                        "notes": "Framework read from the instance URL",
-                    },
-                    "baseModel": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": (
-                            "baseModelInstanceInformation, externalBaseModelUrl, "
-                            "parent_mlentory_id"
-                        ),
-                        "notes": (
-                            "Real lineage first, then the parent model this "
-                            "instance belongs to"
-                        ),
-                    },
-                    "usageInstructions": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": "usage",
-                    },
-                    "memoryRequirements": {
-                        "extraction_method": "Parsed_from_Kaggle_instances_json",
-                        "confidence": 1.0,
-                        "source_field": "totalUncompressedBytes",
-                    },
-                },
-            }
-
-            obj = MLModel(**payload)
-            normalized.append(obj.model_dump(mode="json", by_alias=True))
-
-        except ValidationError as ve:
-            errors.append(
-                {
-                    "instanceId": instance_id,
-                    "_index": idx,
-                    "_error": "MLModel validation failed",
-                    "details": ve.errors(),
-                }
-            )
-        except Exception as e:
-            errors.append(
-                {
-                    "instanceId": instance_id,
-                    "_index": idx,
-                    "_error": str(e),
-                    "error_type": type(e).__name__,
-                }
-            )
-
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(normalized, f, indent=2, ensure_ascii=False, default=_json_default)
-
-    if errors:
-        err_path = Path(normalized_folder) / "mlinstances_normalization_errors.json"
-        with open(err_path, "w", encoding="utf-8") as f:
-            json.dump(errors, f, indent=2, ensure_ascii=False)
-        logger.warning(
-            "Normalized %d/%d instances. Errors: %d (see %s)",
-            len(normalized), len(raw_instances), len(errors), err_path,
-        )
-    else:
-        logger.info("Normalized %d/%d instances. No errors.", len(normalized), len(raw_instances))
-
-    return str(out_path)
 
 
 @asset(
@@ -1130,8 +1100,8 @@ def kaggle_licenses_normalized(
         "keywords_json": AssetIn("kaggle_keywords_normalized"),
         "licenses_json": AssetIn("kaggle_licenses_normalized"),
         "frameworks_json": AssetIn("kaggle_frameworks_normalized"),
+        "sharedby_json": AssetIn("kaggle_sharedby_normalized"),
         "models_json": AssetIn("kaggle_model_normalized"),
-        "instances_json": AssetIn("kaggle_instances_normalized"),
         "sources_json": AssetIn("kaggle_sources_normalized"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
@@ -1141,8 +1111,8 @@ def kaggle_create_translation_mapping(
     keywords_json: str,
     licenses_json: str,
     frameworks_json: str,
+    sharedby_json: str,
     models_json: str,
-    instances_json: str,
     sources_json: str,
     run_folder_data: Tuple[str, str],
 ) -> str:
@@ -1186,8 +1156,8 @@ def kaggle_create_translation_mapping(
         {"label": "keywords", "path": keywords_json},
         {"label": "licenses", "path": licenses_json},
         {"label": "frameworks", "path": frameworks_json},
+        {"label": "sharedby", "path": sharedby_json},
         {"label": "models", "path": models_json},
-        {"label": "instances", "path": instances_json},
         {"label": "sources", "path": sources_json},
     ]
 
@@ -1214,3 +1184,99 @@ def kaggle_create_translation_mapping(
 
     logger.info("Saved translation mapping (%d entries) to %s", len(out_map), output_path)
     return str(output_path)
+
+
+@asset(
+    group_name="kaggle_transformation",
+    ins={
+        "sharedby_data": AssetIn("kaggle_sharedby_raw"),
+        "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
+    },
+    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+)
+def kaggle_sharedby_normalized(
+    sharedby_data: Tuple[str, str],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Normalize Kaggle sharedBy entities to schema.org DefinedTerm-like format
+    and write <normalized_folder>/sharedby.json with IRI keys.
+    """
+    sharedby_json_path, _raw_run_folder = sharedby_data
+    _raw_models_json_path, normalized_folder = run_folder_data
+
+    out_path = Path(normalized_folder) / "sharedby.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not sharedby_json_path:
+        logger.info("No sharedby_json_path. Writing empty sharedby.json")
+        out_path.write_text("[]", encoding="utf-8")
+        return str(out_path)
+
+    raw_sharedby = _load_json_records(sharedby_json_path)
+    logger.info(
+        "Loading Kaggle sharedBy entities from %s (%d records)",
+        sharedby_json_path, len(raw_sharedby),
+    )
+
+    normalized: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    for idx, rec in enumerate(raw_sharedby):
+        name = str(rec.get("name", "")).strip() or f"sharedby_{idx}"
+        mlentory_id = str(rec.get("mlentory_id", "")).strip() or None
+
+        extraction_meta = rec.get("extraction_metadata") or {}
+        if not isinstance(extraction_meta, dict):
+            extraction_meta = {}
+
+        payload: Dict[str, Any] = {
+            "identifier": [mlentory_id] if mlentory_id else [],
+            "name": name,
+            "url": None,
+            "term_code": name,
+            "description": "Entity representing who shared/published the model.",
+            "in_defined_term_set": ["https://www.kaggle.com/models"],
+            "extraction_metadata": extraction_meta,
+        }
+
+        try:
+            obj = DefinedTerm(**payload)
+            normalized.append(obj.model_dump(mode="json", by_alias=True))
+        except ValidationError as ve:
+            errors.append(
+                {
+                    "sharedby": name,
+                    "_index": idx,
+                    "_error": "DefinedTerm validation failed",
+                    "details": ve.errors(),
+                }
+            )
+        except Exception as e:
+            errors.append(
+                {
+                    "sharedby": name,
+                    "_index": idx,
+                    "_error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(normalized, f, indent=2, ensure_ascii=False)
+
+    if errors:
+        err_path = Path(normalized_folder) / "sharedby_normalization_errors.json"
+        with open(err_path, "w", encoding="utf-8") as f:
+            json.dump(errors, f, indent=2, ensure_ascii=False)
+        logger.warning(
+            "Normalized %d/%d sharedBy entities. Errors: %d (see %s)",
+            len(normalized), len(raw_sharedby), len(errors), err_path,
+        )
+    else:
+        logger.info(
+            "Normalized %d/%d sharedBy entities. No errors.",
+            len(normalized), len(raw_sharedby),
+        )
+
+    return str(out_path)

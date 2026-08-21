@@ -12,9 +12,10 @@ from typing import Dict
 
 from etl_extractors.kaggle.entity_identifiers.base import EntityIdentifier
 from etl_extractors.kaggle.entity_identifiers.instance_identifier import InstanceIdentifier
-from etl_extractors.kaggle.entity_identifiers.license_identifier import LicenseIdentifier
 from etl_extractors.kaggle.entity_identifiers.keyword_identifier import KeywordIdentifier
+from etl_extractors.kaggle.entity_identifiers.license_identifier import LicenseIdentifier
 from etl_extractors.kaggle.entity_identifiers.framework_identifier import FrameworkIdentifier
+from etl_extractors.kaggle.entity_identifiers.sharedby_identifier import SharedByIdentifier
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,8 @@ class KaggleEnrichment:
     def __init__(self) -> None:
         self.identifiers: Dict[str, EntityIdentifier] = {
             "instances": InstanceIdentifier(),
-            "licenses": LicenseIdentifier(),
             "keywords": KeywordIdentifier(),
+            "licenses": LicenseIdentifier(),
             "frameworks": FrameworkIdentifier(),
-            
+            "sharedby": SharedByIdentifier()
         }

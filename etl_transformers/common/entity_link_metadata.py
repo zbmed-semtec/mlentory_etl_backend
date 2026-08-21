@@ -81,8 +81,6 @@ AI4LIFE_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
 }
 
 # Field → metadata for Kaggle entity-linking merge (merge_kaggle_partial_schemas).
-# Paste into etl_transformers/common/entity_link_metadata.py alongside the
-# HF and AI4Life dicts, then register it in _PLATFORM_METADATA below.
 KAGGLE_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
     "license": _entry(
         "kaggle_license_identifier",
@@ -99,15 +97,26 @@ KAGGLE_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
         source_field="keywords",
         notes="Curated Kaggle tags; sparse coverage across the catalog",
     ),
-    "modelCategory": _entry(
+    "mlTask": _entry(
+        "kaggle_keyword_identifier",
+        source_field="keywords",
+        notes="Derived from tags under the 'task' category in fullPath",
+    ),
+    "sharedBy": _entry("kaggle_sharedby_identifier", source_field="sharedBy"),
+    "softwareRequirements": _entry(
         "kaggle_framework_identifier",
         source_field="frameworks",
         notes="Framework names read from instance URLs (PyTorch, Keras, …)",
     ),
+    "inLanguage": _entry(
+        "lingua-language-detector+pycountry",
+        source_field="intendedUse",
+        notes="Model card language detection",
+    ),
 }
- 
- 
-# Add "kaggle" to the existing registry:
+
+
+# Add to the platform registry:
 _PLATFORM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
     "hf": HF_ENTITY_LINK_METADATA,
     "ai4life": AI4LIFE_ENTITY_LINK_METADATA,

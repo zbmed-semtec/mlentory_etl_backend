@@ -8,11 +8,12 @@ import pandas as pd
 
 from etl_extractors.kaggle.clients.models_client import KaggleModelClient
 from etl_extractors.kaggle.clients.instances_client import KaggleInstancesClient
-from etl_extractors.kaggle.clients.licenses_client import KaggleLicenseClient
 from etl_extractors.kaggle.clients.keywords_client import KaggleKeywordsClient
+from etl_extractors.kaggle.clients.licenses_client import KaggleLicenseClient
 from etl_extractors.kaggle.clients.frameworks_client import KaggleFrameworkClient
-
+from etl_extractors.kaggle.clients.sharedby_client import KaggleSharedByClient
 from etl_extractors.kaggle.kaggle_crawler import KaggleCrawler
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,19 +31,21 @@ class KaggleExtractor:
     def __init__(
         self,
         records_data: Optional[Dict[str, Any]] = None,
-        crawler: Optional[KaggleCrawler] = None,
         models_client: Optional[KaggleModelClient] = None,
         instances_client: Optional[KaggleInstancesClient] = None,
-        licenses_client: Optional[KaggleLicenseClient] = None,
         keywords_client: Optional[KaggleKeywordsClient] = None,
+        licenses_client: Optional[KaggleLicenseClient] = None,
         frameworks_client: Optional[KaggleFrameworkClient] = None,
+        sharedby_client: Optional[KaggleSharedByClient] = None,
+        crawler: Optional[KaggleCrawler] = None,
     ) -> None:
         self.models_client = models_client or KaggleModelClient(records_data)
-        self.crawler = crawler
         self.instances_client = instances_client or KaggleInstancesClient(records_data)
-        self.licenses_client = licenses_client or KaggleLicenseClient(records_data)
         self.keywords_client = keywords_client or KaggleKeywordsClient(records_data)
+        self.licenses_client = licenses_client or KaggleLicenseClient(records_data)
         self.frameworks_client = frameworks_client or KaggleFrameworkClient(records_data)
+        self.sharedby_client = sharedby_client or KaggleSharedByClient(records_data)
+        self.crawler = crawler
 
     def fetch_records(
         self,
@@ -94,19 +97,23 @@ class KaggleExtractor:
     def extract_models(self) -> pd.DataFrame:
         df = self.models_client.get_models_metadata()
         return df
-    
+
     def extract_specific_instances(self, instance_ids) -> pd.DataFrame:
         df = self.instances_client.get_instances_metadata(instance_ids)
         return df
-    
+
+    def extract_specific_keywords(self, keyword_names) -> pd.DataFrame:
+        df = self.keywords_client.get_keywords_metadata(keyword_names)
+        return df
+
     def extract_specific_licenses(self, license_names) -> pd.DataFrame:
         df = self.licenses_client.get_licenses_metadata(license_names)
         return df
-    
-    def extract_specific_keywords(self, keywords_names) -> pd.DataFrame:
-            df = self.keywords_client.get_keywords_metadata(keywords_names)
-            return df
-        
-    def extract_specific_frameworks(self, frameworks_names) -> pd.DataFrame:
-                df = self.frameworks_client.get_frameworks_metadata(frameworks_names)
-                return df
+
+    def extract_specific_frameworks(self, framework_names) -> pd.DataFrame:
+        df = self.frameworks_client.get_frameworks_metadata(framework_names)
+        return df
+
+    def extract_sharedby(self, names) -> pd.DataFrame:
+        df = self.sharedby_client.get_sharedby_metadata(names)
+        return df

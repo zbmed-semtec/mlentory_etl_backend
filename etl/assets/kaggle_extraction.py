@@ -402,3 +402,59 @@ def kaggle_frameworks_raw(
  
     logger.info("Saved %d frameworks to %s", len(framework_df), framework_path)
     return (str(framework_path), run_folder)
+
+ 
+@asset(
+    group_name="kaggle_enrichment",
+    ins={"models_data": AssetIn("kaggle_models_raw")},
+    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+)
+def kaggle_identified_sharedby(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
+    """
+    Identify sharedBy entities per model from Kaggle model metadata.
+ 
+    On Kaggle this is the account that uploaded the model, so grouping by it
+    answers "show me everything this person or organization published".
+    """
+    models_json_path, _ = models_data
+    enrichment = KaggleEnrichment()
+    models_df = KaggleHelper.load_models_dataframe(models_json_path)
+ 
+    model_sharedby = enrichment.identifiers["sharedby"].identify_per_model(models_df)
+    logger.info("Identified sharedBy entities for %d models", len(model_sharedby))
+    return model_sharedby
+ 
+ 
+@asset(
+    group_name="kaggle_enrichment",
+    tags={"pipeline": "Kaggle_etl"},
+    ins={
+        "raw_records": AssetIn("kaggle_raw_records"),
+        "identified_sharedby": AssetIn("kaggle_identified_sharedby"),
+    },
+)
+def kaggle_sharedby_raw(
+    raw_records: Dict[str, Any],
+    identified_sharedby: Dict[str, List[str]],
+) -> Tuple[str, str]:
+    """
+    Build sharedBy entity records and save to sharedby.json.
+    Returns (sharedby_json_path, run_folder).
+    """
+    run_folder = raw_records["run_folder"]
+    sharedby_names: Set[str] = set()
+    for _, names in identified_sharedby.items():
+        sharedby_names.update([x for x in names if x])
+ 
+    if not sharedby_names:
+        logger.info("No sharedBy entities to extract")
+        return ("", run_folder)
+ 
+    extractor = KaggleExtractor(records_data=raw_records["data"])
+    sharedby_df = extractor.extract_sharedby(sorted(sharedby_names))
+ 
+    sharedby_path = Path(run_folder) / "sharedby.json"
+    sharedby_df.to_json(str(sharedby_path), orient="records", indent=2)
+ 
+    logger.info("Saved %d sharedBy entities to %s", len(sharedby_df), sharedby_path)
+    return (str(sharedby_path), run_folder)

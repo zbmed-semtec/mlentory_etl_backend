@@ -114,6 +114,10 @@ class KaggleInstancesClient:
         # parent's model card, not just their own short overview.
         parent_description = self._to_str((record or {}).get("description", ""))
         parent_title = self._to_str((record or {}).get("title", ""))
+        # The uploader is declared once on the model. Instances have no owner
+        # of their own, so it is carried down: a search for everything an
+        # account published should return their variations too.
+        parent_shared_by = self._to_str((record or {}).get("author", ""))
 
         raw_instances = record.get("instances")
         raw_instances = raw_instances if isinstance(raw_instances, list) else []
@@ -171,6 +175,7 @@ class KaggleInstancesClient:
             out["modelId"] = model_ref
             out["parent_name"] = parent_title
             out["parent_description"] = parent_description
+            out["sharedBy"] = parent_shared_by
             out["extraction_timestamp"] = self._to_str(
                 self.records_data.get("timestamp", "")
             )

@@ -273,18 +273,9 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     # Total uncompressed bytes summed across the model's instances.
     memory_requirements = str(raw_model.get("contentSize", "")).strip()
 
-    # Platform-specific counters, kept out of the FAIR fields proper.
-    metrics: Dict[str, Any] = {}
-    for source_key, target_key in (
-        ("voteCount", "votes"),
-        ("downloadCount", "downloads"),
-        ("num_instances", "instances"),
-    ):
-        value = raw_model.get(source_key)
-        if isinstance(value, (int, float)):
-            metrics[target_key] = value
-        elif isinstance(value, str) and value.strip().isdigit():
-            metrics[target_key] = int(value.strip())
+    # Kaggle sets fineTunable on the instance, never on the model, so a parent
+    # model has nothing to read here. Its instances carry their own value.
+    adaption_techniques = "fineTuned" if raw_model.get("fineTunable") else None
 
     # Build the result FIRST
     result: Dict[str, Any] = {
@@ -307,7 +298,7 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "readme": readme,
         "issueTracker": issue_tracker,
         "memoryRequirements": memory_requirements,
-        "metrics": metrics,
+        "adaptionTechniques": adaption_techniques,
         "_model_id": model_id,
     }
 
@@ -415,11 +406,11 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
             source_field="contentSize",
             notes="Uncompressed bytes summed across all model instances",
         ),
-        "metrics": _create_extraction_metadata(
+        "adaptionTechniques": _create_extraction_metadata(
             method=_METHOD,
             confidence=1.0,
-            source_field="voteCount, downloadCount, num_instances",
-            notes="Platform-specific counters; non-FAIR extension",
+            source_field="fineTunable",
+            notes="Set per instance by Kaggle; absent on the model itself",
         ),
         "citation": _create_extraction_metadata(
             method=_METHOD,

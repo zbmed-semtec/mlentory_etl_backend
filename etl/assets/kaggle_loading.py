@@ -133,7 +133,13 @@ def kaggle_load_models_to_neo4j(
     normalized_models: str,
     store_ready: Dict[str, Any],
 ) -> Tuple[str, str]:
-    """Load normalized Kaggle models as RDF triples into Neo4j."""
+    """
+    Load normalized Kaggle models as RDF triples into Neo4j.
+
+    ``mlmodels.json`` holds both models and their instances - a Kaggle model
+    is a container and its instances are the downloadable artifacts, each an
+    MLModel in its own right - so one loader covers both.
+    """
     mlmodels_json_path = normalized_models
     normalized_folder = str(Path(mlmodels_json_path).parent)
 
@@ -163,55 +169,6 @@ def kaggle_load_models_to_neo4j(
         **load_stats,
     }
     return (_write_report(rdf_run_folder, "mlmodels", report), normalized_folder)
-
-
-@asset(
-    group_name="kaggle_loading",
-    ins={
-        "instances_normalized": AssetIn("kaggle_instances_normalized"),
-        "store_ready": AssetIn("kaggle_rdf_store_ready"),
-    },
-    tags={"pipeline": "Kaggle_etl", "stage": "load"},
-)
-def kaggle_load_instances_to_neo4j(
-    instances_normalized: str,
-    store_ready: Dict[str, Any],
-) -> Tuple[str, str]:
-    """
-    Load normalized Kaggle model instances as RDF triples into Neo4j.
-
-    Instances are MLModel-shaped - a downloadable artifact of a model, one per
-    framework and variation - so they use the same RDF builder as models but
-    land in their own graph file.
-    """
-    if not instances_normalized or instances_normalized == "":
-        logger.info("No instances to load (empty input)")
-        return ("", "")
-    instances_path = Path(instances_normalized)
-    if not instances_path.exists():
-        logger.warning(f"Instances JSON not found: {instances_normalized}")
-        return ("", "")
-
-    normalized_folder = str(instances_path.parent)
-    config = _store_config(store_ready)
-    rdf_run_folder = _rdf_run_folder(normalized_folder)
-
-    ttl_path = rdf_run_folder / "mlinstances.ttl"
-    load_stats = build_and_persist_models_rdf(
-        json_path=instances_normalized,
-        config=config,
-        output_ttl_path=str(ttl_path),
-        batch_size=50,
-    )
-    report = {
-        "input_file": instances_normalized,
-        "rdf_folder": str(rdf_run_folder),
-        "ttl_file": str(ttl_path),
-        "neo4j_uri": store_ready["uri"],
-        "neo4j_database": store_ready["database"],
-        **load_stats,
-    }
-    return (_write_report(rdf_run_folder, "mlinstances", report), normalized_folder)
 
 
 @asset(
@@ -455,7 +412,6 @@ def kaggle_elasticsearch_ready() -> Dict[str, Any]:
     ins={
         "normalized_models": AssetIn("kaggle_model_normalized"),
         "translation_mapping": AssetIn("kaggle_create_translation_mapping"),
-        "instances_normalized": AssetIn("kaggle_instances_normalized"),
         "frameworks_normalized": AssetIn("kaggle_frameworks_normalized"),
         "es_ready": AssetIn("kaggle_elasticsearch_ready"),
     },
@@ -464,13 +420,10 @@ def kaggle_elasticsearch_ready() -> Dict[str, Any]:
 def kaggle_index_models_elasticsearch(
     normalized_models: str,
     translation_mapping: str,
-    instances_normalized: str,
     frameworks_normalized: str,
     es_ready: Dict[str, Any],
 ) -> str:
     """Index Kaggle models into Elasticsearch (reusing HF document builder)."""
-    if not instances_normalized:
-        logger.info("No Kaggle instances normalized input provided; continuing with model indexing")
     if not frameworks_normalized:
         logger.info("No Kaggle frameworks normalized input provided; continuing with model indexing")
 
