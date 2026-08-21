@@ -33,11 +33,10 @@ from pydantic import BaseModel, ValidationError
 from dagster import asset, AssetIn
 
 from etl_extractors.hf import HFHelper
-from etl_extractors.hf.hf_citation_normalization import normalize_citations_from_chunk
-from etl_extractors.hf.hf_parameter_count_inference import infer_parameter_count_labels
 from etl_transformers.hf.transform_mlmodel import map_basic_properties
 from etl_transformers.hf.map_llm_schema_properties import map_llm_schema_properties
 from etl_transformers.common.entity_link_metadata import apply_entity_link_extraction_metadata
+from etl_transformers.common.citation_text import parse_creative_work_citations_from_text
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
 from schemas.croissant import CroissantDataset
@@ -234,13 +233,15 @@ def hf_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
     group_name="hf_transformation",
     ins={
         "models_data": AssetIn("hf_normalized_run_folder"),
-        "citation_chunks": AssetIn("hf_identified_chunk_citation"),
+        "citation_data": AssetIn("hf_identified_chunk_citation"),
+        "modelsize_data": AssetIn("hf_identified_modelsize"),
     },
     tags={"pipeline": "hf_etl", "stage": "transform"},
 )
 def hf_extract_basic_properties(
     models_data: Tuple[str, str],
-    citation_chunks: str,
+    citation_data: Tuple[Dict[str, Optional[Dict]], str],
+    modelsize_data: Tuple[Dict[str, Optional[Dict]], str],
 ) -> str:
     """
     Extract basic properties from HF models.
@@ -252,30 +253,15 @@ def hf_extract_basic_properties(
 
     Args:
         models_data: Tuple of (raw_data_json_path, normalized_folder)
-        citation_chunks: Path to ``chunks_citation.json`` from extraction (same run)
+        citation_data: Tuple of (citation_chunks: Dictionary mapping model IDs to their citation information, run_folder)
+        modelsize_data: Tuple of (modelsize_chunks: Dictionary mapping model IDs to their size information, run_folder)
 
     Returns:
         Path to saved partial schema JSON file
     """
     raw_data_json_path, normalized_folder = models_data
-
-    citation_chunks_path = Path(citation_chunks)
-    chunk_by_model: Dict[str, Any] = {}
-    if citation_chunks_path.is_file():
-        with open(citation_chunks_path, "r", encoding="utf-8") as cf:
-            loaded_chunks = json.load(cf)
-        if isinstance(loaded_chunks, dict):
-            chunk_by_model = loaded_chunks
-        else:
-            logger.warning(
-                "Expected dict in citation chunks at %s; ignoring",
-                citation_chunks_path,
-            )
-    else:
-        logger.warning(
-            "Citation chunks file not found at %s; citation will be [] for all models",
-            citation_chunks_path,
-        )
+    citation_chunks, _ = citation_data
+    modelsizes, _ = modelsize_data
 
     # Load raw models
     logger.info(f"Loading raw models from {raw_data_json_path}")
@@ -285,7 +271,6 @@ def hf_extract_basic_properties(
     logger.info(f"Loaded {len(raw_models)} raw models")
 
     models_df = HFHelper.load_models_dataframe(raw_data_json_path)
-    parameter_counts_by_model = infer_parameter_count_labels(models_df)
 
     # Extract basic properties for each model
     partial_schemas: List[Dict[str, Any]] = []
@@ -301,13 +286,13 @@ def hf_extract_basic_properties(
             partial_data["_model_id"] = model_id
             partial_data["_index"] = idx
 
-            pc_val = parameter_counts_by_model.get(model_id)
+            pc_val = modelsizes.get(model_id)
             if pc_val:
                 partial_data["parameterCount"] = pc_val
 
-            partial_data["citation"] = normalize_citations_from_chunk(
-                model_id, chunk_by_model.get(model_id)
-            )
+            chunk = citation_chunks.get(model_id)
+            if chunk and chunk.get("text"):
+                partial_data["citation"] = parse_creative_work_citations_from_text(chunk.get("text", ""), log_context=model_id)
 
             partial_schemas.append(partial_data)
             
@@ -327,7 +312,7 @@ def hf_extract_basic_properties(
                 "url": ""
             })
             err_entry = partial_schemas[-1]
-            pc_val = parameter_counts_by_model.get(model_id)
+            pc_val = modelsizes.get(model_id)
             if pc_val:
                 err_entry["parameterCount"] = pc_val
             err_entry["citation"] = []

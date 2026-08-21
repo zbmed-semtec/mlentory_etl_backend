@@ -3,7 +3,7 @@ Identifier for different schema properties.
 """
 
 from __future__ import annotations
-from typing import Set, Dict, List, Any
+from typing import Optional, Set, Dict, List, Any
 import pandas as pd
 import logging
 from pathlib import Path
@@ -32,7 +32,7 @@ class CitationIdentifier(EntityIdentifier):
     def identify_per_model(self, models_df: pd.DataFrame) -> Dict[str, Any]:
         return super().identify_per_model(models_df)
 
-    def identify_from_chunks(self, chunks_dict: Dict[str, List[Dict[str, Any]]], output_root: Path) ->  Path:
+    def identify_from_chunks(self, chunks_dict: Dict[str, List[Dict[str, Any]]]) ->  Dict[str, Optional[Dict[str, Any]]]:
         """
         Identifies chunks that contain property: citation.
 
@@ -62,16 +62,7 @@ class CitationIdentifier(EntityIdentifier):
                 if result[model_id] is None:
                     result[model_id] = chunk
 
-        suffix = "chunks_citation"
-        output_root.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        json_path = output_root / f"{timestamp}_{suffix}.json"
-
-        with json_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-
-        logger.info("Saved %s to %s", suffix, json_path)
-        return json_path
+        return result
 
 
 class ModelSizeIdentifier(EntityIdentifier):

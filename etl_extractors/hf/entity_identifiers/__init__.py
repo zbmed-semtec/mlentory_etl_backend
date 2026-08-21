@@ -14,7 +14,7 @@ from .license_identifier import LicenseIdentifier
 from .task_identifier import TaskIdentifier
 from .sharedby_identifier import SharedByIdentifier
 from .chunk_identifier import ChunkIdentifier
-from .property_identifier import ModelSizeIdentifier
+from .property_identifier import ModelSizeIdentifier, CitationIdentifier
 
 __all__ = [
     "EntityIdentifier",
@@ -27,5 +27,6 @@ __all__ = [
     "TaskIdentifier",
     "SharedByIdentifier",
     "ModelSizeIdentifier",
+    "CitationIdentifier",
 ]
 

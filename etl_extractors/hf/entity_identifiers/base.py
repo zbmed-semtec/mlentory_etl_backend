@@ -49,7 +49,7 @@ class EntityIdentifier(ABC):
         """
         pass
 
-    def identify_from_chunks(self, chunks_dict: Dict[str, List[Dict[str, Any]]], output_root: Path) -> Any:
+    def identify_from_chunks(self, chunks_dict: Dict[str, List[Dict[str, Any]]]) -> Any:
         """
         Extract entity IDs/names from a dictionary of model card chunks per model ID
 

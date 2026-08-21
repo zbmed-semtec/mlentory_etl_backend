@@ -13,7 +13,6 @@ from dagster import asset, AssetIn
 
 from etl import LLMConfig
 from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper, HFLLMSchemaPropertyExtractor
-from etl_extractors.hf.hf_citation_normalization import select_citation_chunk_per_model
 from etl.config import get_hf_config
 
 
@@ -537,7 +536,7 @@ def hf_identified_modelcard_chunks(models_data: Tuple[str, str]) -> Tuple[Dict[s
     ins={"chunks_data": AssetIn("hf_identified_modelcard_chunks")},
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
-def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str]) -> str:
+def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str]) -> Tuple[Dict[str, Optional[dict]], str]:
     """
     Ranks chunks to find the one most likely 
     to contain citation/BibTeX information.
@@ -546,17 +545,13 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
         chunks_data: Tuple of ({model_id: list_of_chunks}, run_folder)
 
     Returns:
-        Path to ``chunks_citation.json`` (per-model selected chunk dict or null)
+        Tuple of ({model_id: selected_chunk}, run_folder)
     """
     chunks_dict, run_folder = chunks_data
-    selected = select_citation_chunk_per_model(chunks_dict)
-    final_path = Path(run_folder) / "chunks_citation.json"
-    final_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(final_path, "w", encoding="utf-8") as f:
-        json.dump(selected, f, indent=2, ensure_ascii=False)
+    enrichment = HFEnrichment()
+    selected = enrichment.identifiers["citation"].identify_from_chunks(chunks_dict)
 
-    logger.info(f"Citation chunks saved to {final_path}")
-    return str(final_path)
+    return (selected, run_folder)
 
 @asset(
     group_name="hf_enrichment",
@@ -601,9 +596,6 @@ def hf_llm_schema_extractor(chunks_data: Tuple[Dict[str, List[dict]], str]) -> T
         return content.strip()
 
     chunks_dict, run_folder = chunks_data
-    enrichment = HFEnrichment()
-    output_root = Path(run_folder).parent.parent
-
     preprocessed_chunks = {}
 
     for model_id, chunks in chunks_dict.items():
