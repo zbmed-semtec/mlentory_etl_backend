@@ -18,6 +18,7 @@ platforms:
   huggingface:
     # Number of latest models to extract
     num_models: 10
+    
     # Whether to prioritize recently updated models
     update_recent: true
     # Number of parallel threads for extraction
@@ -52,4 +53,13 @@ platforms:
     base_url: "https://hypha.aicell.io"
     # Parent ID for collection filtering
     parent_id: "bioimage-io/bioimage.io"
+
+   # Kaggle Configuration
+  kaggle:
+    num_models: null            # null = all (~43,044)
+    incremental: false
+    force_full_refresh: false
+    refresh_metadata: true
+    threads: 4
+   
 

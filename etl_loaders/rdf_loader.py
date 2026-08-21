@@ -50,6 +50,7 @@ def build_model_triples(graph: Graph, model: Dict[str, Any]) -> int:
     # Add rdf:type
     graph.add((subject, namespaces["rdf"].type, namespaces["fair4ml"].MLModel))
     
+    
     string_properties_lst = [
         # Core identification properties
         "https://schema.org/identifier",

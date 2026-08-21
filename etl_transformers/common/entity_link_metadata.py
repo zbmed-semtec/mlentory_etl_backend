@@ -80,9 +80,47 @@ AI4LIFE_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
     ),
 }
 
+# Field → metadata for Kaggle entity-linking merge (merge_kaggle_partial_schemas).
+KAGGLE_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
+    "license": _entry(
+        "kaggle_license_identifier",
+        source_field="licenses",
+        notes="License is declared per model instance, not per model",
+    ),
+    "source": _entry(
+        "Kaggle_catalog_website",
+        source_field="sources",
+        notes="Kaggle catalog WebSite IRI",
+    ),
+    "keywords": _entry(
+        "Kaggle_models_endpoint",
+        source_field="keywords",
+        notes="Curated Kaggle tags; sparse coverage across the catalog",
+    ),
+    "mlTask": _entry(
+        "kaggle_keyword_identifier",
+        source_field="keywords",
+        notes="Derived from tags under the 'task' category in fullPath",
+    ),
+    "sharedBy": _entry("kaggle_sharedby_identifier", source_field="sharedBy"),
+    "softwareRequirements": _entry(
+        "kaggle_framework_identifier",
+        source_field="frameworks",
+        notes="Framework names read from instance URLs (PyTorch, Keras, …)",
+    ),
+    "inLanguage": _entry(
+        "lingua-language-detector+pycountry",
+        source_field="intendedUse",
+        notes="Model card language detection",
+    ),
+}
+
+
+# Add to the platform registry:
 _PLATFORM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
     "hf": HF_ENTITY_LINK_METADATA,
     "ai4life": AI4LIFE_ENTITY_LINK_METADATA,
+    "kaggle": KAGGLE_ENTITY_LINK_METADATA,
 }
 
 
