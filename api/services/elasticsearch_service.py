@@ -117,24 +117,34 @@ class ElasticsearchService(FacetedSearchMixin):
 
         return models, total_count
 
+    @staticmethod
+    def _normalize_model_uri(model_id: str) -> str:
+        """Convert a compact model ID to a full MLentory graph URI when needed."""
+        if not model_id:
+            return model_id
+        if model_id.startswith("https://") or model_id.startswith("http://"):
+            return model_id
+        return f"https://w3id.org/mlentory/mlentory_graph/{model_id}"
+
     def get_model_by_id(self, model_id: str) -> Optional[ModelListItem]:
         """
         Get a single model by its identifier.
 
         Args:
-            model_id: The model identifier/URI
+            model_id: The model identifier/URI (full URI or compact hash)
 
         Returns:
             ModelListItem if found, None otherwise
         """
         # Search for model_id as an element of db_identifier (assuming db_identifier is a list in the ES document)
         # search = ModelDocument.search(using=self.client, index=self.config.hf_models_index)
-        
+        model_uri = self._normalize_model_uri(model_id)
+
         search_query = {
                 "size": 1,
                 "query": {
                     "match": {
-                        "db_identifier": model_id
+                        "db_identifier": model_uri
                     }
                 }
             }

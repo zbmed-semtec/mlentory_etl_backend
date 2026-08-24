@@ -12,16 +12,17 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Any, Dict, List, Union
+from typing import Optional, Any, Dict, List, Tuple, Union
 from urllib.parse import urlparse
 
 import requests
 
 from rdflib import Graph, Namespace
 from rdflib_neo4j import Neo4jStoreConfig, Neo4jStore, HANDLE_VOCAB_URI_STRATEGY
-from neo4j import GraphDatabase
+from neo4j import Driver, GraphDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -213,22 +214,114 @@ def create_graph_context(
 
 
 # ============================
-# n10s (neosemantics) helpers
+# Neo4j driver (shared pool)
 # ============================
 
+# Process-wide shared driver. Neo4j's Python driver owns an internal connection
+# pool; create once per process and close only on shutdown.
+_driver_lock = threading.Lock()
+_shared_driver: Optional[Driver] = None
+_shared_driver_key: Optional[Tuple[str, str, str, str]] = None
+
+
+def _max_connection_pool_size_from_env() -> Optional[int]:
+    """Optional NEO4J_MAX_CONNECTION_POOL_SIZE override for load testing."""
+    raw = os.getenv("NEO4J_MAX_CONNECTION_POOL_SIZE")
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"NEO4J_MAX_CONNECTION_POOL_SIZE must be an integer, got {raw!r}"
+        ) from exc
+    if value < 1:
+        raise ValueError(
+            f"NEO4J_MAX_CONNECTION_POOL_SIZE must be >= 1, got {value}"
+        )
+    return value
+
+
 def _get_driver(cfg: Optional[Neo4jConfig] = None):
+    """
+    Return the process-wide Neo4j driver and target database name.
+
+    Lazily creates a single GraphDatabase.driver for the given connection
+    identity. Concurrent callers share the same driver / connection pool.
+    If connection settings change, the previous driver is closed and replaced.
+    """
+    global _shared_driver, _shared_driver_key
+
     env_cfg = cfg or Neo4jConfig.from_env()
-    driver = GraphDatabase.driver(env_cfg.uri, auth=(env_cfg.user, env_cfg.password))
-    return driver, env_cfg.database
+    key = (env_cfg.uri, env_cfg.user, env_cfg.password, env_cfg.database)
+
+    with _driver_lock:
+        if _shared_driver is not None and _shared_driver_key == key:
+            return _shared_driver, env_cfg.database
+
+        if _shared_driver is not None:
+            try:
+                _shared_driver.close()
+            except Exception as exc:
+                logger.warning("Error closing previous Neo4j driver: %s", exc)
+            _shared_driver = None
+            _shared_driver_key = None
+
+        driver_kwargs: Dict[str, Any] = {}
+        pool_size = _max_connection_pool_size_from_env()
+        if pool_size is not None:
+            driver_kwargs["max_connection_pool_size"] = pool_size
+
+        _shared_driver = GraphDatabase.driver(
+            env_cfg.uri,
+            auth=(env_cfg.user, env_cfg.password),
+            **driver_kwargs,
+        )
+        _shared_driver_key = key
+        if pool_size is not None:
+            logger.info(
+                "Created shared Neo4j driver for %s/%s (max_connection_pool_size=%s)",
+                env_cfg.uri,
+                env_cfg.database,
+                pool_size,
+            )
+        else:
+            logger.info(
+                "Created shared Neo4j driver for %s/%s",
+                env_cfg.uri,
+                env_cfg.database,
+            )
+        return _shared_driver, env_cfg.database
+
+
+def close_driver() -> None:
+    """Close the shared Neo4j driver if one exists. Safe to call multiple times."""
+    global _shared_driver, _shared_driver_key
+
+    with _driver_lock:
+        if _shared_driver is None:
+            return
+        try:
+            _shared_driver.close()
+            logger.info("Closed shared Neo4j driver")
+        except Exception as exc:
+            logger.warning("Error closing shared Neo4j driver: %s", exc)
+        finally:
+            _shared_driver = None
+            _shared_driver_key = None
 
 
 def _run_cypher(query: str, params: Optional[Dict[str, Any]] = None, cfg: Optional[Neo4jConfig] = None) -> List[Dict[str, Any]]:
+    """
+    Run a Cypher query using the shared Neo4j driver.
+
+    Opens a short-lived session for the query (returned to the pool on exit).
+    Does not close the process-wide driver.
+    """
     driver, database = _get_driver(cfg)
     with driver.session(database=database) as session:
         result = session.run(query, params or {})
-        records = [r.data() for r in result]
-    driver.close()
-    return records
+        return [r.data() for r in result]
 
 
 def init_neosemantics(config: Optional[Dict[str, Any]] = None, cfg: Optional[Neo4jConfig] = None) -> Dict[str, Any]:

@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-latency stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
 
 # Default target
 .DEFAULT_GOAL := help
@@ -287,6 +287,14 @@ stella-warmup: ## Preload MLentory search paths used by STELLA rankers (avoids f
 		>/dev/null 2>&1 \
 		&& echo "$(GREEN)  ✓ experiment ranker warmed up$(NC)" \
 		|| echo "$(YELLOW)  ! experiment ranker warmup failed (non-fatal)$(NC)"
+	@sudo docker exec stella-app curl -sf --max-time 120 \
+		'http://mlentory-api:8000/api/v1/stella/search_with_stella?query=warmup&page=1&limit=1&filters=%7B%7D&facets=%5B%22mlTask%22%5D&facet_query=%7B%7D&session_id=stella-warmup' \
+		>/dev/null 2>&1 \
+		&& echo "$(GREEN)  ✓ search_with_stella warmed up$(NC)" \
+		|| echo "$(YELLOW)  ! search_with_stella warmup failed (non-fatal)$(NC)"
+	
+stella-latency: ## Measure STELLA page-1 first vs cached calls (same query + session_id)
+	@python3 scripts/search_latency.py $(ARGS)
 
 stella-sync-db-passwords: ## Align STELLA DB passwords with .env (fixes stale Docker volumes)
 	@STELLA_APP_PW=$$(grep -E '^STELLA_POSTGRES_PW=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "'); \
