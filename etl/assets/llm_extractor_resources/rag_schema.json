@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "properties": {
+    "chunk_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [],
+        "minItems": 1,
+        "maxItems": 3
+      },
+      "description": "A list of section IDs, or []."
+    }
+  },
+  "required": [
+    "chunk_ids"
+  ],
+  "additionalProperties": false
+}

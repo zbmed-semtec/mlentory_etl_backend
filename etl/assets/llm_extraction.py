@@ -20,6 +20,7 @@ class LLMSchemaPropertyExtractor(ABC):
         self.config = config
         self.vllm_kwargs = self.config.vllm_kwargs
         self.client = None
+        self.ranker = None
         self.tokenizer = None
         self.model_name = None
         self.llm_len = 0
@@ -27,6 +28,7 @@ class LLMSchemaPropertyExtractor(ABC):
         self.questions = None
         self.prop_template_type_map = None
         self.templates = None
+        self.rag_questions = None
         
         self.extraction_results = {}
         self.evaluation_results = {}
@@ -40,6 +42,7 @@ class LLMSchemaPropertyExtractor(ABC):
 
         questions_file = os.path.join(metadata_dir, 'llm_questions.csv')
         templates_file = os.path.join(metadata_dir, 'llm_templates.csv')
+        rag_file = os.path.join(metadata_dir, "rag_questions.csv")
 
         if not os.path.exists(questions_file) or not os.path.exists(templates_file):
             self.logger.error(f"FATAL: Metadata files not found in directory: {metadata_dir}")
@@ -51,6 +54,10 @@ class LLMSchemaPropertyExtractor(ABC):
 
         templates_df = pd.read_csv(templates_file, sep=";")
         self.templates = templates_df.set_index('Type')['Template'].to_dict()
+
+        if os.path.exists(rag_file):
+            rag_df = pd.read_csv(rag_file, sep=";")
+            self.rag_questions = (rag_df.set_index("Property")[["RAGPositive", "RAGNegative", "LLMQuestion"]].to_dict(orient="index"))
 
     def load_llm(self) -> None:
         """Initializes the OpenAI API client and local tokenizer."""
@@ -130,6 +137,11 @@ class LLMSchemaPropertyExtractor(ABC):
         pass
 
     @abstractmethod
-    def parse_llm_output(self, reasoning_start_str: str, reasoning_end_str: str) -> Dict[str, Any]:
+    def extract_rag_properties(self) -> Dict[str, Any]:
+        """Extracts properties using RAG (Retrieval-Augmented Generation) approach."""
+        pass
+
+    @abstractmethod
+    def parse_llm_output(self) -> Dict[str, Any]:
         """Parses the raw output from the LLM into a structured dictionary."""
         pass

@@ -553,6 +553,34 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
 
     return (selected, run_folder)
 
+# currently disabled until a faster alternative is implemented
+# @asset(
+#     group_name="hf_enrichment",
+#     ins={"chunks_data": AssetIn("hf_identified_modelcard_chunks"),
+#          "citation_data": AssetIn("hf_identified_chunk_citation")},
+#     tags={"pipeline": "hf_etl", "stage": "extract"}
+# )
+# def hf_rag_chunk_extractor(chunks_data: Tuple[Dict[str, List[dict]], str], citation_data: Tuple[Dict[str, Optional[dict]], str]) -> Optional[Dict]:
+#     chunks_dict, run_folder = chunks_data
+#     citation_chunks, _ = citation_data
+
+#     # remove the citation data 
+#     for model_id, citation_chunk in citation_chunks.items():
+#         if citation_chunk and citation_chunk in chunks_dict.get(model_id, []):
+#             chunks_dict[model_id].remove(citation_chunk)
+
+#     config = LLMConfig()
+#     llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=config)
+#     llm_extractor.load_metadata()
+#     llm_extractor.load_llm()
+#     result = llm_extractor.extract_rag_properties(chunks_dict)
+#     final_path = Path(run_folder) / "rag_extraction_results.json"
+#     with open(final_path, "w", encoding="utf-8") as f:
+#         json.dump(result, f, indent=4)
+
+#     logger.info(f"RAG extraction results saved to {final_path}")
+#     return (result, str(final_path))
+
 @asset(
     group_name="hf_enrichment",
     ins={"chunks_data": AssetIn("hf_identified_modelcard_chunks")},
