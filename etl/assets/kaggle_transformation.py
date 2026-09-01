@@ -791,6 +791,12 @@ def kaggle_model_normalized(
                 "SharedBy", shared_by_name, platform="Kaggle"
             )
 
+        license_name = str(mapped.get("license", "") or "").strip()
+        if license_name:
+            mapped["license"] = KaggleHelper.generate_mlentory_entity_hash_id(
+                "License", license_name, platform="Kaggle"
+            )
+
         parent_id = str(rec.get("parent_mlentory_id", "") or "").strip()
         if parent_id and parent_inlanguage_by_iri.get(parent_id):
             mapped["inLanguage"] = list(parent_inlanguage_by_iri[parent_id])
