@@ -59,6 +59,53 @@ class AI4LifeConfig(BaseModel):
     num_models: int = Field(default=50, ge=0)
     base_url: str = Field(default="https://hypha.aicell.io")
     parent_id: str = Field(default="bioimage-io/bioimage.io")
+    
+class KaggleConfig(BaseModel):
+    """Configuration for Kaggle model-card extraction."""
+
+    # --- Source ---
+    # Meta Kaggle CSVs are the source of truth for the model list. They
+    # refresh daily; refs are derived by joining Models -> owner (org or user).
+    meta_dataset: str = Field(default="kaggle/meta-kaggle")
+    refresh_metadata: bool = Field(
+        default=True,
+        description="Re-download Meta Kaggle CSVs to pick up new/changed models.",
+    )
+
+    # --- Scope ---
+    num_models: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Cap the number of models fetched. None = all (~42k).",
+    )
+    incremental: bool = Field(
+        default=True,
+        description=(
+            "Fetch only new/changed models since the last run. The full crawl "
+            "is a one-time baseline (~6h); deltas are ~1k models (~10 min)."
+        ),
+    )
+    force_full_refresh: bool = Field(
+        default=False,
+        description=(
+            "Refetch everything regardless of state. Catches description edits "
+            "that don't bump a date/version column in Meta Kaggle."
+        ),
+    )
+
+    # --- Concurrency ---
+    # Threads are cheap (the work is network-bound) but effective throughput
+    # is capped by Kaggle's quota, not by this value. See KaggleExtractor for
+    # the measured rate limits, which are deliberately not exposed here.
+    threads: int = Field(default=8, ge=1, le=32)
+
+    # --- Resilience ---
+    max_retries: int = Field(default=6, ge=1)
+    request_timeout_seconds: int = Field(default=30, ge=5)
+    checkpoint_every: int = Field(
+        default=200, ge=1,
+        description="Force records to disk every N records; bounds loss on crash.",
+    )
 
 
 class PlatformsConfig(BaseModel):
@@ -67,6 +114,7 @@ class PlatformsConfig(BaseModel):
     huggingface: HuggingFaceConfig = Field(default_factory=HuggingFaceConfig)
     openml: OpenMLConfig = Field(default_factory=OpenMLConfig)
     ai4life: AI4LifeConfig = Field(default_factory=AI4LifeConfig)
+    kaggle: KaggleConfig = Field(default_factory=KaggleConfig)
 
 
 class RunConfig(BaseModel):
@@ -185,6 +233,10 @@ def get_openml_config() -> OpenMLConfig:
 def get_ai4life_config() -> AI4LifeConfig:
     """Get AI4Life platform configuration."""
     return ConfigLoader.get_config().platforms.ai4life
+
+def get_kaggle_config() -> KaggleConfig:
+    """Get Kaggle platform configuration."""
+    return ConfigLoader.get_config().platforms.kaggle
 
 
 def get_general_config() -> GeneralConfig:
