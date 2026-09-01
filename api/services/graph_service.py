@@ -612,29 +612,90 @@ class GraphService:
             return None
 
 
-    def get_models_by_entity_uri(self, entity_uri: str) -> List[Dict[str, Any]]:
+    # Outgoing relationships needed to render related-model cards without
+    # a follow-up full model-detail request per card.
+    _RELATED_MODEL_CARD_RELS = [
+        "schema__license",
+        "fair4ml__mlTask",
+        "schema__keywords",
+        "fair4ml__sharedBy",
+        "schema__author",
+    ]
+
+    def get_models_by_entity_uri(
+        self,
+        entity_uri: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        Get all models related to an entity URI.
-        
+        Get models related to an entity URI, optionally paginated.
+
+        Includes card-relevant outgoing relations (license, mlTask, keywords,
+        sharedBy/author) in the same Neo4j round-trip so callers do not need
+        N follow-up model-detail requests.
+
         Args:
             entity_uri: The entity URI to find related models for
-            
+            limit: Max models to return (None = all remaining after offset)
+            offset: Number of models to skip
+
         Returns:
-            List of dictionaries containing model information and relationship types
+            Tuple of (models list, total matching model count)
         """
-        query = """
+        if offset < 0:
+            offset = 0
+        if limit is not None and limit < 0:
+            limit = None
+
+        count_query = """
         MATCH (e {uri: $entityURI})
         MATCH (m:fair4ml__MLModel)-[r]-(e)
-        RETURN DISTINCT 
-            m.uri as model_uri,
-            m.schema__name as model_name,
-            type(r) as relationship_type,
-            properties(m) as model_properties
-        ORDER BY m.schema__name
+        RETURN count(DISTINCT m) AS count
         """
-        
+
+        # Paginate distinct models, then attach card relations in one query.
+        data_query = """
+        MATCH (e {uri: $entityURI})
+        MATCH (m:fair4ml__MLModel)-[r]-(e)
+        WITH m, collect(DISTINCT type(r))[0] AS relationship_type
+        ORDER BY coalesce(m.schema__name, m.uri)
+        SKIP $offset
+        """
+        if limit is not None:
+            data_query += "\nLIMIT $limit"
+
+        data_query += """
+        OPTIONAL MATCH (m)-[out]->(t)
+        WHERE type(out) IN $cardRels
+        RETURN
+            m.uri AS model_uri,
+            m.schema__name AS model_name,
+            relationship_type,
+            properties(m) AS model_properties,
+            collect(DISTINCT {
+                type: type(out),
+                target: coalesce(t.uri, t.schema__name)
+            }) AS relations
+        ORDER BY coalesce(m.schema__name, m.uri)
+        """
+
+        params: Dict[str, Any] = {
+            "entityURI": entity_uri,
+            "offset": int(offset),
+            "cardRels": self._RELATED_MODEL_CARD_RELS,
+        }
+        if limit is not None:
+            params["limit"] = int(limit)
+
         try:
-            results = _run_cypher(query, {"entityURI": entity_uri}, self.config)
+            count_rows = _run_cypher(count_query, {"entityURI": entity_uri}, self.config)
+            total_count = int(count_rows[0].get("count", 0)) if count_rows else 0
+
+            if total_count == 0:
+                return [], 0
+
+            results = _run_cypher(data_query, params, self.config)
 
             models: List[Dict[str, Any]] = []
             for record in results:
@@ -652,6 +713,30 @@ class GraphService:
                     else:
                         normalized_props[key] = str(value)
 
+                # Fold card relations into model_properties (same shape as node props)
+                for rel in record.get("relations") or []:
+                    if not isinstance(rel, dict):
+                        continue
+                    rel_type = rel.get("type")
+                    target = rel.get("target")
+                    if not rel_type or target is None:
+                        continue
+                    existing = normalized_props.get(rel_type)
+                    if existing is None:
+                        normalized_props[rel_type] = [str(target)]
+                    elif isinstance(existing, list):
+                        target_str = str(target)
+                        if target_str not in existing:
+                            existing.append(target_str)
+                    else:
+                        existing_str = str(existing)
+                        target_str = str(target)
+                        normalized_props[rel_type] = (
+                            [existing_str, target_str]
+                            if existing_str != target_str
+                            else [existing_str]
+                        )
+
                 models.append(
                     {
                         "model_uri": record.get("model_uri"),
@@ -661,13 +746,13 @@ class GraphService:
                     }
                 )
 
-            return models
+            return models, total_count
         except Exception as e:
             logger.error(
                 f"Error getting models for entity URI '{entity_uri}': {e}",
                 exc_info=True,
             )
-            return []
+            return [], 0
 
     def grouped_facet_values(self, entity_type: List[str]) -> Tuple[Dict[str, List[str]], int]:
         """

@@ -431,21 +431,23 @@ def get_related_models_by_entity(
             return {
                 "error": f"Entity not found: {entity_name}",
             }
-        result = graph_service.get_models_by_entity_uri(entity_uri=result["uri"])
-        
+        models, total_count = graph_service.get_models_by_entity_uri(
+            entity_uri=result["uri"]
+        )
+
         # Transform results to only include requested fields
         transformed_models = []
-        for model in result:
+        for model in models:
             model_properties = model.get("model_properties", {})
             transformed_models.append({
                 "model_name": model.get("model_name") or model_properties.get("schema__name", ""),
                 "model_description": model_properties.get("schema__description", ""),
                 "shared_by": model_properties.get("fair4ml__sharedBy", ""),
             })
-        
+
         return {
             "models": transformed_models,
-            "count": len(transformed_models),
+            "count": total_count,
         }
     except Exception as e:
         logger.error(f"Error getting related models by entity: {e}", exc_info=True)
