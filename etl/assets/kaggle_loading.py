@@ -20,6 +20,7 @@ from etl_loaders.rdf_loader import (
     build_and_persist_licenses_rdf,
     build_and_persist_sources_rdf,
     build_and_persist_defined_terms_rdf,
+    build_and_persist_languages_rdf,
 )
 from etl_loaders.metadata_graph import export_metadata_graph_json
 from etl_loaders.rdf_store import (
@@ -383,6 +384,48 @@ def kaggle_load_sharedby_to_neo4j(
         **load_stats,
     }
     return (_write_report(rdf_run_folder, "sharedby", report), normalized_folder)
+
+
+@asset(
+    group_name="kaggle_loading",
+    ins={
+        "languages_normalized": AssetIn("kaggle_languages_normalized"),
+        "store_ready": AssetIn("kaggle_rdf_store_ready"),
+    },
+    tags={"pipeline": "kaggle_etl", "stage": "load"},
+)
+def kaggle_load_languages_to_neo4j(
+    languages_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Load normalized languages as RDF triples into Neo4j."""
+    if not languages_normalized or languages_normalized == "":
+        logger.info("No languages to load (empty input)")
+        return ("", "")
+    languages_path = Path(languages_normalized)
+    if not languages_path.exists():
+        logger.warning(f"Languages JSON not found: {languages_normalized}")
+        return ("", "")
+
+    normalized_folder = str(languages_path.parent)
+    config = _store_config(store_ready)
+    rdf_run_folder = _rdf_run_folder(normalized_folder)
+
+    ttl_path = rdf_run_folder / "languages.ttl"
+    load_stats = build_and_persist_languages_rdf(
+        json_path=languages_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+    )
+    report = {
+        "input_file": languages_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+    return (_write_report(rdf_run_folder, "languages", report), normalized_folder)
 
 
 @asset(

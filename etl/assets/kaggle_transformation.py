@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Any, Optional
 import logging
 
+import pycountry
 from pydantic import BaseModel, ValidationError
 from dagster import asset, AssetIn
 
@@ -34,7 +35,7 @@ from etl_transformers.common.entity_link_metadata import (
     apply_entity_link_extraction_metadata,
 )
 from schemas.fair4ml import MLModel
-from schemas.schemaorg import DefinedTerm
+from schemas.schemaorg import DefinedTerm, Language
 
 
 logger = logging.getLogger(__name__)
@@ -430,6 +431,7 @@ def kaggle_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
         "licenses_mapping": AssetIn("kaggle_identified_licenses"),
         "frameworks_mapping": AssetIn("kaggle_identified_frameworks"),
         "sharedby_mapping": AssetIn("kaggle_identified_sharedby"),
+        "inlanguage_mapping": AssetIn("kaggle_detected_inlanguage"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
     tags={"pipeline": "kaggle_etl", "stage": "transform"},
@@ -439,16 +441,19 @@ def kaggle_entity_linking(
     licenses_mapping: Dict[str, List[str]],
     frameworks_mapping: Dict[str, List[str]],
     sharedby_mapping: Dict[str, List[str]],
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
     run_folder_data: Tuple[str, str],
 ) -> str:
     """
-    Create entity linking mapping: model_id -> {keywords, licenses, frameworks, sources}
+    Create entity linking mapping: model_id -> {keywords, licenses, frameworks, sharedby, inLanguage, sources}
     Links identified entities with their enriched metadata.
 
     Args:
         keywords_mapping: {model_id: [keyword_refs]}
         licenses_mapping: {model_id: [license_names]}
         frameworks_mapping: {model_id: [framework_names]}
+        sharedby_mapping: {model_id: [sharedby_names]}
+        inlanguage_mapping: {model_id: [{code, confidence}, ...]}
         run_folder_data: Tuple of (raw_models_json_path, normalized_folder)
 
     Returns:
@@ -476,6 +481,7 @@ def kaggle_entity_linking(
         | set(licenses_mapping.keys())
         | set(frameworks_mapping.keys())
         | set(sharedby_mapping.keys())
+        | set(inlanguage_mapping.keys())
     )
 
     entity_linking: Dict[str, Dict[str, List[str]]] = {}
@@ -485,6 +491,12 @@ def kaggle_entity_linking(
         licenses = licenses_mapping.get(model_id, []) or []
         frameworks = frameworks_mapping.get(model_id, []) or []
         sharedby = sharedby_mapping.get(model_id, []) or []
+        inlanguage_predictions = inlanguage_mapping.get(model_id, []) or []
+        inlanguage_codes = [
+            str(prediction.get("code")).strip()
+            for prediction in inlanguage_predictions
+            if isinstance(prediction, dict) and str(prediction.get("code", "")).strip()
+        ]
 
         entity_linking[model_id] = {
             "keywords": [
@@ -502,6 +514,10 @@ def kaggle_entity_linking(
             "sharedby": [
                 KaggleHelper.generate_mlentory_entity_hash_id("SharedBy", x, platform="Kaggle")
                 for x in sharedby
+            ],
+            "inLanguage": [
+                KaggleHelper.generate_mlentory_entity_hash_id("Language", x, platform="Kaggle")
+                for x in inlanguage_codes
             ],
             "sources": list(kaggle_catalog_source_iris),
         }
@@ -542,6 +558,7 @@ def merge_kaggle_partial_schemas(
         licenses = links.get("licenses") or []
         frameworks = links.get("frameworks") or []
         sharedby = links.get("sharedby") or []
+        inlanguage = links.get("inLanguage") or []
         sources = links.get("sources") or []
         linked_fields: List[str] = []
 
@@ -564,6 +581,10 @@ def merge_kaggle_partial_schemas(
         if sharedby:
             merged_data["sharedBy"] = str(sharedby[0])  # MLModel.sharedBy is a single string
             linked_fields.append("sharedBy")
+
+        if inlanguage:
+            merged_data["inLanguage"] = list(inlanguage)
+            linked_fields.append("inLanguage")
 
         if sources:
             merged_data["source"] = str(sources[0])  # MLModel.source is a single string
@@ -744,6 +765,15 @@ def kaggle_model_normalized(
         all_model_ids=all_ids,
     )
 
+    parent_inlanguage_by_iri: Dict[str, List[str]] = {}
+    for _model_id, parent_data in merged_items:
+        langs = parent_data.get("inLanguage") or []
+        if not langs:
+            continue
+        for ident in parent_data.get("identifier") or []:
+            if isinstance(ident, str) and ident.strip():
+                parent_inlanguage_by_iri[ident.strip()] = list(langs)
+
     # Instances are MLModels too, so they are validated and written into the
     # same file rather than a separate one.
     instances_json_path, _raw_run_folder = instances_data
@@ -763,6 +793,10 @@ def kaggle_model_normalized(
             mapped["sharedBy"] = KaggleHelper.generate_mlentory_entity_hash_id(
                 "SharedBy", shared_by_name, platform="Kaggle"
             )
+
+        parent_id = str(rec.get("parent_mlentory_id", "") or "").strip()
+        if parent_id and parent_inlanguage_by_iri.get(parent_id):
+            mapped["inLanguage"] = list(parent_inlanguage_by_iri[parent_id])
 
         instance_items.append((instance_id, mapped))
 
@@ -1097,10 +1131,131 @@ def kaggle_licenses_normalized(
 @asset(
     group_name="kaggle_transformation",
     ins={
+        "inlanguage_mapping": AssetIn("kaggle_detected_inlanguage"),
+        "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
+    },
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
+)
+def kaggle_languages_normalized(
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
+    run_folder_data: Tuple[str, str],
+) -> str:
+    """
+    Materialize detected Kaggle inLanguage codes into normalized Language entities.
+
+    Writes ``languages.json`` into the run's normalized folder so Kaggle outputs
+    are aligned with the HF and AI4Life pipeline artifact layout.
+    """
+    _, normalized_folder = run_folder_data
+    output_path = Path(normalized_folder) / "languages.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    normalized_languages: List[Dict[str, Any]] = []
+    validation_errors: List[Dict[str, Any]] = []
+    per_code_confidence: Dict[str, float] = {}
+    for model_predictions in (inlanguage_mapping or {}).values():
+        for prediction in (model_predictions or []):
+            if not isinstance(prediction, dict):
+                continue
+            normalized_code = str(prediction.get("code", "")).strip()
+            if not normalized_code:
+                continue
+            confidence = float(prediction.get("confidence", 0.0) or 0.0)
+            per_code_confidence[normalized_code] = max(
+                per_code_confidence.get(normalized_code, 0.0),
+                confidence,
+            )
+
+    unique_codes = sorted(per_code_confidence.keys())
+
+    for idx, code in enumerate(unique_codes):
+        try:
+            language_ref = pycountry.languages.get(alpha_2=code.lower())
+            if language_ref is None:
+                language_ref = pycountry.languages.get(alpha_3=code.lower())
+
+            normalized_name = getattr(language_ref, "name", None) or code
+            alternate_names: List[str] = []
+            alpha_2 = getattr(language_ref, "alpha_2", None)
+            alpha_3 = getattr(language_ref, "alpha_3", None)
+            if isinstance(alpha_2, str) and alpha_2.strip():
+                alternate_names.append(alpha_2.lower())
+            if isinstance(alpha_3, str) and alpha_3.strip() and alpha_3.lower() not in alternate_names:
+                alternate_names.append(alpha_3.lower())
+            if not alternate_names:
+                alternate_names = [code]
+
+            scope = getattr(language_ref, "scope", None)
+            lang_type = getattr(language_ref, "type", None)
+            description = None
+            if scope or lang_type:
+                parts = []
+                if scope:
+                    parts.append(str(scope))
+                if lang_type:
+                    parts.append(str(lang_type))
+                description = f"ISO language ({', '.join(parts)})"
+
+            language = Language(
+                identifier=[
+                    KaggleHelper.generate_mlentory_entity_hash_id(
+                        "Language", code, platform="Kaggle"
+                    )
+                ],
+                name=str(normalized_name),
+                url=None,
+                alternateName=alternate_names,
+                description=description,
+                extraction_metadata={
+                    "extraction_method": "lingua-language-detector+pycountry",
+                    "confidence": per_code_confidence.get(code, 0.0),
+                    "source_field": "intendedUse",
+                },
+            )
+            normalized_languages.append(language.model_dump(mode="json", by_alias=True))
+        except Exception as exc:
+            validation_errors.append(
+                {
+                    "_index": idx,
+                    "language_code": code,
+                    "_error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+
+    with open(output_path, "w", encoding="utf-8") as file_handle:
+        json.dump(normalized_languages, file_handle, indent=2, ensure_ascii=False)
+
+    if validation_errors:
+        errors_path = Path(normalized_folder) / "languages_normalization_errors.json"
+        with open(errors_path, "w", encoding="utf-8") as file_handle:
+            json.dump(validation_errors, file_handle, indent=2, ensure_ascii=False)
+        logger.warning(
+            "Normalized %d/%d languages with %d errors (see %s)",
+            len(normalized_languages),
+            len(unique_codes),
+            len(validation_errors),
+            errors_path,
+        )
+    else:
+        logger.info(
+            "Normalized %d/%d languages. No errors.",
+            len(normalized_languages),
+            len(unique_codes),
+        )
+
+    logger.info("Wrote normalized Kaggle languages to %s", output_path)
+    return str(output_path)
+
+
+@asset(
+    group_name="kaggle_transformation",
+    ins={
         "keywords_json": AssetIn("kaggle_keywords_normalized"),
         "licenses_json": AssetIn("kaggle_licenses_normalized"),
         "frameworks_json": AssetIn("kaggle_frameworks_normalized"),
         "sharedby_json": AssetIn("kaggle_sharedby_normalized"),
+        "inlanguage_json": AssetIn("kaggle_languages_normalized"),
         "models_json": AssetIn("kaggle_model_normalized"),
         "sources_json": AssetIn("kaggle_sources_normalized"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
@@ -1112,6 +1267,7 @@ def kaggle_create_translation_mapping(
     licenses_json: str,
     frameworks_json: str,
     sharedby_json: str,
+    inlanguage_json: str,
     models_json: str,
     sources_json: str,
     run_folder_data: Tuple[str, str],
@@ -1157,6 +1313,7 @@ def kaggle_create_translation_mapping(
         {"label": "licenses", "path": licenses_json},
         {"label": "frameworks", "path": frameworks_json},
         {"label": "sharedby", "path": sharedby_json},
+        {"label": "languages", "path": inlanguage_json},
         {"label": "models", "path": models_json},
         {"label": "sources", "path": sources_json},
     ]

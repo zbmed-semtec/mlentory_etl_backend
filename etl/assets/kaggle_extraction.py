@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Any, Set
 
 import pandas as pd
+import pycountry
 from dagster import AssetIn, asset
 
 from etl.config import get_kaggle_config
@@ -458,3 +459,106 @@ def kaggle_sharedby_raw(
  
     logger.info("Saved %d sharedBy entities to %s", len(sharedby_df), sharedby_path)
     return (str(sharedby_path), run_folder)
+
+
+@asset(
+    group_name="kaggle_enrichment",
+    ins={"models_data": AssetIn("kaggle_models_raw")},
+    tags={"pipeline": "kaggle_etl", "stage": "extract"},
+)
+def kaggle_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Detect documentation/description languages per model for schema:inLanguage.
+
+    Kaggle stores the model card in ``intendedUse`` (from the API description
+    field), so detection uses that text plus the model name, matching AI4Life.
+    """
+    from etl_extractors.common.text_language_detector import detect_language_predictions
+
+    models_json_path, _ = models_data
+    with open(models_json_path, "r", encoding="utf-8") as file_handle:
+        raw_models = json.load(file_handle)
+
+    if not isinstance(raw_models, list):
+        logger.warning("Expected list of models at %s", models_json_path)
+        return {}
+
+    detected: Dict[str, List[Dict[str, Any]]] = {}
+    for idx, raw_model in enumerate(raw_models):
+        if not isinstance(raw_model, dict):
+            continue
+
+        model_id = str(raw_model.get("modelId", "")).strip() or f"unknown_{idx}"
+        text_parts = [
+            str(raw_model.get("intendedUse", "")).strip(),
+            str(raw_model.get("name", "")).strip(),
+        ]
+        detected[model_id] = detect_language_predictions(
+            "\n\n".join([part for part in text_parts if part]),
+            min_confidence=0.75,
+            max_languages=5,
+        )
+
+    logger.info("Detected inLanguage values for %d Kaggle models", len(detected))
+    return detected
+
+
+@asset(
+    group_name="kaggle_enrichment",
+    ins={
+        "models_data": AssetIn("kaggle_models_raw"),
+        "inlanguage_mapping": AssetIn("kaggle_detected_inlanguage"),
+    },
+    tags={"pipeline": "kaggle_etl", "stage": "extract"},
+)
+def kaggle_languages_raw(
+    models_data: Tuple[str, str],
+    inlanguage_mapping: Dict[str, List[Dict[str, Any]]],
+) -> str:
+    """
+    Persist detected language metadata to the raw run folder as ``languages.json``.
+    """
+    _, run_folder = models_data
+
+    per_code_confidence: Dict[str, float] = {}
+    for predictions in (inlanguage_mapping or {}).values():
+        for prediction in (predictions or []):
+            if not isinstance(prediction, dict):
+                continue
+            code = str(prediction.get("code", "")).strip().lower()
+            if not code:
+                continue
+            confidence = float(prediction.get("confidence", 0.0) or 0.0)
+            per_code_confidence[code] = max(per_code_confidence.get(code, 0.0), confidence)
+
+    records: List[Dict[str, Any]] = []
+    for code in sorted(per_code_confidence.keys()):
+        language = pycountry.languages.get(alpha_2=code) or pycountry.languages.get(alpha_3=code)
+        records.append(
+            {
+                "code": code,
+                "alpha_2": getattr(language, "alpha_2", None) if language else None,
+                "alpha_3": getattr(language, "alpha_3", None) if language else None,
+                "name": getattr(language, "name", None) if language else code,
+                "scope": getattr(language, "scope", None) if language else None,
+                "type": getattr(language, "type", None) if language else None,
+                "mlentory_id": KaggleHelper.generate_mlentory_entity_hash_id(
+                    "Language", code, platform="Kaggle"
+                ),
+                "enriched": language is not None,
+                "entity_type": "Language",
+                "platform": "Kaggle",
+                "extraction_metadata": {
+                    "extraction_method": "lingua-language-detector+pycountry",
+                    "confidence": per_code_confidence[code],
+                    "source_field": "intendedUse",
+                },
+            }
+        )
+
+    out_path = Path(run_folder) / "languages.json"
+    with open(out_path, "w", encoding="utf-8") as file_handle:
+        json.dump(records, file_handle, indent=2, ensure_ascii=False)
+
+    logger.info("Saved %d Kaggle languages to %s", len(records), out_path)
+    return str(out_path)

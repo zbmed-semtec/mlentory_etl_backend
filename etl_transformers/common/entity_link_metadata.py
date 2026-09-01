@@ -111,7 +111,7 @@ KAGGLE_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
     "inLanguage": _entry(
         "lingua-language-detector+pycountry",
         source_field="intendedUse",
-        notes="Model card language detection",
+        notes="Model card language detection from intendedUse and name",
     ),
 }
 
