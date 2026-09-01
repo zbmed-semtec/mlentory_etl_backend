@@ -345,6 +345,49 @@ def kaggle_load_frameworks_to_neo4j(
 @asset(
     group_name="kaggle_loading",
     ins={
+        "sharedby_normalized": AssetIn("kaggle_sharedby_normalized"),
+        "store_ready": AssetIn("kaggle_rdf_store_ready"),
+    },
+    tags={"pipeline": "Kaggle_etl", "stage": "load"},
+)
+def kaggle_load_sharedby_to_neo4j(
+    sharedby_normalized: str,
+    store_ready: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Load normalized sharedBy entities as RDF triples into Neo4j."""
+    if not sharedby_normalized or sharedby_normalized == "":
+        logger.info("No sharedBy entities to load (empty input)")
+        return ("", "")
+    sharedby_path = Path(sharedby_normalized)
+    if not sharedby_path.exists():
+        logger.warning(f"SharedBy JSON not found: {sharedby_normalized}")
+        return ("", "")
+
+    normalized_folder = str(sharedby_path.parent)
+    config = _store_config(store_ready)
+    rdf_run_folder = _rdf_run_folder(normalized_folder)
+
+    ttl_path = rdf_run_folder / "sharedby.ttl"
+    load_stats = build_and_persist_defined_terms_rdf(
+        json_path=sharedby_normalized,
+        config=config,
+        output_ttl_path=str(ttl_path),
+        entity_label="sharedby",
+    )
+    report = {
+        "input_file": sharedby_normalized,
+        "rdf_folder": str(rdf_run_folder),
+        "ttl_file": str(ttl_path),
+        "neo4j_uri": store_ready["uri"],
+        "neo4j_database": store_ready["database"],
+        **load_stats,
+    }
+    return (_write_report(rdf_run_folder, "sharedby", report), normalized_folder)
+
+
+@asset(
+    group_name="kaggle_loading",
+    ins={
         "models_loaded": AssetIn("kaggle_load_models_to_neo4j"),
         "store_ready": AssetIn("kaggle_rdf_store_ready"),
     },
