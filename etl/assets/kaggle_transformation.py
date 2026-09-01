@@ -4,17 +4,14 @@ Dagster assets for Kaggle -> FAIR4ML transformation.
 Pipeline:
 1) Read raw Kaggle models from extraction (models.json)
 2) Create separate assets for each property group:
-    - mlmodels.json       (FAIR4ML MLModel)
-    - mlinstances.json    (FAIR4ML MLModel, one per downloadable instance)
+    - mlmodels.json       (FAIR4ML MLModel: parent models and their instances)
     - entity_linking.json (linkage of model -> keywords/licenses/frameworks)
 
-Instances are written to their own file rather than mlmodels.json. A Kaggle
-model is a container and its instances are the downloadable artifacts, so
-folding them in would turn ~43k models into ~60k+ search results that are
-mostly the same model repackaged. The relationships survive either way -
-``parent_mlentory_id`` links an instance to its model and ``baseModel`` links
-a fine-tune to what it was derived from - so the graph can still answer
-"show me every variation of Gemma" and "show me models built on Gemma".
+A Kaggle model is a container; its instances are the downloadable artifacts
+(one per framework and variation). Both are ``fair4ml:MLModel`` records in
+the same ``mlmodels.json`` and are indexed together. They are distinguishable
+by ``baseModel`` (empty on the parent; on an instance it points at the parent
+and at any real lineage) and by ``adaptionTechniques``.
 """
 from __future__ import annotations
 
