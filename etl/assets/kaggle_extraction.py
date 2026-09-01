@@ -37,7 +37,7 @@ KAGGLE_ROOT = Path("/data/1_raw/kaggle")
 STATE_DIR = Path(os.getenv("CACHE_PATH", "/data/cache")) / "kaggle"
 
 
-@asset(group_name="kaggle_extraction", tags={"pipeline": "Kaggle_etl"})
+@asset(group_name="kaggle_extraction", tags={"pipeline": "kaggle_etl", "stage": "extract"})
 def kaggle_run_folder() -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_id = str(uuid.uuid4())[:8]
@@ -49,7 +49,7 @@ def kaggle_run_folder() -> str:
 
 @asset(
     group_name="kaggle_extraction",
-    tags={"pipeline": "Kaggle_etl"},
+    tags={"pipeline": "kaggle_etl", "stage": "extract"},
     ins={"run_folder": AssetIn("kaggle_run_folder")},
 )
 def kaggle_raw_catalog_sources(run_folder: str) -> str:
@@ -68,7 +68,7 @@ def kaggle_raw_catalog_sources(run_folder: str) -> str:
  
 
 
-@asset(group_name="kaggle_extraction", tags={"pipeline": "Kaggle_etl"}, ins={"run_folder": AssetIn("kaggle_run_folder")})
+@asset(group_name="kaggle_extraction", tags={"pipeline": "kaggle_etl", "stage": "extract"}, ins={"run_folder": AssetIn("kaggle_run_folder")})
 def kaggle_model_refs(run_folder: str) -> List[str]:
     """Build the owner/slug ref list from the Meta Kaggle dataset."""
     config = get_kaggle_config()
@@ -87,7 +87,7 @@ def kaggle_model_refs(run_folder: str) -> List[str]:
     return refs
 
 
-@asset(group_name="kaggle_extraction", tags={"pipeline": "Kaggle_etl"}, ins={"run_folder": AssetIn("kaggle_run_folder"), "refs": AssetIn("kaggle_model_refs")})
+@asset(group_name="kaggle_extraction", tags={"pipeline": "kaggle_etl", "stage": "extract"}, ins={"run_folder": AssetIn("kaggle_run_folder"), "refs": AssetIn("kaggle_model_refs")})
 def kaggle_raw_records(run_folder: str, refs: List[str]) -> Dict[str, Any]:
     """Fetch raw model cards from the Kaggle API and set extraction timestamp."""
     config = get_kaggle_config()
@@ -127,7 +127,7 @@ def kaggle_raw_records(run_folder: str, refs: List[str]) -> Dict[str, Any]:
     return payload
 
 
-@asset(group_name="kaggle_extraction", tags={"pipeline": "Kaggle_etl"}, ins={"raw_data": AssetIn("kaggle_raw_records")})
+@asset(group_name="kaggle_extraction", tags={"pipeline": "kaggle_etl", "stage": "extract"}, ins={"raw_data": AssetIn("kaggle_raw_records")})
 def kaggle_models_raw(raw_data: Dict[str, Any]) -> Tuple[str, str]:
     extractor = KaggleExtractor(records_data=raw_data['data'])
     models_df = extractor.extract_models()
@@ -141,7 +141,7 @@ def kaggle_models_raw(raw_data: Dict[str, Any]) -> Tuple[str, str]:
 @asset(
     group_name="kaggle_enrichment",
     ins={"models_data": AssetIn("kaggle_models_raw")},
-    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+    tags={"pipeline": "kaggle_etl", "stage": "extract"}
 )
 def kaggle_identified_instances(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
     """
@@ -167,7 +167,7 @@ def kaggle_identified_instances(models_data: Tuple[str, str]) -> Dict[str, List[
 
 @asset(
     group_name="kaggle_enrichment",
-    tags={"pipeline": "Kaggle_etl"},
+    tags={"pipeline": "kaggle_etl", "stage": "extract"},
     ins={
         "raw_records": AssetIn("kaggle_raw_records"),
         "identified_instances": AssetIn("kaggle_identified_instances"),
@@ -206,7 +206,7 @@ def kaggle_instances_raw(
 @asset(
     group_name="kaggle_enrichment",
     ins={"models_data": AssetIn("kaggle_models_raw")},
-    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+    tags={"pipeline": "kaggle_etl", "stage": "extract"}
 )
 def kaggle_identified_licenses(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
     """
@@ -232,7 +232,7 @@ def kaggle_identified_licenses(models_data: Tuple[str, str]) -> Dict[str, List[s
 
 @asset(
     group_name="kaggle_enrichment",
-    tags={"pipeline": "Kaggle_etl"},
+    tags={"pipeline": "kaggle_etl", "stage": "extract"},
     ins={
         "raw_records": AssetIn("kaggle_raw_records"),
         "identified_licenses": AssetIn("kaggle_identified_licenses"),
@@ -271,7 +271,7 @@ def kaggle_licenses_raw(
 @asset(
     group_name="kaggle_enrichment",
     ins={"models_data": AssetIn("kaggle_models_raw")},
-    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+    tags={"pipeline": "kaggle_etl", "stage": "extract"}
 )
 def kaggle_identified_keywords(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
     """
@@ -298,7 +298,7 @@ def kaggle_identified_keywords(models_data: Tuple[str, str]) -> Dict[str, List[s
  
 @asset(
     group_name="kaggle_enrichment",
-    tags={"pipeline": "Kaggle_etl"},
+    tags={"pipeline": "kaggle_etl", "stage": "extract"},
     ins={
         "raw_records": AssetIn("kaggle_raw_records"),
         "identified_keywords": AssetIn("kaggle_identified_keywords"),
@@ -341,7 +341,7 @@ def kaggle_keywords_raw(
 @asset(
     group_name="kaggle_enrichment",
     ins={"models_data": AssetIn("kaggle_models_raw")},
-    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+    tags={"pipeline": "kaggle_etl", "stage": "extract"}
 )
 def kaggle_identified_frameworks(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
     """
@@ -368,7 +368,7 @@ def kaggle_identified_frameworks(models_data: Tuple[str, str]) -> Dict[str, List
  
 @asset(
     group_name="kaggle_enrichment",
-    tags={"pipeline": "Kaggle_etl"},
+    tags={"pipeline": "kaggle_etl", "stage": "extract"},
     ins={
         "raw_records": AssetIn("kaggle_raw_records"),
         "identified_frameworks": AssetIn("kaggle_identified_frameworks"),
@@ -407,7 +407,7 @@ def kaggle_frameworks_raw(
 @asset(
     group_name="kaggle_enrichment",
     ins={"models_data": AssetIn("kaggle_models_raw")},
-    tags={"pipeline": "Kaggle_etl", "stage": "extract"}
+    tags={"pipeline": "kaggle_etl", "stage": "extract"}
 )
 def kaggle_identified_sharedby(models_data: Tuple[str, str]) -> Dict[str, List[str]]:
     """
@@ -427,7 +427,7 @@ def kaggle_identified_sharedby(models_data: Tuple[str, str]) -> Dict[str, List[s
  
 @asset(
     group_name="kaggle_enrichment",
-    tags={"pipeline": "Kaggle_etl"},
+    tags={"pipeline": "kaggle_etl", "stage": "extract"},
     ins={
         "raw_records": AssetIn("kaggle_raw_records"),
         "identified_sharedby": AssetIn("kaggle_identified_sharedby"),

@@ -244,7 +244,7 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
 @asset(
     group_name="kaggle_transformation",
     ins={"models_data": AssetIn("kaggle_models_raw")},
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_normalized_model_folder(models_data: Tuple[str, str]) -> Tuple[str, str]:
     """
@@ -267,7 +267,7 @@ def kaggle_normalized_model_folder(models_data: Tuple[str, str]) -> Tuple[str, s
 @asset(
     group_name="kaggle_transformation",
     ins={"models_data": AssetIn("kaggle_normalized_model_folder")},
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_extract_basic_properties(models_data: Tuple[str, str]) -> str:
     """
@@ -393,7 +393,7 @@ def kaggle_extract_basic_properties(models_data: Tuple[str, str]) -> str:
 @asset(
     group_name="kaggle_transformation",
     ins={"run_folder_data": AssetIn("kaggle_normalized_model_folder")},
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
     """
@@ -432,7 +432,7 @@ def kaggle_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
         "sharedby_mapping": AssetIn("kaggle_identified_sharedby"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_entity_linking(
     keywords_mapping: Dict[str, List[str]],
@@ -652,7 +652,7 @@ def validate_kaggle_mlmodels(
         "entity_linking_path": AssetIn("kaggle_entity_linking"),
         "instances_data": AssetIn("kaggle_instances_raw"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_model_normalized(
     run_folder_data: Tuple[str, str],
@@ -803,7 +803,7 @@ def kaggle_model_normalized(
         "keywords_data": AssetIn("kaggle_keywords_raw"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_keywords_normalized(
     keywords_data: Tuple[str, str],
@@ -902,7 +902,7 @@ def kaggle_keywords_normalized(
         "frameworks_data": AssetIn("kaggle_frameworks_raw"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_frameworks_normalized(
     frameworks_data: Tuple[str, str],
@@ -994,7 +994,7 @@ def kaggle_frameworks_normalized(
         "licenses_data": AssetIn("kaggle_licenses_raw"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_licenses_normalized(
     licenses_data: Tuple[str, str],
@@ -1105,7 +1105,7 @@ def kaggle_licenses_normalized(
         "sources_json": AssetIn("kaggle_sources_normalized"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_create_translation_mapping(
     keywords_json: str,
@@ -1192,7 +1192,7 @@ def kaggle_create_translation_mapping(
         "sharedby_data": AssetIn("kaggle_sharedby_raw"),
         "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "transform"},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
 def kaggle_sharedby_normalized(
     sharedby_data: Tuple[str, str],

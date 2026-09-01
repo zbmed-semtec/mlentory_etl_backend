@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-latency stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl kaggle-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector kaggle-extract kaggle-transform kaggle-load kaggle-index run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-latency stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
 
 # Default target
 .DEFAULT_GOAL := help
@@ -412,7 +412,7 @@ etl-check: ## Verify Dagster and Elasticsearch are running before ETL
 	@curl -sf "http://localhost:$(ELASTICSEARCH_HOST_PORT)/_cluster/health" >/dev/null 2>&1 \
 		|| { echo "$(YELLOW)Elasticsearch not reachable on port $(ELASTICSEARCH_HOST_PORT) — run 'make ensure-elasticsearch'$(NC)"; exit 1; }
 
-etl-run: etl-check ## Run full ETL pipeline for all sources (HF + AI4Life + OpenML)
+etl-run: etl-check ## Run full ETL pipeline for all sources (HF + AI4Life + Kaggle + OpenML)
 	@echo "$(BLUE)Running full ETL pipeline (all sources)...$(NC)"
 	$(DAGSTER_ETL)
 
@@ -427,6 +427,10 @@ hf-etl: etl-check ## Run full HuggingFace ETL pipeline
 ai4life-etl: etl-check ## Run full AI4Life ETL pipeline
 	@echo "$(BLUE)Running AI4Life ETL pipeline...$(NC)"
 	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl"'
+
+kaggle-etl: etl-check ## Run full Kaggle ETL pipeline
+	@echo "$(BLUE)Running Kaggle ETL pipeline...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl"'
 
 extract: etl-check ## Run extraction stage for all sources
 	@echo "$(BLUE)Running extraction stage (all sources)...$(NC)"
@@ -480,6 +484,22 @@ ai4life-vector: etl-check ## AI4Life vector backfill only
 	@echo "$(BLUE)Running AI4Life vector backfill...$(NC)"
 	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="vector_index"'
 
+kaggle-extract: etl-check ## Kaggle extraction stage only
+	@echo "$(BLUE)Running Kaggle extraction...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl",tag:"stage"="extract"'
+
+kaggle-transform: etl-check ## Kaggle transformation stage only
+	@echo "$(BLUE)Running Kaggle transformation...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl",tag:"stage"="transform"'
+
+kaggle-load: etl-check ## Kaggle loading stage only (Neo4j, RDF)
+	@echo "$(BLUE)Running Kaggle loading...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl",tag:"stage"="load"'
+
+kaggle-index: etl-check ## Kaggle Elasticsearch indexing only
+	@echo "$(BLUE)Running Kaggle Elasticsearch indexing...$(NC)"
+	$(DAGSTER_ETL) --select 'kaggle_index_models_elasticsearch'
+
 run-by-tag: etl-check ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline"="hf_etl")
 	@if [ -z "$(TAG)" ]; then \
 		echo "$(YELLOW)Please specify TAG, e.g., make run-by-tag TAG=\"pipeline\"=\"hf_etl\"$(NC)"; \
@@ -499,7 +519,7 @@ setup: up ## Complete initial setup (.env + all services per USE_STELLA)
 	@echo "  1. Edit .env file with your configuration if needed"
 	@echo "  2. Visit http://localhost:3000 for Dagster UI"
 	@echo "  3. Visit http://localhost:7474 for Neo4j Browser"
-	@echo "  4. Run 'make hf-etl', 'make ai4life-etl', or 'make etl-both' to run pipelines"
+	@echo "  4. Run 'make hf-etl', 'make ai4life-etl', 'make kaggle-etl', or 'make etl-both' to run pipelines"
 
 ##@ Information
 

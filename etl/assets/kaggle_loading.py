@@ -66,7 +66,7 @@ def _write_report(rdf_run_folder: Path, entity_label: str, report: Dict[str, Any
 
 @asset(
     group_name="kaggle_loading",
-    tags={"pipeline": "Kaggle_etl", "stage": "load"}
+    tags={"pipeline": "kaggle_etl", "stage": "load"}
 )
 def kaggle_rdf_store_ready() -> Dict[str, Any]:
     """Verify Neo4j RDF store is configured and ready."""
@@ -127,7 +127,7 @@ def kaggle_rdf_store_ready() -> Dict[str, Any]:
         "normalized_models": AssetIn("kaggle_model_normalized"),
         "store_ready": AssetIn("kaggle_rdf_store_ready"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "load"},
+    tags={"pipeline": "kaggle_etl", "stage": "load"},
 )
 def kaggle_load_models_to_neo4j(
     normalized_models: str,
@@ -177,7 +177,7 @@ def kaggle_load_models_to_neo4j(
         "licenses_normalized": AssetIn("kaggle_licenses_normalized"),
         "store_ready": AssetIn("kaggle_rdf_store_ready"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "load"}
+    tags={"pipeline": "kaggle_etl", "stage": "load"}
 )
 def kaggle_load_licenses_to_neo4j(
     licenses_normalized: str,
@@ -219,7 +219,7 @@ def kaggle_load_licenses_to_neo4j(
         "sources_normalized": AssetIn("kaggle_sources_normalized"),
         "store_ready": AssetIn("kaggle_rdf_store_ready"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "load"},
+    tags={"pipeline": "kaggle_etl", "stage": "load"},
 )
 def kaggle_load_sources_to_neo4j(
     sources_normalized: str,
@@ -262,7 +262,7 @@ def kaggle_load_sources_to_neo4j(
         "keywords_normalized": AssetIn("kaggle_keywords_normalized"),
         "store_ready": AssetIn("kaggle_rdf_store_ready"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "load"}
+    tags={"pipeline": "kaggle_etl", "stage": "load"}
 )
 def kaggle_load_keywords_to_neo4j(
     keywords_normalized: str,
@@ -305,7 +305,7 @@ def kaggle_load_keywords_to_neo4j(
         "frameworks_normalized": AssetIn("kaggle_frameworks_normalized"),
         "store_ready": AssetIn("kaggle_rdf_store_ready"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "load"}
+    tags={"pipeline": "kaggle_etl", "stage": "load"}
 )
 def kaggle_load_frameworks_to_neo4j(
     frameworks_normalized: str,
@@ -348,7 +348,7 @@ def kaggle_load_frameworks_to_neo4j(
         "sharedby_normalized": AssetIn("kaggle_sharedby_normalized"),
         "store_ready": AssetIn("kaggle_rdf_store_ready"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "load"},
+    tags={"pipeline": "kaggle_etl", "stage": "load"},
 )
 def kaggle_load_sharedby_to_neo4j(
     sharedby_normalized: str,
@@ -391,7 +391,7 @@ def kaggle_load_sharedby_to_neo4j(
         "models_loaded": AssetIn("kaggle_load_models_to_neo4j"),
         "store_ready": AssetIn("kaggle_rdf_store_ready"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "load"},
+    tags={"pipeline": "kaggle_etl", "stage": "load"},
 )
 def kaggle_export_metadata_json(
     models_loaded: Tuple[str, str],
@@ -436,7 +436,7 @@ def kaggle_export_metadata_json(
 
 @asset(
     group_name="kaggle_loading",
-    tags={"pipeline": "Kaggle_etl", "stage": "index"},
+    tags={"pipeline": "kaggle_etl", "stage": "index"},
 )
 def kaggle_elasticsearch_ready() -> Dict[str, Any]:
     """Verify Elasticsearch is configured and ready for Kaggle indexing."""
@@ -458,7 +458,7 @@ def kaggle_elasticsearch_ready() -> Dict[str, Any]:
         "frameworks_normalized": AssetIn("kaggle_frameworks_normalized"),
         "es_ready": AssetIn("kaggle_elasticsearch_ready"),
     },
-    tags={"pipeline": "Kaggle_etl", "stage": "index"},
+    tags={"pipeline": "kaggle_etl", "stage": "index"},
 )
 def kaggle_index_models_elasticsearch(
     normalized_models: str,
