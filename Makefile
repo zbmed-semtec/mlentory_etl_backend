@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl kaggle-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector kaggle-extract kaggle-transform kaggle-load kaggle-index run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-latency stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl kaggle-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector kaggle-extract kaggle-transform kaggle-load kaggle-index kaggle-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-latency stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
 
 # Default target
 .DEFAULT_GOAL := help
@@ -499,6 +499,10 @@ kaggle-load: etl-check ## Kaggle loading stage only (Neo4j, RDF)
 kaggle-index: etl-check ## Kaggle Elasticsearch indexing only
 	@echo "$(BLUE)Running Kaggle Elasticsearch indexing...$(NC)"
 	$(DAGSTER_ETL) --select 'kaggle_index_models_elasticsearch'
+
+kaggle-vector: etl-check ## Kaggle vector backfill only
+	@echo "$(BLUE)Running Kaggle vector backfill...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl",tag:"stage"="vector_index"'
 
 run-by-tag: etl-check ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline"="hf_etl")
 	@if [ -z "$(TAG)" ]; then \
