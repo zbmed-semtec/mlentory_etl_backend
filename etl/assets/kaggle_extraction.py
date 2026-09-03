@@ -17,6 +17,8 @@ import os
 import json
 import logging
 import uuid
+import re
+import numpy as np
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple, List, Dict, Any, Set
@@ -30,6 +32,10 @@ from etl_extractors.kaggle import KaggleExtractor
 from etl_extractors.kaggle.kaggle_crawler import KaggleCrawler
 from etl_extractors.kaggle.kaggle_helper import KaggleHelper
 from etl_extractors.kaggle.kaggle_enrichment import KaggleEnrichment
+
+# temporary import from HF for LLM-based schema extraction
+from etl import LLMConfig
+from etl_extractors.hf import HFLLMSchemaPropertyExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -562,3 +568,71 @@ def kaggle_languages_raw(
 
     logger.info("Saved %d Kaggle languages to %s", len(records), out_path)
     return str(out_path)
+
+@asset(group_name="kaggle_extraction", 
+       tags={"pipeline": "kaggle_etl", "stage": "extract"}, 
+       ins={"raw_data": AssetIn("kaggle_raw_records")})
+def kaggle_llm_schema_extractors(raw_data: Dict[str, Any]) -> Tuple[Dict[str, Dict[str, str]], str]:
+    """
+    Uses an LLM to extract structured metadata from model cards.
+ 
+    Args:
+        raw_data:  Dict[str, Any]
+ 
+    Returns:
+        Tuple of ({model_id: {property: result}}, run_folder)
+    """
+
+    def preprocess_model_cards(json_data):
+        """
+        Extracts text from Kaggle model JSON(s), removing markdown code blocks.
+        Returns a dictionary of { "model_ref": "combined_clean_text" }
+        """
+        logger.info("Preprocessing %d Kaggle model cards for LLM extraction", len(json_data))
+        if isinstance(json_data, dict):
+            json_data = [json_data]
+            
+        extracted_data = {}
+        
+        for model in json_data:
+            model_id = model.get("ref") or str(model.get("id"))
+            text_parts = []
+            for field in ["title", "subtitle", "description", "provenanceSources"]:
+                val = model.get(field)
+                if val:
+                    text_parts.append(str(val))
+
+            for instance in model.get("instances", []):
+                for field in ["overview", "usage"]:
+                    val = instance.get(field)
+                    if val:
+                        text_parts.append(str(val))
+
+            combined_text = "\n\n".join(text_parts)
+            clean_text = re.sub(r'```.*?```', '', combined_text, flags=re.DOTALL)
+            clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text).strip()
+            
+            extracted_data[model_id] = clean_text
+            
+        return extracted_data
+
+    run_folder = raw_data.get("run_folder")
+    models_data = raw_data.get("data", {}).get("data", [])
+    model_texts = preprocess_model_cards(models_data)
+
+    logger.info("Prepared %d model texts for LLM extraction. Average length: %.2f characters", len(model_texts), np.mean([len(text) for text in model_texts.values()]))
+    config = LLMConfig()
+    llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=config)
+    llm_extractor.load_metadata()
+    llm_extractor.load_llm()
+    batch_size = llm_extractor.estimate_max_concurrent_cards(model_texts, typical_visible_output_tokens=150)
+    llm_extractor.extract_properties(model_texts, 
+                                     return_result=False,
+                                     batch_size=batch_size)
+    result = llm_extractor.parse_llm_output()
+    final_path = Path(run_folder) / "llm_extraction_results.json"
+    with open(final_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=4)
+    
+    logger.info(f"LLM extraction results saved to {final_path}")
+    return (result, str(final_path))
