@@ -260,7 +260,7 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     date_modified = _parse_datetime(date_modified)
 
     description = str(raw_model.get("intendedUse", "")).strip()
-    readme = validate_optional_url(raw_model.get("readme_file"))
+    readme = validate_optional_url(raw_model.get("readme_file")) or validate_optional_url(url)
     # No network call: Kaggle serves the model card inline as the description,
     # which extraction already persisted.
     abstract = KaggleHelper.resolve_abstract_content(raw_model)
@@ -379,8 +379,11 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "readme": _create_extraction_metadata(
             method=_METHOD,
             confidence=1.0,
-            source_field="readme_file",
-            notes="Kaggle has no separate readme URL; card is inline",
+            source_field="readme_file, url",
+            notes=(
+                "Kaggle has no separate README file; codemeta:readme is the "
+                "public model page https://www.kaggle.com/models/{owner}/{slug}"
+            ),
         ),
         "issueTracker": _create_extraction_metadata(
             method=_METHOD,

@@ -198,6 +198,7 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
         "usageInstructions": usage or None,
         "memoryRequirements": str(rec.get("contentSize", "")).strip() or None,
         "archivedAt": url or None,
+        "readme": url or None,
         "extraction_metadata": {
             "identifier": {**meta, "source_field": "mlentory_id"},
             "name": {**meta, "source_field": "slug"},
@@ -232,6 +233,11 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
             },
             "usageInstructions": {**meta, "source_field": "usage"},
             "memoryRequirements": {**meta, "source_field": "totalUncompressedBytes"},
+            "readme": {
+                **meta,
+                "source_field": "url",
+                "notes": "Public instance page; Kaggle has no separate README file",
+            },
         },
         "_model_id": instance_id,
     }
