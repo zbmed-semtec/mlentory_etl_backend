@@ -486,8 +486,9 @@ async def get_related_models(
         /models/related?reference_model_id=<model_id>&limit_per_category=5
     """
     try:
+        print(f"Fetching related models for reference_model_id: {reference_model_id}, extended: {extended}, limit_per_category: {limit_per_category}")
         results = related_models_controller.get_all_related_models(
-            reference_model_id=reference_model_id,
+            reference_model_id="https://w3id.org/mlentory/mlentory_graph/" + reference_model_id,
             extended=extended,
             limit_per_category=limit_per_category
         )

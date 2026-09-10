@@ -82,6 +82,16 @@ class FacetedSearchMixin:
                 supports_search=True,
                 pinned=False
             ),
+            "baseModels": FacetConfig(
+                field="baseModels",
+                label="Base Models",
+                type="keyword",
+                icon="mdi-family-tree",
+                is_high_cardinality=True,
+                default_size=20,
+                supports_search=True,
+                pinned=False
+            ),
             "platform": FacetConfig(
                 field="platform",
                 label="Platform",
@@ -374,6 +384,7 @@ class FacetedSearchMixin:
                     license=source.get("license"),
                     mlTask=source.get("ml_tasks", []),
                     keywords=source.get("keywords", []),
+                    baseModels=source.get("baseModels", []) or [],
                     datasets=source.get("datasets", []) or [],
                     platform=source.get("platform", "Unknown"),
                 )

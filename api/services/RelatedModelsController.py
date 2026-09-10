@@ -250,13 +250,13 @@ class RelatedModelsController:
                 score += keyword_similarity * 0.25
         
         # 3. Base Model Similarity (20% weight)
-        # if reference_model.baseModels and candidate_model.baseModels:
-        #     ref_base_models = set(reference_model.baseModels)
-        #     cand_base_models = set(candidate_model.baseModels)
-        #     if ref_base_models and cand_base_models:
-        #         common_base_models = ref_base_models & cand_base_models
-        #         base_similarity = len(common_base_models) / max(len(ref_base_models), len(cand_base_models))
-        #         score += base_similarity * 0.2
+        if reference_model.baseModels and candidate_model.baseModels:
+            ref_base_models = set(reference_model.baseModels)
+            cand_base_models = set(candidate_model.baseModels)
+            if ref_base_models and cand_base_models:
+                common_base_models = ref_base_models & cand_base_models
+                base_similarity = len(common_base_models) / max(len(ref_base_models), len(cand_base_models))
+                score += base_similarity * 0.2
         
         # 4. Name Similarity (10% weight)
         if reference_model.name and candidate_model.name:
@@ -352,8 +352,7 @@ class RelatedModelsController:
             >>> for model in models:
             ...     print(f"Model: {model['name']}, Base: {model['baseModels']}")
         """
-        reference_base_models = None # No base model information available in the reference model, cannot perform search
-        # reference_base_models = reference_model.baseModels
+        reference_base_models = reference_model.baseModels
         reference_model_id = reference_model.db_identifier
         
         if not reference_base_models:
@@ -363,10 +362,11 @@ class RelatedModelsController:
             same_base_models = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"baseModels": reference_base_models},
+                page_size=limit + 1,
             )
             
             return [
-                model for model in same_base_models 
+                model for model in same_base_models[0]
                 if model.db_identifier != reference_model_id
             ][:limit]
             
