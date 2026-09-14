@@ -137,9 +137,9 @@ class KaggleModelClient:
 
         # url fields
         out["url"] = f"https://www.kaggle.com/models/{model_id}" if model_id else ""
-        # Kaggle serves the model card as the description field rather than a
-        # separate file, so there is no distinct readme URL to point at.
-        out["readme_file"] = ""
+        # Kaggle has no separate README file; the public model page is the card.
+        # codemeta:readme therefore points at that page (owner/slug).
+        out["readme_file"] = out["url"]
 
         # paths to extract (do NOT store path-lists in output)
         #
