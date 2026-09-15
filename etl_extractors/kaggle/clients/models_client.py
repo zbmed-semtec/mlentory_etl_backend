@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -96,24 +95,9 @@ class KaggleModelClient:
 
     @staticmethod
     def _safe_iso_date(ts: Any) -> str:
-        """
-        Convert a Kaggle timestamp to YYYY-MM-DD.
-
-        Kaggle returns ISO 8601 strings on the models endpoint, but Meta
-        Kaggle CSV columns can surface as unix seconds, so handle both.
-        """
-        if isinstance(ts, (int, float)):
-            try:
-                return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
-            except (OverflowError, OSError, ValueError):
-                return ""
-        if isinstance(ts, str) and ts:
-            cleaned = ts.replace("Z", "+00:00")
-            try:
-                return datetime.fromisoformat(cleaned).strftime("%Y-%m-%d")
-            except ValueError:
-                return ts[:10] if len(ts) >= 10 else ""
-        return ""
+        """Convert a Kaggle timestamp to YYYY-MM-DD."""
+        parsed = KaggleHelper.parse_kaggle_datetime(ts)
+        return parsed.strftime("%Y-%m-%d") if parsed else ""
 
     def fetch_model_metadata(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Fetch a single model's metadata and normalize all missing values to ''."""
@@ -247,7 +231,7 @@ class KaggleModelClient:
         )
         out["dateModified"] = self._safe_iso_date(
             self._first_hit(flat, ["lastUpdateTime", "updateTime", "LastUpdateTime"])
-        )
+        ) or out["dateCreated"]
         out["datePublished"] = out["dateCreated"]
 
         # conditionsOfAccess: isPrivate is a bool; express it as an access label
