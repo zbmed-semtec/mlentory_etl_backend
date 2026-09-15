@@ -29,6 +29,7 @@ from etl.config import get_kaggle_config
 from etl_extractors.kaggle import KaggleExtractor
 from etl_extractors.kaggle.kaggle_crawler import KaggleCrawler
 from etl_extractors.kaggle.kaggle_helper import KaggleHelper
+from etl_extractors.kaggle.model_readme import KaggleModelReadmeFetcher
 from etl_extractors.kaggle.kaggle_enrichment import KaggleEnrichment
 from etl_transformers.common.llm_inlanguage import (
     LLM_INLANGUAGE_METHOD,
@@ -199,10 +200,32 @@ def kaggle_instances_raw(
  
     extractor = KaggleExtractor(records_data=records)
     instances_df = extractor.extract_specific_instances(sorted(instance_ids))
- 
+
+    config = get_kaggle_config()
+    if config.fetch_instance_readmes and not instances_df.empty:
+        instance_records = instances_df.to_dict(orient="records")
+        crawler = KaggleCrawler(
+            output_dir=str(STATE_DIR),
+            threads=config.threads,
+            max_retries=config.max_retries,
+            request_timeout_seconds=config.request_timeout_seconds,
+        )
+        fetcher = KaggleModelReadmeFetcher(
+            crawler,
+            cache_dir=STATE_DIR / "instance_readmes",
+            force_refresh=config.force_full_refresh,
+        )
+        found = fetcher.attach_readmes(instance_records)
+        instances_df = pd.DataFrame(instance_records)
+        logger.info(
+            "Attached README.md on %d/%d Kaggle models",
+            found,
+            len(instance_records),
+        )
+
     instances_path = Path(run_folder) / "instances.json"
     instances_df.to_json(str(instances_path), orient="records", indent=2)
- 
+
     logger.info("Saved %d instances to %s", len(instances_df), instances_path)
     return (str(instances_path), run_folder)
 

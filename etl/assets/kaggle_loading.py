@@ -137,9 +137,8 @@ def kaggle_load_models_to_neo4j(
     """
     Load normalized Kaggle models as RDF triples into Neo4j.
 
-    ``mlmodels.json`` holds both models and their instances - a Kaggle model
-    is a container and its instances are the downloadable artifacts, each an
-    MLModel in its own right - so one loader covers both.
+    ``mlmodels.json`` holds Kaggle variations as FAIR4ML models. Parent Kaggle
+    models are containers only and are not loaded as MLModel nodes.
     """
     mlmodels_json_path = normalized_models
     normalized_folder = str(Path(mlmodels_json_path).parent)
