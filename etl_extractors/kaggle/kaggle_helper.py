@@ -7,6 +7,7 @@ Contains commonly used functions shared across Kaggle extractors, enrichment, an
 from __future__ import annotations
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 import logging
 from typing import Any, Dict, List, Optional
@@ -185,6 +186,50 @@ class KaggleHelper:
         return "https://w3id.org/mlentory/mlentory_graph/"+hash_obj.hexdigest()
 
     @staticmethod
+    def parse_kaggle_datetime(value: Any) -> Optional[datetime]:
+        """
+        Parse a Kaggle timestamp into a datetime.
+
+        Accepts ISO 8601, YYYY-MM-DD, Meta Kaggle ``MM/DD/YYYY[ HH:MM:SS]``,
+        unix seconds, or an existing datetime. Returns None when empty or
+        unparseable.
+        """
+        if value is None or value == "":
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, (int, float)):
+            try:
+                return datetime.utcfromtimestamp(value)
+            except (OverflowError, OSError, ValueError):
+                return None
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        iso = text.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(iso)
+        except ValueError:
+            pass
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        return None
+
+    KAGGLE_CATALOG_URL = "https://www.kaggle.com/models"
+
+    @staticmethod
+    def catalog_website_iri() -> str:
+        """w3id of the Kaggle catalog ``schema:WebSite`` entity."""
+        return KaggleHelper.generate_mlentory_entity_hash_id(
+            "WebSite", KaggleHelper.KAGGLE_CATALOG_URL
+        )
+
+    @staticmethod
     def raw_kaggle_catalog_website_records() -> list[dict[str, object]]:
         """
         Canonical Kaggle hosting ``schema:WebSite`` row(s) for this pipeline.
@@ -192,8 +237,8 @@ class KaggleHelper:
         Minted with :meth:`generate_mlentory_entity_hash_id` like other Kaggle entities.
         Intended to be written as ``sources.json`` under ``1_raw/kaggle/<run>/`` at extract.
         """
-        url = "https://www.kaggle.com/models"
-        mlentory_id = KaggleHelper.generate_mlentory_entity_hash_id("WebSite", url)
+        url = KaggleHelper.KAGGLE_CATALOG_URL
+        mlentory_id = KaggleHelper.catalog_website_iri()
         return [
             {
                 "https://schema.org/identifier": [mlentory_id],
