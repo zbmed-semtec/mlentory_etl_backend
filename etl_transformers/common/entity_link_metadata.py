@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
 
+from etl_transformers.common.llm_inlanguage import LLM_INLANGUAGE_METHOD
+
 
 def _entry(
     method: str,
@@ -52,11 +54,6 @@ HF_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
         source_field="tags",
         notes="Language tags mapped via pycountry",
     ),
-    "inLanguage": _entry(
-        "lingua-language-detector+pycountry",
-        source_field="card",
-        notes="Readme language detection",
-    ),
     "mlTask": _entry("catalog_csv", source_field="pipeline_tag"),
     "sharedBy": _entry("hf_sharedby_identifier", source_field="sharedBy"),
 }
@@ -74,9 +71,9 @@ AI4LIFE_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
     "mlTask": _entry("ai4life_task_identifier", source_field="tasks"),
     "sharedBy": _entry("ai4life_sharedby_identifier", source_field="sharedBy"),
     "inLanguage": _entry(
-        "lingua-language-detector+pycountry",
+        LLM_INLANGUAGE_METHOD,
         source_field="documentation_content",
-        notes="Readme/documentation language detection",
+        notes="Documentation language (schema:inLanguage) via LLM schema extraction",
     ),
 }
 
@@ -109,9 +106,9 @@ KAGGLE_ENTITY_LINK_METADATA: Dict[str, Dict[str, Any]] = {
         notes="Framework names read from instance URLs (PyTorch, Keras, …)",
     ),
     "inLanguage": _entry(
-        "lingua-language-detector+pycountry",
+        LLM_INLANGUAGE_METHOD,
         source_field="intendedUse",
-        notes="Model card language detection from intendedUse and name",
+        notes="Documentation language (schema:inLanguage) via LLM schema extraction",
     ),
 }
 

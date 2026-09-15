@@ -355,7 +355,6 @@ def hf_extract_basic_properties(
         "licenses_mapping": AssetIn("hf_identified_licenses"),
         "base_models_mapping": AssetIn("hf_identified_base_models"),
         "languages_mapping": AssetIn("hf_identified_languages"),
-        "readme_languages_mapping": AssetIn("hf_detected_readme_languages"),
         "tasks_mapping": AssetIn("hf_identified_tasks"),
         "sharedby_mapping": AssetIn("hf_identified_sharedby"),
         "run_folder_data": AssetIn("hf_normalized_run_folder"),
@@ -369,7 +368,6 @@ def hf_entity_linking(
     licenses_mapping: Tuple[Dict[str, List[str]], str],
     base_models_mapping: Tuple[Dict[str, List[str]], str],
     languages_mapping: Tuple[Dict[str, List[str]], str],
-    readme_languages_mapping: Tuple[Dict[str, List[Dict[str, object]]], str],
     tasks_mapping: Tuple[Dict[str, List[str]], str],
     sharedby_mapping: Tuple[Dict[str, List[str]], str],
     run_folder_data: Tuple[str, str],
@@ -378,7 +376,9 @@ def hf_entity_linking(
     Build model_id -> linked MLentory IRIs for datasets, keywords, languages, tasks, etc.
 
     ``languages`` maps tag-derived codes to Language IRIs (supportedLanguages).
-    ``inLanguage`` maps Lingua + pycountry-normalized readme languages to the same IRIs.
+    ``inLanguage`` is not linked here: documentation language comes from the
+    LLM schema extractor (``schema:inLanguage``) and is mapped in
+    ``map_llm_schema_properties``.
 
     Args:
         datasets_mapping: Tuple of ({model_id: [dataset_names]}, run_folder)
@@ -387,7 +387,6 @@ def hf_entity_linking(
         licenses_mapping: Tuple of ({model_id: [license_ids]}, run_folder)
         base_models_mapping: Tuple of ({model_id: [base_model_ids]}, run_folder)
         languages_mapping: Tuple of ({model_id: [language codes from tags]}, run_folder)
-        readme_languages_mapping: Tuple of ({model_id: [{code, confidence}]}, run_folder)
         tasks_mapping: Tuple of ({model_id: [task_ids]}, run_folder)
         sharedby_mapping: Tuple of ({model_id: [sharedby_ids]}, run_folder)
         run_folder_data: Tuple of (models_json_path, normalized_folder)
@@ -406,7 +405,6 @@ def hf_entity_linking(
     model_licenses = licenses_mapping[0]
     model_base_models = base_models_mapping[0]
     model_languages = languages_mapping[0]
-    model_readme_languages = readme_languages_mapping[0]
     model_tasks = tasks_mapping[0]
     model_sharedby = sharedby_mapping[0]
 
@@ -449,14 +447,6 @@ def hf_entity_linking(
             "languages": [
                 HFHelper.generate_mlentory_entity_hash_id("Language", x)
                 for x in model_languages.get(model_id, [])
-            ],
-            "inLanguage": [
-                HFHelper.generate_mlentory_entity_hash_id("Language", x)
-                for x in [
-                    str(prediction.get("code")).strip()
-                    for prediction in (model_readme_languages.get(model_id, []) or [])
-                    if isinstance(prediction, dict) and str(prediction.get("code", "")).strip()
-                ]
             ],
             "tasks": [
                 HFHelper.generate_mlentory_entity_hash_id("Task", x)
@@ -866,9 +856,6 @@ def merge_model_partial_schemas(
                 if model_entities["languages"]:
                     merged["supportedLanguages"] = model_entities["languages"]
                     linked_fields.append("supportedLanguages")
-                if model_entities.get("inLanguage"):
-                    merged["inLanguage"] = model_entities["inLanguage"]
-                    linked_fields.append("inLanguage")
                 if model_entities["tasks"]:
                     merged["mlTask"] = model_entities["tasks"]
                     linked_fields.append("mlTask")

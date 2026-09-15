@@ -23,6 +23,10 @@ from etl_extractors.ai4life.ai4life_enrichment import AI4LifeEnrichment
 from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 from etl_extractors.ai4life.ai4life_extractor import AI4LifeExtractor
 from etl.config import get_ai4life_config, get_general_config
+from etl_transformers.common.llm_inlanguage import (
+    LLM_INLANGUAGE_METHOD,
+    detect_inlanguage_with_llm,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -367,10 +371,10 @@ def ai4life_identified_sharedby(models_data: Tuple[str, str]) -> Dict[str, List[
 def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[Dict[str, Any]]]:
     """
     Detect documentation/description languages per model for schema:inLanguage.
-    """
-    from etl_extractors.common.text_language_detector import detect_language_predictions
 
-    models_json_path, _ = models_data
+    Uses the shared LLM schema extractor (same ``schema:inLanguage`` question as HF).
+    """
+    models_json_path, run_folder = models_data
     with open(models_json_path, "r", encoding="utf-8") as file_handle:
         raw_models = json.load(file_handle)
 
@@ -378,7 +382,7 @@ def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[
         logger.warning("Expected list of models at %s", models_json_path)
         return {}
 
-    detected: Dict[str, List[Dict[str, Any]]] = {}
+    texts: Dict[str, str] = {}
     for idx, raw_model in enumerate(raw_models):
         if not isinstance(raw_model, dict):
             continue
@@ -389,11 +393,12 @@ def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[
             str(raw_model.get("intendedUse", "")).strip(),
             str(raw_model.get("name", "")).strip(),
         ]
-        detected[model_id] = detect_language_predictions(
-            "\n\n".join([part for part in text_parts if part]),
-            min_confidence=0.75,
-            max_languages=5,
-        )
+        texts[model_id] = "\n\n".join([part for part in text_parts if part])
+
+    detected = detect_inlanguage_with_llm(texts, log=logger)
+    out_path = Path(run_folder) / "llm_inlanguage_results.json"
+    with open(out_path, "w", encoding="utf-8") as file_handle:
+        json.dump(detected, file_handle, indent=2, ensure_ascii=False)
 
     logger.info("Detected inLanguage values for %d AI4Life models", len(detected))
     return detected
@@ -446,7 +451,7 @@ def ai4life_languages_raw(
                 "entity_type": "Language",
                 "platform": "AI4Life",
                 "extraction_metadata": {
-                    "extraction_method": "lingua-language-detector+pycountry",
+                    "extraction_method": LLM_INLANGUAGE_METHOD,
                     "confidence": per_code_confidence[code],
                 },
             }
