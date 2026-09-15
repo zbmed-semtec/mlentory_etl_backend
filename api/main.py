@@ -321,7 +321,7 @@ async def health_check() -> HealthResponse:
             logger.warning(f"Neo4j health check failed: {e}")
 
         cuda_healthy = _cuda_available()
-        require_cuda = os.environ.get("REQUIRE_CUDA_HEALTH", "true").lower() in {
+        require_cuda = os.environ.get("REQUIRE_CUDA_HEALTH", "false").lower() in {
             "1",
             "true",
             "t",
@@ -337,7 +337,10 @@ async def health_check() -> HealthResponse:
                 detail="CUDA/GPU unavailable in API container",
             )
 
-        status = "healthy" if (es_healthy and neo4j_healthy and cuda_healthy) else "degraded"
+        core_healthy = es_healthy and neo4j_healthy
+        if require_cuda:
+            core_healthy = core_healthy and cuda_healthy
+        status = "healthy" if core_healthy else "degraded"
 
         return HealthResponse(
             status=status,
