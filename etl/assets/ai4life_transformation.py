@@ -25,6 +25,7 @@ from etl_extractors.hf import HFHelper
 from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 from etl_transformers.ai4life.transform_mlmodel import map_ai4life_basic_properties
 from etl_transformers.common.entity_link_metadata import apply_entity_link_extraction_metadata
+from etl_transformers.common.llm_inlanguage import LLM_INLANGUAGE_METHOD
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import ScholarlyArticle, CreativeWork, DefinedTerm, Language
 from schemas.croissant import CroissantDataset
@@ -598,7 +599,7 @@ def ai4life_languages_normalized(
                 alternateName=alternate_names,
                 description=description,
                 extraction_metadata={
-                    "extraction_method": "lingua-language-detector+pycountry",
+                    "extraction_method": LLM_INLANGUAGE_METHOD,
                     "confidence": per_code_confidence.get(code, 0.0),
                 },
             )

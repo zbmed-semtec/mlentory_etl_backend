@@ -6,6 +6,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from etl_extractors.hf.hf_helper import HFHelper
+from etl_transformers.common.llm_inlanguage import (
+    LLM_INLANGUAGE_METHOD,
+    parse_llm_inlanguage_codes,
+)
+
 EXTRACTION_METADATA_KEY = "_extraction_metadata"
 
 LLM_PROPERTY_TO_FIELD: Dict[str, str] = {
@@ -15,6 +21,7 @@ LLM_PROPERTY_TO_FIELD: Dict[str, str] = {
     "insilico:dataSplits": "dataSplits",
     "insilico:adaptionTechniques": "adaptionTechniques",
     "fair4ml:mlTask": "mlTask",
+    "schema:inLanguage": "inLanguage",
 }
 
 
@@ -52,6 +59,7 @@ def map_llm_schema_properties(
     - ``modelCategory``: LLM architecture string appended uniquely to list
     - ``domain``, ``dataSplits``, ``adaptionTechniques``: LLM value wins when present
     - ``mlTask``: keep existing HF pipeline_tag tasks; use LLM only when empty
+    - ``inLanguage``: documentation-language ISO codes mapped to Language IRIs
 
     Args:
         llm_record: One model entry from ``llm_extraction_results.json``.
@@ -116,6 +124,20 @@ def map_llm_schema_properties(
             extraction_metadata["mlTask"] = _as_metadata_entry(
                 llm_meta_by_property["fair4ml:mlTask"]
             )
+
+    inlanguage_codes = parse_llm_inlanguage_codes(llm_record.get("schema:inLanguage"))
+    if inlanguage_codes:
+        result["inLanguage"] = [
+            HFHelper.generate_mlentory_entity_hash_id("Language", code)
+            for code in inlanguage_codes
+        ]
+        inlanguage_meta = llm_meta_by_property.get("schema:inLanguage") or {
+            "extraction_method": LLM_INLANGUAGE_METHOD,
+            "confidence": 0.85,
+            "source_field": "card",
+            "notes": "Documentation language (schema:inLanguage)",
+        }
+        extraction_metadata["inLanguage"] = _as_metadata_entry(inlanguage_meta)
 
     if extraction_metadata:
         result["extraction_metadata"] = extraction_metadata

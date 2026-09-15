@@ -31,6 +31,7 @@ from etl_transformers.kaggle.transform_mlmodel import map_kaggle_basic_propertie
 from etl_transformers.common.entity_link_metadata import (
     apply_entity_link_extraction_metadata,
 )
+from etl_transformers.common.llm_inlanguage import LLM_INLANGUAGE_METHOD
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import DefinedTerm, Language
 
@@ -1216,7 +1217,7 @@ def kaggle_languages_normalized(
                 alternateName=alternate_names,
                 description=description,
                 extraction_metadata={
-                    "extraction_method": "lingua-language-detector+pycountry",
+                    "extraction_method": LLM_INLANGUAGE_METHOD,
                     "confidence": per_code_confidence.get(code, 0.0),
                     "source_field": "intendedUse",
                 },
