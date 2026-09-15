@@ -652,6 +652,45 @@ class KaggleCrawler:
             return []
         return json.loads(self.output_file.read_text(encoding="utf-8"))
 
+    def load_meta_creation_dates(self) -> Dict[str, str]:
+        """Map ``owner/slug`` to Meta Kaggle ``CreationDate``."""
+        models_csv = self.meta_dir / "Models.csv"
+        if not models_csv.exists():
+            logger.warning("Meta Kaggle Models.csv missing at %s", models_csv)
+            return {}
+        dates: Dict[str, str] = {}
+        for ref, row in self._join_model_rows():
+            created = (row.get("CreationDate") or "").strip()
+            if created:
+                dates[ref] = created
+        return dates
+
+    def attach_meta_dates(
+        self,
+        records: List[Dict[str, Any]],
+        dates_by_ref: Optional[Dict[str, str]] = None,
+    ) -> int:
+        """
+        Copy Meta Kaggle CreationDate onto API records that have no timestamp.
+
+        ``models/get`` does not return publishTime for most cards. Models.csv
+        does, so variations can inherit a real ``dateCreated``.
+        """
+        dates = dates_by_ref if dates_by_ref is not None else self.load_meta_creation_dates()
+        attached = 0
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("publishTime") or rec.get("CreationDate") or rec.get("creationDate"):
+                continue
+            ref = rec.get("ref")
+            created = dates.get(ref) if isinstance(ref, str) else None
+            if not created:
+                continue
+            rec["CreationDate"] = created
+            attached += 1
+        return attached
+
     @staticmethod
     def _save_json(path, data) -> None:
         tmp = str(path) + ".tmp"

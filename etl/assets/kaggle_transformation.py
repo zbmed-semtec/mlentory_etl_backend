@@ -4,14 +4,13 @@ Dagster assets for Kaggle -> FAIR4ML transformation.
 Pipeline:
 1) Read raw Kaggle models from extraction (models.json)
 2) Create separate assets for each property group:
-    - mlmodels.json       (FAIR4ML MLModel: parent models and their instances)
-    - entity_linking.json (linkage of model -> keywords/licenses/frameworks)
+    - mlmodels.json       (FAIR4ML MLModel records: Kaggle variations only)
+    - entity_linking.json (linkage of parent catalog row -> keywords/licenses)
 
-A Kaggle model is a container; its instances are the downloadable artifacts
-(one per framework and variation). Both are ``fair4ml:MLModel`` records in
-the same ``mlmodels.json`` and are indexed together. They are distinguishable
-by ``baseModel`` (empty on the parent; on an instance it points at the parent
-and at any real lineage) and by ``adaptionTechniques``.
+A Kaggle "model" on the website is a container. The downloadable artifacts
+are variations (framework + slug). Only variations are stored as
+``fair4ml:MLModel``. Parent rows still supply tags, dates, inLanguage, and
+the shared card text.
 """
 from __future__ import annotations
 
@@ -27,6 +26,7 @@ from pydantic import BaseModel, ValidationError
 from dagster import asset, AssetIn
 
 from etl_extractors.kaggle.kaggle_helper import KaggleHelper
+from etl_extractors.kaggle.model_readme import compose_model_documentation
 from etl_transformers.kaggle.transform_mlmodel import map_kaggle_basic_properties
 from etl_transformers.common.entity_link_metadata import (
     apply_entity_link_extraction_metadata,
@@ -107,21 +107,21 @@ def _adaption_technique(record: Dict[str, Any]) -> Optional[str]:
 
 def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Map one Kaggle model instance onto the MLModel field set.
+    Map one Kaggle variation onto the FAIR4ML MLModel field set.
 
-    An instance is a downloadable artifact of a model - one per framework and
-    variation - and is emitted as an MLModel in its own right, alongside the
-    models themselves. Only the fields it genuinely owns are mapped: its own
-    name, overview, usage snippet, license, size and URL.
+    A Kaggle variation (framework + slug) is the catalog MLModel. The parent
+    Kaggle model is only a container.
 
-    ``baseModel`` carries two kinds of link, real lineage first: the model an
-    instance was derived from (from ``baseModelInstanceInformation``), then
-    the parent model it belongs to. Both become ``fair4ml:baseModel`` edges,
-    which gives the graph a parent node with its variations as children.
+    Documentation prefers the model README.md (parent card plus extras in
+    one file). When that file is absent, parent card + overview + usage are
+    joined instead.
+
+    ``baseModel`` is real lineage only (another variation this one was derived
+    from, or an external URL). The Kaggle parent container is not an MLModel,
+    so it is not stored as ``baseModel``.
     """
     instance_id = str(rec.get("instanceId", "")).strip()
     mlentory_id = str(rec.get("mlentory_id", "")).strip()
-    parent_id = str(rec.get("parent_mlentory_id", "")).strip()
     url = str(rec.get("url", "")).strip()
 
     identifiers = [x for x in (mlentory_id,) if x]
@@ -164,23 +164,34 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
     if external_base and external_base not in base_models:
         base_models.append(external_base)
 
-    # The parent model this instance belongs to. Added last so real lineage
-    # stays at index 0 for anything that needs to tell the two apart.
-    if parent_id and parent_id not in base_models:
-        base_models.append(parent_id)
-
-    # The instance's own documentation. `overview` is the short summary Kaggle
-    # shows on the variation page; `usage` is the long form and is often
-    # richer than the parent model card. abstract holds both, matching what it
-    # means at model level: the complete original text for this record.
     overview = str(rec.get("description", "")).strip()
     usage = str(rec.get("usage", "")).strip()
-    full_card = "\n\n".join(part for part in (overview, usage) if part)
+    readme_markdown = str(rec.get("readme_markdown") or "").strip()
+    full_docs = compose_model_documentation(
+        parent_card=str(rec.get("parent_description") or "").strip(),
+        overview=overview,
+        usage=usage,
+        readme_markdown=readme_markdown,
+    )
+    if readme_markdown:
+        docs_source = "model README.md"
+        docs_notes = "Uploaded README.md from the Kaggle model file list"
+    else:
+        docs_source = "parent description, overview, usage"
+        docs_notes = (
+            "No variation README.md; joined parent model card with "
+            "variation overview and usage"
+        )
 
     meta = {
         "extraction_method": "Parsed_from_Kaggle_instances_json",
         "confidence": 1.0,
     }
+    source_iri = KaggleHelper.catalog_website_iri()
+    date_created = KaggleHelper.parse_kaggle_datetime(rec.get("dateCreated"))
+    date_modified = (
+        KaggleHelper.parse_kaggle_datetime(rec.get("dateModified")) or date_created
+    )
 
     return {
         "identifier": identifiers,
@@ -188,8 +199,12 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
         "url": list(dict.fromkeys(urls)),
         "author": str(rec.get("sharedBy", "")).strip() or None,
         "sharedBy": str(rec.get("sharedBy", "")).strip() or None,
-        "description": overview or None,
-        "abstract": full_card or None,
+        "source": source_iri or None,
+        "dateCreated": date_created,
+        "dateModified": date_modified,
+        "datePublished": date_created,
+        "description": full_docs or None,
+        "abstract": full_docs or None,
         "license": str(rec.get("license", "")).strip() or None,
         "modelCategory": [
             x for x in (str(rec.get("frameworkName", "")).strip(),) if x
@@ -202,17 +217,55 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
         "readme": url or None,
         "extraction_metadata": {
             "identifier": {**meta, "source_field": "mlentory_id"},
-            "name": {**meta, "source_field": "slug"},
+            "name": {
+                **meta,
+                "source_field": "title, framework, slug",
+                "notes": (
+                    "Parent title plus framework; variation slug omitted "
+                    "when it is generic (default or 1)"
+                ),
+            },
             "sharedBy": {
                 **meta,
                 "source_field": "sharedBy",
                 "notes": "Owner carried down from the parent model",
             },
-            "description": {**meta, "source_field": "overview"},
+            "source": {
+                "extraction_method": "Kaggle_catalog_website",
+                "confidence": 1.0,
+                "source_field": "sources",
+                "notes": "Kaggle catalog WebSite IRI",
+            },
+            "dateCreated": {
+                **meta,
+                "source_field": "CreationDate, publishTime",
+                "notes": (
+                    "Parent CreationDate from Meta Kaggle Models.csv; "
+                    "models/get has no timestamps"
+                ),
+            },
+            "datePublished": {
+                **meta,
+                "source_field": "CreationDate, publishTime",
+                "notes": "Same as dateCreated",
+            },
+            "dateModified": {
+                **meta,
+                "source_field": "updateTime, CreationDate",
+                "notes": (
+                    "Parent updateTime when present; otherwise the same "
+                    "CreationDate as dateCreated"
+                ),
+            },
+            "description": {
+                **meta,
+                "source_field": docs_source,
+                "notes": docs_notes,
+            },
             "abstract": {
                 **meta,
-                "source_field": "overview, usage",
-                "notes": "Full instance documentation before summarization",
+                "source_field": docs_source,
+                "notes": docs_notes,
             },
             "license": {**meta, "source_field": "licenseName"},
             "modelCategory": {
@@ -223,10 +276,9 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
             "baseModel": {
                 **meta,
                 "source_field": (
-                    "baseModelInstanceInformation, externalBaseModelUrl, "
-                    "parent_mlentory_id"
+                    "baseModelInstanceInformation, externalBaseModelUrl"
                 ),
-                "notes": "Real lineage first, then the parent model",
+                "notes": "Real lineage to another variation or an external URL",
             },
             "adaptionTechniques": {
                 **meta,
@@ -237,7 +289,10 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
             "readme": {
                 **meta,
                 "source_field": "url",
-                "notes": "Public instance page; Kaggle has no separate README file",
+                "notes": (
+                    "Public instance page URL; markdown body is on "
+                    "description/abstract"
+                ),
             },
         },
         "_model_id": instance_id,
@@ -397,17 +452,23 @@ def kaggle_extract_basic_properties(models_data: Tuple[str, str]) -> str:
 
 @asset(
     group_name="kaggle_transformation",
-    ins={"run_folder_data": AssetIn("kaggle_normalized_model_folder")},
+    ins={
+        "run_folder_data": AssetIn("kaggle_normalized_model_folder"),
+        "raw_sources_path": AssetIn("kaggle_raw_catalog_sources"),
+    },
     tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
-def kaggle_sources_normalized(run_folder_data: Tuple[str, str]) -> str:
+def kaggle_sources_normalized(
+    run_folder_data: Tuple[str, str],
+    raw_sources_path: str,
+) -> str:
     """
     Bring the Kaggle catalog ``WebSite`` from raw extract into this run's
     normalized folder as ``sources.json``.
     """
     raw_models_path, normalized_folder = run_folder_data
     raw_run = Path(raw_models_path).parent
-    raw_sources = raw_run / "sources.json"
+    raw_sources = Path(raw_sources_path) if raw_sources_path else raw_run / "sources.json"
     out_path = Path(normalized_folder) / "sources.json"
 
     if raw_sources.exists():
@@ -465,19 +526,8 @@ def kaggle_entity_linking(
     """
     _, normalized_folder = run_folder_data
 
-    kaggle_catalog_source_iris: List[str] = []
-    for row in KaggleHelper.raw_kaggle_catalog_website_records():
-        ids = row.get("https://schema.org/identifier") or []
-        if not isinstance(ids, list):
-            continue
-        kaggle_catalog_source_iris = [
-            u
-            for u in ids
-            if isinstance(u, str)
-            and u.startswith("https://w3id.org/mlentory/mlentory_graph/")
-        ]
-        if kaggle_catalog_source_iris:
-            break
+    catalog_iri = KaggleHelper.catalog_website_iri()
+    kaggle_catalog_source_iris: List[str] = [catalog_iri] if catalog_iri else []
 
     # union of ids so you don't KeyError if a model appears in only one mapping
     all_model_ids = (
@@ -590,8 +640,11 @@ def merge_kaggle_partial_schemas(
             merged_data["inLanguage"] = list(inlanguage)
             linked_fields.append("inLanguage")
 
-        if sources:
-            merged_data["source"] = str(sources[0])  # MLModel.source is a single string
+        source_iri = (
+            str(sources[0]).strip() if sources else ""
+        ) or KaggleHelper.catalog_website_iri()
+        if source_iri:
+            merged_data["source"] = source_iri
             linked_fields.append("source")
 
         apply_entity_link_extraction_metadata(merged_data, "kaggle", linked_fields)
@@ -627,6 +680,53 @@ def merge_kaggle_partial_schemas(
         merged_items.append((model_id, merged_data))
 
     return merged_items
+
+
+_PARENT_LINK_FIELDS = ("keywords", "source", "inLanguage")
+_PARENT_FALLBACK_FIELDS = (
+    "dateCreated",
+    "dateModified",
+    "datePublished",
+    "citation",
+    "referencePublication",
+)
+
+
+def inherit_parent_catalog_fields(
+    mapped: Dict[str, Any],
+    parent_data: Optional[Dict[str, Any]],
+) -> None:
+    """
+    Copy catalog fields from the Kaggle parent container onto a variation.
+
+    Keywords, source, and inLanguage are declared on the parent page. Dates and
+    citations are inherited when the variation has none of its own.
+    """
+    if not parent_data:
+        return
+
+    parent_meta = parent_data.get("extraction_metadata") or {}
+    mapped_meta = mapped.setdefault("extraction_metadata", {})
+
+    for field in _PARENT_LINK_FIELDS:
+        value = parent_data.get(field)
+        if value in (None, "", []):
+            continue
+        mapped[field] = list(value) if isinstance(value, list) else value
+        if field in parent_meta:
+            mapped_meta[field] = dict(parent_meta[field])
+
+    for field in _PARENT_FALLBACK_FIELDS:
+        current = mapped.get(field)
+        empty = current in (None, "", [])
+        if not empty:
+            continue
+        value = parent_data.get(field)
+        if value in (None, "", []):
+            continue
+        mapped[field] = list(value) if isinstance(value, list) else value
+        if field in parent_meta:
+            mapped_meta[field] = dict(parent_meta[field])
 
 
 def validate_kaggle_mlmodels(
@@ -686,13 +786,11 @@ def kaggle_model_normalized(
     instances_data: Tuple[str, str],
 ) -> str:
     """
-    Builds FAIR4ML-validated MLModel objects for Kaggle.
+    Builds FAIR4ML-validated MLModel objects for Kaggle variations.
 
-    Both models and their instances land in ``mlmodels.json``. A Kaggle model
-    is a container and its instances are the downloadable artifacts - one per
-    framework and variation - and each is an MLModel in its own right. They
-    are distinguishable by ``baseModel``, which on an instance points at the
-    model it belongs to, and by ``adaptionTechniques``.
+    Parent Kaggle models are containers only. Each variation (framework + slug)
+    is stored as an ``MLModel``. Parent rows still feed keywords, source,
+    inLanguage, dates, and the shared card text onto those variations.
 
     Inputs:
       - run_folder_data: (raw_models_json_path, normalized_run_folder)
@@ -763,35 +861,29 @@ def kaggle_model_normalized(
         dict.fromkeys(raw_ids + list(basic_by_id.keys()) + list(entity_linking.keys()))
     )
 
-    merged_items = merge_kaggle_partial_schemas(
+    merged_parents = merge_kaggle_partial_schemas(
         basic_by_id=basic_by_id,
         entity_linking_data=entity_linking,
         all_model_ids=all_ids,
     )
-
-    parent_inlanguage_by_iri: Dict[str, List[str]] = {}
-    for _model_id, parent_data in merged_items:
-        langs = parent_data.get("inLanguage") or []
-        if not langs:
-            continue
+    parent_by_model_id: Dict[str, Dict[str, Any]] = {
+        model_id: data for model_id, data in merged_parents
+    }
+    parent_by_iri: Dict[str, Dict[str, Any]] = {}
+    for _model_id, parent_data in merged_parents:
         for ident in parent_data.get("identifier") or []:
             if isinstance(ident, str) and ident.strip():
-                parent_inlanguage_by_iri[ident.strip()] = list(langs)
+                parent_by_iri[ident.strip()] = parent_data
 
-    # Instances are MLModels too, so they are validated and written into the
-    # same file rather than a separate one.
     instances_json_path, _raw_run_folder = instances_data
     raw_instances = _load_json_records(instances_json_path) if instances_json_path else []
-    logger.info("Loading %d Kaggle instances from %s", len(raw_instances), instances_json_path)
+    logger.info("Loading %d Kaggle variations from %s", len(raw_instances), instances_json_path)
 
     instance_items: List[Tuple[str, Dict[str, Any]]] = []
     for rec in raw_instances:
         mapped = normalize_kaggle_instance(rec)
         instance_id = mapped.pop("_model_id", "") or f"instance_{len(instance_items)}"
 
-        # Entity linking only covers models.json, so an instance's sharedBy is
-        # still a plain name here. Mint the same IRI the models get, so both
-        # point at one shared node rather than a name and an IRI.
         shared_by_name = str(mapped.get("sharedBy", "") or "").strip()
         if shared_by_name:
             mapped["sharedBy"] = KaggleHelper.generate_mlentory_entity_hash_id(
@@ -804,22 +896,22 @@ def kaggle_model_normalized(
                 "License", license_name, platform="Kaggle"
             )
 
-        parent_id = str(rec.get("parent_mlentory_id", "") or "").strip()
-        if parent_id and parent_inlanguage_by_iri.get(parent_id):
-            mapped["inLanguage"] = list(parent_inlanguage_by_iri[parent_id])
+        parent_iri = str(rec.get("parent_mlentory_id", "") or "").strip()
+        parent_model_id = str(rec.get("modelId", "") or "").strip()
+        parent_data = parent_by_iri.get(parent_iri) or parent_by_model_id.get(parent_model_id)
+        inherit_parent_catalog_fields(mapped, parent_data)
 
         instance_items.append((instance_id, mapped))
 
-    merged_items.extend(instance_items)
-
-    normalized_models, validation_errors = validate_kaggle_mlmodels(merged_items)
+    normalized_models, validation_errors = validate_kaggle_mlmodels(instance_items)
 
     if not normalized_models:
         raise RuntimeError("kaggle_model_normalized produced zero valid MLModels. Aborting run.")
 
     logger.info(
-        "Normalized %d records (%d models + %d instances)",
-        len(normalized_models), len(all_ids), len(instance_items),
+        "Normalized %d Kaggle variations (from %d parent containers)",
+        len(normalized_models),
+        len(merged_parents),
     )
 
     output_path = normalized_folder_path / "mlmodels.json"

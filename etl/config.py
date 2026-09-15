@@ -106,6 +106,14 @@ class KaggleConfig(BaseModel):
         default=200, ge=1,
         description="Force records to disk every N records; bounds loss on crash.",
     )
+    fetch_instance_readmes: bool = Field(
+        default=True,
+        description=(
+            "List each Kaggle model's (variation) files and download README.md "
+            "only, not weights. Falls back to parent card + overview + usage "
+            "when no README exists."
+        ),
+    )
 
 
 class PlatformsConfig(BaseModel):
