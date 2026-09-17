@@ -37,37 +37,38 @@ services:
       retries: 3
       start_period: 40s
 
-  # Add vLLM service for high-performance LLM inference
   vllm:
-    container_name: vllm
-    hostname: vllm
-    image: vllm/vllm-openai:latest
-    ports:
-      - "8003:8000"  # Map container port 8000 to host port 8003
-    volumes:
-      - ../deploy/vllm_models:/root/.cache/huggingface  # Cache for model storage
-    networks:
-      - mlentory-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              capabilities: [gpu]
-              count: all
-    environment:
-      - VLLM_MODEL=${VLLM_MODEL:-google/gemma-3-4b-it}  # Default model
-      - VLLM_HOST=0.0.0.0
-      - VLLM_PORT=8000
-      - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
-    command: ["--model", "${VLLM_MODEL:-google/gemma-3-4b-it}", "--host", "0.0.0.0", "--port", "8000"]
-    # healthcheck:
-    #   test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 20
-    #   start_period: 600s
-    restart: unless-stopped
+      container_name: vllm
+      hostname: vllm
+      image: "${IMAGE}"
+      ports:
+        - "8003:8000"
+      volumes:
+        - ../deploy/vllm_models:/root/.cache/huggingface
+        - ./etl_extractors/hf/hf_llm_extractor_resources:/app/metadata:ro
+      networks:
+        - mlentory-network
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                capabilities: [gpu]
+                count: all
+      environment:
+        - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
+        - VLLM_USE_V2_MODEL_RUNNER=0
+      command: >
+        --model "${MODEL_NAME}"
+        --host 0.0.0.0
+        --port 8000
+        --max-num-seqs "${MAX_NUM_SEQS}"
+        --gpu-memory-utilization 0.92
+        --max-model-len "${MAX_MODEL_LEN}"
+        --trust-remote-code
+        --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}"
+        ${EXTRA_VLLM_ARGS}
+      restart: unless-stopped
 
   elasticsearch:
     profiles: ["etl", "api", "complete", "mcp"]
@@ -86,7 +87,8 @@ services:
       # - cluster.initial_master_nodes=elastic   # Use this for production
       - cluster.name=es-docker-cluster
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+      # Compose overrides .env; 256m was too small for concurrent faceted search.
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
       # - "bootstrap.system_call_filter=false"   # Is not required for version 8.0 and above
       # - node.max_local_storage_nodes=2
       # Disk watermark settings to prevent allocation issues when disk is nearly full
@@ -94,6 +96,10 @@ services:
       - "cluster.routing.allocation.disk.watermark.high=97%" # High watermark at 97% as requested
       - "cluster.routing.allocation.disk.watermark.flood_stage=98%" # Flood stage at 98%
       - "cluster.info.update.interval=1m" # Update cluster info every minute
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     volumes:
       - ./config/elasticsearch/data:/usr/share/elasticsearch/data
     networks:
@@ -173,23 +179,47 @@ services:
       - "8008:8000"
     env_file:
       - .env
+    environment:
+      # Chat generation runs in vLLM. Hide the GPU even if the NVIDIA runtime is default.
+      - REQUIRE_CUDA_HEALTH=${REQUIRE_CUDA_HEALTH:-false}
+      - NVIDIA_VISIBLE_DEVICES=void
+      - API_WORKERS=${API_WORKERS:-4}
     volumes:
       - ./api:/app/api
       - ./etl_loaders:/app/etl_loaders
       - ./schemas:/app/schemas
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              capabilities: [gpu]
-              count: all
     networks:
       - mlentory-network
     depends_on:
       - neo4j
       - elasticsearch
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    labels:
+      - autoheal=true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    # --reload is a single-process file watcher; it cannot handle concurrent users.
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-4}
+
+  # Restarts containers labeled autoheal=true when their Docker healthcheck fails.
+  # Needed because Docker does not restart on "unhealthy" by itself.
+  autoheal:
+    profiles: ["api", "complete"]
+    image: willfarrell/autoheal:latest
+    container_name: mlentory-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=120
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - mlentory-network
 
   # =============================================================================
   # MLentory MCP API
@@ -280,7 +310,7 @@ services:
       POSTGRES_DB: ${STELLA_POSTGRES_DB:-postgres}
       POSTGRES_URL: stella-app-db:5430
 
-    command: gunicorn -w 2 --timeout 60 -b :8005 'app.app:create_app()'
+    command: gunicorn -w 4 --timeout 60 -b :8005 'app.app:create_app()'
     depends_on:
       stella-app-db:
         condition: service_healthy
@@ -328,7 +358,7 @@ services:
       - mlentory-network
     ports:
       - "${STELLA_EXPERIMENT_PORT:-5000}:5000"
-    command: ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "app:app"]
+    command: ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
     restart: unless-stopped
 
   stella-mlentory-experiment:
@@ -339,7 +369,7 @@ services:
       - mlentory-network
     ports:
       - "${STELLA_EXPERIMENT_PORT:-5001}:5000"
-    command: ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "app:app"]
+    command: ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
     restart: unless-stopped
 
   stella-server:
@@ -375,7 +405,7 @@ services:
         [
           "http://stella-app:8005"
         ]
-    command: gunicorn -w 2 --timeout 60 -b :8000 'app.app:create_app()'
+    command: gunicorn -w 4 --timeout 60 -b :8000 'app.app:create_app()'
     depends_on:
       stella-server-db:
         condition: service_healthy

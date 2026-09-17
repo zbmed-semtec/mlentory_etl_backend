@@ -100,7 +100,7 @@ async def get_related_entities(
 
 @router.get("/graph/grouped_facet_values", response_model=GroupedFacetValuesResponse)
 async def grouped_facet_values(entity_type: List = Query(
-    ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy", "fair4ml__trainedOn", "fair4ml__testedOn", "fair4ml__validatedOn", "fair4ml__evaluatedOn"], 
+    ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy", "fair4ml__evaluatedOn"], 
     description="Entity type to list"
 )) -> GroupedFacetValuesResponse:
     """
@@ -112,9 +112,8 @@ async def grouped_facet_values(entity_type: List = Query(
 
     Args:
         entity_type: A list of relationship types to include. Defaults to
-            ["fair4ml__mlTask", "schema__keywords", "schema__license", "fair4ml__sharedBy",
-            "fair4ml__trainedOn", "fair4ml__testedOn",
-            "fair4ml__validatedOn", "fair4ml__evaluatedOn"].
+            ["fair4ml__mlTask", "schema__keywords", "schema__license", "schema__sharedBy",
+            "fair4ml__evaluatedOn"].
 
     Returns:
         GroupedFacetValuesResponse: Contains facets (grouped entities by relationship type)
@@ -257,35 +256,53 @@ async def get_models_by_entity_uri(
         ...,
         description="The full entity URI to find related models for "
         "(e.g. 'https://w3id.org/mlentory/mlentory_graph/<entity-id>')",
-    )
+    ),
+    limit: int = Query(
+        50,
+        ge=1,
+        le=500,
+        description="Max number of models to return (default 50; never unbounded)",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Number of models to skip for pagination",
+    ),
 ) -> RelatedModelsResponse:
     """
-    📋 Get all models related to an entity.
-    
-    Retrieves all ML models that are connected to the given entity URI via any relationship.
-    
+    Get models related to an entity (optionally paginated).
+
+    Retrieves ML models connected to the given entity URI. Only one page is
+    returned; ``count`` is always the total match count.
+
     **Parameters:**
     - `entity_uri`: The entity URI to find related models for
-    
+    - `limit`: Page size (default 50, max 500)
+    - `offset`: Optional page offset
+
     **Response:**
     - `entity_uri`: The queried entity URI
     - `models`: List of related models with properties and relationship types
-    - `count`: Total number of related models
+    - `count`: Total number of related models (not just this page)
 
     **Example:**
     ```
-    GET /api/v1/entities/related_models?entity_uri=https://w3id.org/mlentory/mlentory_graph/fd5b71...
+    GET /api/v1/graph/entities/related_models?entity_uri=https://w3id.org/mlentory/mlentory_graph/fd5b71...&limit=10&offset=0
     ```
     """
     try:
-        models = graph_service.get_models_by_entity_uri(entity_uri=entity_uri)
-        
+        models, total_count = graph_service.get_models_by_entity_uri(
+            entity_uri=entity_uri,
+            limit=limit,
+            offset=offset,
+        )
+
         return RelatedModelsResponse(
             entity_uri=entity_uri,
             models=models,
-            count=len(models)
+            count=total_count,
         )
-    
+
     except Exception as e:
         logger.error(f"Error getting models for entity URI: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

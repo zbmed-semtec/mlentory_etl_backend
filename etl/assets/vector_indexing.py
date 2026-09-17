@@ -142,3 +142,53 @@ def ai4life_vector_backfill(
     }
     return _write_report(report_path, payload)
 
+
+@asset(
+    group_name="vector_indexing",
+    ins={
+        "es_ready": AssetIn("kaggle_elasticsearch_ready"),
+        "indexed_report": AssetIn("kaggle_index_models_elasticsearch"),
+    },
+    tags={"pipeline": "kaggle_etl", "stage": "vector_index"},
+)
+def kaggle_vector_backfill(
+    es_ready: Dict[str, Any],
+    indexed_report: str,
+) -> str:
+    """Backfill vector fields into the Kaggle Elasticsearch models index."""
+    index_name = es_ready.get("kaggle_models_index") or os.getenv(
+        "ELASTIC_KAGGLE_MODELS_INDEX", "kaggle_models"
+    )
+    batch_size = _env_int("VECTOR_INDEX_BATCH_SIZE", 50)
+    skip_existing = _env_bool("VECTOR_INDEX_SKIP_EXISTING", True)
+
+    logger.info(
+        "Running Kaggle vector backfill: index=%s batch_size=%s skip_existing=%s",
+        index_name,
+        batch_size,
+        skip_existing,
+    )
+
+    stats = run_vector_index_update(
+        index_name=index_name,
+        es_ready=es_ready,
+        batch_size=batch_size,
+        skip_existing=skip_existing,
+        logger_instance=logger,
+    )
+
+    report_path: Optional[Path] = None
+    try:
+        report_path = Path(indexed_report).with_name("vector_index_report.json")
+    except Exception:
+        report_path = None
+
+    if not report_path:
+        report_path = Path("data") / "reports" / "kaggle" / "vector_index_report.json"
+
+    payload = {
+        "source_index_report": indexed_report,
+        **stats,
+    }
+    return _write_report(report_path, payload)
+

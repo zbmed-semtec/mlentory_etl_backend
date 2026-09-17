@@ -5,7 +5,8 @@ WORKDIR /app
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu124
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -17,22 +18,27 @@ RUN apt-get update && apt-get install -y \
 
 # Copy pyproject.toml and install dependencies
 COPY ./pyproject.toml ./
-RUN pip install --no-cache-dir --upgrade pip && \
+# Conda base images ship an old attrs; upgrading pip alone breaks poetry/cffi installs.
+RUN pip install --no-cache-dir --upgrade "attrs>=23.2.0" "cffi>=1.15" && \
+    pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir poetry && \
     poetry config virtualenvs.create false && \
     poetry install --no-interaction --no-ansi --no-root --only main && \
+    pip install --no-cache-dir --force-reinstall \
+        torch==2.6.0 torchvision==0.21.0 \
+        --index-url https://download.pytorch.org/whl/cu124 && \
     pip install --no-cache-dir faiss-gpu==1.7.2
 # Copy application code
 COPY . ./api/
-COPY ../etl_loaders/ ./etl_loaders/
-COPY ../schemas/ ./schemas/
+COPY etl_loaders/ ./etl_loaders/
+COPY schemas/ ./schemas/
 
 # Expose API port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Health check (fails when /health returns non-2xx, including CUDA 503)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -fsS http://localhost:8000/health || exit 1
 
 # Default command
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

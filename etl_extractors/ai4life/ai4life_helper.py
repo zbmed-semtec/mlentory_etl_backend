@@ -7,13 +7,20 @@ Contains commonly used functions shared across AI4Life extractors, enrichment, a
 from __future__ import annotations
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import logging
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import requests
+
+from etl_transformers.common.utils import validate_optional_url
 
 
 logger = logging.getLogger(__name__)
+
+DOCUMENTATION_FETCH_TIMEOUT = 15
 
 
 class AI4LifeHelper:
@@ -180,3 +187,74 @@ class AI4LifeHelper:
                 "https://schema.org/url": url,
             }
         ]
+
+    @staticmethod
+    def fetch_documentation_text(url: str, timeout: int = DOCUMENTATION_FETCH_TIMEOUT) -> Optional[str]:
+        """Fetch markdown/text documentation from a readme URL."""
+        if not url or not isinstance(url, str):
+            return None
+
+        cleaned_url = url.strip()
+        if not cleaned_url:
+            return None
+
+        try:
+            response = requests.get(cleaned_url, timeout=timeout)
+            response.raise_for_status()
+            response.encoding = response.encoding or "utf-8"
+            text = response.text
+            return text.strip() if text and text.strip() else None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to fetch documentation from %s: %s", cleaned_url, exc)
+            return None
+
+    @staticmethod
+    def resolve_abstract_content(
+        raw_model: Dict[str, Any],
+        timeout: int = DOCUMENTATION_FETCH_TIMEOUT,
+    ) -> Optional[str]:
+        """
+        Resolve schema:abstract content for an AI4Life model.
+
+        Prefers persisted ``documentation_content`` from extraction; falls back to
+        fetching the readme URL when missing (e.g. older raw runs).
+        """
+        stored = str(raw_model.get("documentation_content", "")).strip()
+        if stored:
+            return stored
+
+        readme_url = validate_optional_url(raw_model.get("readme_file"))
+        if not readme_url:
+            return None
+
+        return AI4LifeHelper.fetch_documentation_text(readme_url, timeout=timeout)
+
+    @staticmethod
+    def enrich_models_with_documentation(
+        models: List[Dict[str, Any]],
+        max_workers: int = 4,
+        timeout: int = DOCUMENTATION_FETCH_TIMEOUT,
+    ) -> None:
+        """Fetch readme content and attach it as ``documentation_content`` on each model."""
+        if not models:
+            return
+
+        def _enrich_one(model: Dict[str, Any]) -> None:
+            if not isinstance(model, dict):
+                return
+
+            existing = str(model.get("documentation_content", "")).strip()
+            if existing:
+                return
+
+            readme_url = validate_optional_url(model.get("readme_file"))
+            if not readme_url:
+                model["documentation_content"] = ""
+                return
+
+            content = AI4LifeHelper.fetch_documentation_text(readme_url, timeout=timeout)
+            model["documentation_content"] = content or ""
+
+        workers = max(1, min(max_workers, len(models)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            list(executor.map(_enrich_one, models))

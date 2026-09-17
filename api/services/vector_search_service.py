@@ -105,8 +105,8 @@ class VectorSearchService(FacetedSearchMixin):
         if facets is None:
             facets = ["mlTask", "license", "keywords", "datasets", "platform"]
 
-        # default to the API's HF index unless explicitly overridden
-        indices = indices or [self.config.hf_models_index]
+        # default to HF + AI4Life model indexes unless explicitly overridden
+        indices = indices or self._model_search_indices()
 
         # pagination
         limit = min(max(limit, 1), 1000)
@@ -116,8 +116,11 @@ class VectorSearchService(FacetedSearchMixin):
         # encode query
         query_vector = _get_embedder().encode(query or "")
 
-        # base query: only docs that actually have vectors
-        must_conditions: List[Dict[str, Any]] = [{"exists": {"field": "model_vector"}}]
+        # base query: minimum metadata + only docs that actually have vectors
+        must_conditions: List[Dict[str, Any]] = [
+            self._minimum_metadata_bool_filter(),
+            {"exists": {"field": "model_vector"}},
+        ]
         must_conditions.extend(self._build_filter_conditions(filters))
 
         base_query: Dict[str, Any] = {"bool": {"must": must_conditions}} if must_conditions else {"match_all": {}}
@@ -144,7 +147,7 @@ class VectorSearchService(FacetedSearchMixin):
                 "description",
                 "ml_tasks",
                 "keywords",
-                "platform",
+                "source",
                 "db_identifier",
                 "shared_by",
                 "license",
@@ -197,7 +200,7 @@ class VectorSearchService(FacetedSearchMixin):
                     mlTask=src.get("ml_tasks") or [],
                     keywords=src.get("keywords") or [],
                     datasets=src.get("datasets") or [],
-                    platform=src.get("platform") or "Unknown",
+                    platform=src.get("source") or "Unknown",
                 )
             )
 

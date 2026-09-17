@@ -136,8 +136,9 @@ def _get_recent_updates() -> int:
             },
         }
         response = elasticsearch_service.client.search(
-            index=elasticsearch_service.config.hf_models_index,
+            index=elasticsearch_service._model_search_indices(),
             body=query,
+            params={"ignore_unavailable": "true"},
         )
         total = response.get("hits", {}).get("total", 0)
         if isinstance(total, dict):

@@ -103,9 +103,10 @@ class LLMService:
             ImportError: If required dependencies are missing
         """
         try:
+            # Keep embeddings on CPU so this process does not compete with vLLM for VRAM.
             self.embeddings = HuggingFaceEmbeddings(
                 model_name=self.embedding_model_name,
-                model_kwargs={"device": "cuda"},
+                model_kwargs={"device": "cpu"},
             )
             logger.info(f"Initialized embeddings with model: {self.embedding_model_name}")
         except Exception as e:

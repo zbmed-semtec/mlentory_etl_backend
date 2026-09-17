@@ -55,6 +55,7 @@ class ModelService:
             identifier=es_model.db_identifier,
             name=es_model.name,
             description=es_model.description,
+            abstract=es_model.abstract,
             sharedBy=es_model.sharedBy,
             license=es_model.license,
             mlTask=es_model.mlTask,

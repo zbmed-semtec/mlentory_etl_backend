@@ -66,17 +66,24 @@ class ElasticsearchService(FacetedSearchMixin):
         # Calculate offset
         from_offset = (page - 1) * page_size
 
-        # Create search object using elasticsearch_dsl
-        search = Search(using=self.client, index=self.config.hf_models_index)
-
-        # Add search query if provided
-        if search_query:
-            search = search.query("multi_match", query=search_query, fields=["name", "description", "keywords"])
-        else:
-            search = search.query("match_all")
-
-        # Apply pagination and execute search
-        search = search[from_offset:from_offset + page_size]
+        # Always require the minimum metadata set; combine with optional text query.
+        meta_filter = self._minimum_metadata_bool_filter()["bool"]
+        q_meta = Q(
+            "bool",
+            must=meta_filter["must"],
+            must_not=meta_filter.get("must_not", []),
+        )
+        q_text = (
+            Q("multi_match", query=search_query, fields=["name", "description", "keywords"])
+            if search_query
+            else Q("match_all")
+        )
+        search = (
+            Search(using=self.client, index=self._model_search_indices())
+            .query("bool", must=[q_meta, q_text])
+            .params(ignore_unavailable=True)
+            [from_offset : from_offset + page_size]
+        )
         response = search.execute()
 
         # Convert to ModelListItem objects
@@ -94,13 +101,14 @@ class ElasticsearchService(FacetedSearchMixin):
                 mlentory_id=mlentory_id,
                 name=hit.name or "",
                 description=hit.description,
+                abstract=getattr(hit, "abstract", None) or None,
                 sharedBy=hit.shared_by,  # Note: ES field is snake_case, but schema uses camelCase
                 license=hit.license,
                 mlTask=hit.ml_tasks or [],  # Note: ES field is snake_case, but schema uses camelCase
                 keywords=hit.keywords or [],
                 baseModels=getattr(hit, "baseModels", None) or [],
                 datasets=getattr(hit, "datasets", None) or [],
-                platform=hit.platform or "Unknown",
+                platform=getattr(hit, "source", None) or "Unknown",
             )
             models.append(model)
 
@@ -110,28 +118,42 @@ class ElasticsearchService(FacetedSearchMixin):
 
         return models, total_count
 
+    @staticmethod
+    def _normalize_model_uri(model_id: str) -> str:
+        """Convert a compact model ID to a full MLentory graph URI when needed."""
+        if not model_id:
+            return model_id
+        if model_id.startswith("https://") or model_id.startswith("http://"):
+            return model_id
+        return f"https://w3id.org/mlentory/mlentory_graph/{model_id}"
+
     def get_model_by_id(self, model_id: str) -> Optional[ModelListItem]:
         """
         Get a single model by its identifier.
 
         Args:
-            model_id: The model identifier/URI
+            model_id: The model identifier/URI (full URI or compact hash)
 
         Returns:
             ModelListItem if found, None otherwise
         """
         # Search for model_id as an element of db_identifier (assuming db_identifier is a list in the ES document)
         # search = ModelDocument.search(using=self.client, index=self.config.hf_models_index)
-        
+        model_uri = self._normalize_model_uri(model_id)
+
         search_query = {
                 "size": 1,
                 "query": {
                     "match": {
-                        "db_identifier": model_id
+                        "db_identifier": model_uri
                     }
                 }
             }
-        response = self.client.search(index=self.config.hf_models_index, body=search_query)
+        response = self.client.search(
+            index=self._model_search_indices(),
+            body=search_query,
+            params={"ignore_unavailable": "true"},
+        )
         
 
         if response["hits"]["total"]["value"] == 0:
@@ -149,13 +171,14 @@ class ElasticsearchService(FacetedSearchMixin):
             mlentory_id=mlentory_id,
             name=hit["name"] or "",
             description=hit["description"],
+            abstract=hit.get("abstract") or None,
             sharedBy=hit["shared_by"],  # Note: ES field is snake_case, but schema uses camelCase
             license=hit["license"],
             mlTask=hit["ml_tasks"] or [],  # Note: ES field is snake_case, but schema uses camelCase
             keywords=hit["keywords"] or [],
             baseModels=hit.get("baseModels", []) or [],
             datasets=hit.get("datasets", []) or [],
-            platform=hit.get("platform", "Unknown"),
+            platform=hit.get("source") or "Unknown",
         )
 
 

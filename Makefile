@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run build hf-etl run-by-tag
+.PHONY: help up down restart logs clean test format typecheck extract transform load etl-run etl-check etl-both build hf-etl ai4life-etl kaggle-etl hf-extract hf-transform hf-load hf-index hf-vector ai4life-extract ai4life-transform ai4life-load ai4life-index ai4life-vector kaggle-extract kaggle-transform kaggle-load kaggle-index kaggle-vector run-by-tag init ensure-env prepare-data-dirs ensure-elasticsearch ensure-neo4j wait-elasticsearch wait-neo4j stella-init stella-seed-if-needed stella-warmup stella-latency stella-sync-db-passwords stella-up stella-down wait-stella wait-vllm check-vllm-env detect-profile
 
 # Default target
 .DEFAULT_GOAL := help
@@ -9,6 +9,9 @@ GREEN := \033[0;32m
 YELLOW := \033[0;33m
 NC := \033[0m # No Color
 
+# GPU machine profile config
+LLM_CONFIG := LLM_config_based_on_machine.yaml
+
 ##@ Help
 
 help: ## Display this help message
@@ -18,48 +21,292 @@ help: ## Display this help message
 
 ##@ Docker Operations
 
-up: ## Start all services
+ensure-env: ## Ensure .env exists (copy from .env.example if missing)
+	@if [ ! -f .env ]; then \
+		cp .env.example .env; \
+		echo "$(GREEN).env created from .env.example$(NC)"; \
+	else \
+		echo "$(GREEN).env already exists$(NC)"; \
+	fi
+
+# Create mount dirs before docker compose so Docker does not create them as root.
+# Elasticsearch runs as UID 1000; Neo4j runs as UID 7474 in the official image.
+ELASTICSEARCH_UID := 1000
+ELASTICSEARCH_GID := 1000
+NEO4J_UID := 7474
+NEO4J_GID := 7474
+ELASTICSEARCH_HOST_PORT := 9201
+NEO4J_BROWSER_PORT := 7474
+
+prepare-data-dirs: ## Create Neo4j/Elasticsearch host data dirs with correct ownership
+	@echo "$(BLUE)Preparing data directories...$(NC)"
+	@mkdir -p \
+		./config/elasticsearch/data \
+		./config/neo4j/data \
+		./config/neo4j/logs \
+		./config/neo4j/plugins \
+		./config/neo4j/import \
+		./config/neo4j/conf
+	@sudo chown -R $(ELASTICSEARCH_UID):$(ELASTICSEARCH_GID) ./config/elasticsearch
+	@sudo chmod -R 775 ./config/elasticsearch
+	@sudo chown -R $(NEO4J_UID):$(NEO4J_GID) ./config/neo4j
+	@sudo chmod -R 775 ./config/neo4j
+	@echo "$(GREEN)Data directories ready (Elasticsearch $(ELASTICSEARCH_UID):$(ELASTICSEARCH_GID), Neo4j $(NEO4J_UID):$(NEO4J_GID))$(NC)"
+
+wait-elasticsearch: ## Wait for Elasticsearch cluster health on the host port
+	@echo "$(BLUE)Waiting for Elasticsearch on port $(ELASTICSEARCH_HOST_PORT)...$(NC)"
+	@for i in $$(seq 1 40); do \
+		if curl -sf "http://localhost:$(ELASTICSEARCH_HOST_PORT)/_cluster/health" >/dev/null 2>&1; then \
+			echo "$(GREEN)Elasticsearch is ready$(NC)"; \
+			exit 0; \
+		fi; \
+		if sudo docker inspect -f '{{.State.Status}}' mlentory-elasticsearch 2>/dev/null | grep -q exited; then \
+			echo "$(YELLOW)Elasticsearch container exited — last logs:$(NC)"; \
+			sudo docker logs mlentory-elasticsearch 2>&1 | tail -8; \
+			exit 1; \
+		fi; \
+		echo "  attempt $$i/40 (waiting 3s)..."; \
+		sleep 3; \
+	done; \
+	echo "$(YELLOW)Elasticsearch did not become ready — check: make logs-elasticsearch$(NC)"; \
+	exit 1
+
+ensure-elasticsearch: prepare-data-dirs ## Ensure Elasticsearch is running and healthy (fix perms + retry)
+	@if ! sudo docker inspect -f '{{.State.Running}}' mlentory-elasticsearch 2>/dev/null | grep -q true; then \
+		echo "$(YELLOW)Elasticsearch is not running — starting...$(NC)"; \
+		sudo docker compose --profile=complete up -d elasticsearch; \
+	fi
+	@if ! $(MAKE) wait-elasticsearch; then \
+		echo "$(YELLOW)Elasticsearch unhealthy — fixing data dir permissions and retrying...$(NC)"; \
+		sudo docker compose --profile=complete stop elasticsearch 2>/dev/null || true; \
+		$(MAKE) prepare-data-dirs; \
+		sudo docker compose --profile=complete up -d elasticsearch; \
+		$(MAKE) wait-elasticsearch; \
+	fi
+
+wait-neo4j: ## Wait for Neo4j browser endpoint on the host port
+	@echo "$(BLUE)Waiting for Neo4j on port $(NEO4J_BROWSER_PORT)...$(NC)"
+	@for i in $$(seq 1 40); do \
+		if curl -sf "http://localhost:$(NEO4J_BROWSER_PORT)" >/dev/null 2>&1; then \
+			echo "$(GREEN)Neo4j is ready$(NC)"; \
+			exit 0; \
+		fi; \
+		if sudo docker inspect -f '{{.State.Status}}' mlentory-neo4j 2>/dev/null | grep -q exited; then \
+			echo "$(YELLOW)Neo4j container exited — last logs:$(NC)"; \
+			sudo docker logs mlentory-neo4j 2>&1 | tail -8; \
+			exit 1; \
+		fi; \
+		echo "  attempt $$i/40 (waiting 3s)..."; \
+		sleep 3; \
+	done; \
+	echo "$(YELLOW)Neo4j did not become ready — check: make logs-neo4j$(NC)"; \
+	exit 1
+
+ensure-neo4j: prepare-data-dirs ## Ensure Neo4j is running and healthy (fix perms + retry)
+	@if ! sudo docker inspect -f '{{.State.Running}}' mlentory-neo4j 2>/dev/null | grep -q true; then \
+		echo "$(YELLOW)Neo4j is not running — starting...$(NC)"; \
+		sudo docker compose --profile=complete up -d neo4j; \
+	fi
+	@if ! $(MAKE) wait-neo4j; then \
+		echo "$(YELLOW)Neo4j unhealthy — fixing data dir permissions and retrying...$(NC)"; \
+		sudo docker compose --profile=complete stop neo4j 2>/dev/null || true; \
+		if sudo docker logs mlentory-neo4j 2>&1 | grep -qE 'AccessDenied|Transaction logs are missing'; then \
+			echo "$(YELLOW)Resetting corrupted Neo4j data from failed first start...$(NC)"; \
+			sudo rm -rf ./config/neo4j/data/*; \
+		fi; \
+		$(MAKE) prepare-data-dirs; \
+		sudo docker compose --profile=complete up -d neo4j; \
+		$(MAKE) wait-neo4j; \
+	fi
+
+# check-vllm-env: ## Verify HuggingFace token is set when using gated models
+# 	@VLLM_MODEL=$$(grep -E '^VLLM_MODEL=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' || echo google/gemma-4-E4B-it); \
+# 	HF_TOKEN_LEN=$$(awk -F= '/^HUGGINGFACE_API_TOKEN=/{print length($$2)}' .env 2>/dev/null || echo 0); \
+# 	if [ "$$HF_TOKEN_LEN" -eq 0 ]; then \
+# 		echo "$(YELLOW)WARNING: HUGGINGFACE_API_TOKEN is empty in .env$(NC)"; \
+# 		echo "  The default model ($$VLLM_MODEL) is gated on HuggingFace."; \
+# 		echo "  Set HUGGINGFACE_API_TOKEN in .env (with model access), or set VLLM_MODEL to an open model."; \
+# 		exit 1; \
+# 	fi
+
+# wait-vllm: ## Wait for vLLM to serve /v1/models (model load can take several minutes)
+# 	@echo "$(BLUE)Waiting for vLLM to be ready (google/gemma-4-E4B-it — load may take several minutes)...$(NC)"
+# 	@for i in $$(seq 1 90); do \
+# 		if curl -sf http://localhost:8003/v1/models >/dev/null 2>&1; then \
+# 			echo "$(GREEN)vLLM is ready$(NC)"; \
+# 			exit 0; \
+# 		fi; \
+# 		LOGS=$$(sudo docker logs vllm 2>&1 | tail -30); \
+# 		echo "$$LOGS" | grep -q "gated repo" && { \
+# 			echo "$(YELLOW)vLLM failed: gated HuggingFace model — set HUGGINGFACE_API_TOKEN in .env$(NC)"; exit 1; }; \
+# 		echo "$$LOGS" | grep -q "no kernel image is available" && { \
+# 			echo "$(YELLOW)vLLM failed: GPU/kernel incompatible — use pinned vllm v0.8.5 image (see docker-compose.yml)$(NC)"; \
+# 			echo "$$LOGS" | tail -5; exit 1; }; \
+# 		echo "$$LOGS" | grep -q "Engine core initialization failed" && [ $$i -gt 15 ] && { \
+# 			echo "$(YELLOW)vLLM engine failed to start — last logs:$(NC)"; \
+# 			echo "$$LOGS" | tail -8; exit 1; }; \
+# 		echo "  attempt $$i/90 (waiting 20s)..."; \
+# 		sleep 20; \
+# 	done; \
+# 	echo "$(YELLOW)vLLM did not become ready in time — check: docker logs vllm$(NC)"; \
+# 	sudo docker logs vllm 2>&1 | tail -15; \
+# 	exit 1
+
+wait-stella: ## Wait for STELLA containers to be running
+	@echo "$(BLUE)Waiting for STELLA containers to be ready...$(NC)"
+	@for i in $$(seq 1 60); do \
+		if sudo docker inspect -f '{{.State.Running}}' stella-app 2>/dev/null | grep -q true && \
+		   sudo docker inspect -f '{{.State.Running}}' stella-server 2>/dev/null | grep -q true; then \
+			echo "$(GREEN)STELLA containers are running$(NC)"; \
+			exit 0; \
+		fi; \
+		sleep 2; \
+	done; \
+	echo "$(YELLOW)STELLA containers did not become ready in time$(NC)"; \
+	exit 1
+
+detect-profile: ## Detect GPU and update .env with the matching LLM profile
+	@echo "$(BLUE)Detecting GPU machine profile...$(NC)"
+	python3 scripts/detect_machine_profile.py --config $(LLM_CONFIG) --out .env
+	@echo "$(GREEN)Machine profile applied to .env$(NC)"
+
+up: ensure-env prepare-data-dirs detect-profile ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)
 	@echo "$(BLUE)Starting MLentory ETL services...$(NC)"
-	sudo chown -R 1000:1000 ./config
-	sudo chmod -R 775 ./config
-	sudo docker compose --profile=complete up -d
+	@set -e; \
+	USE_STELLA=$$(grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' | tr '[:upper:]' '[:lower:]' || echo true); \
+	[ -n "$$USE_STELLA" ] || USE_STELLA=true; \
+	echo "USE_STELLA=$$USE_STELLA"; \
+		$(MAKE) check-vllm-env; \
+		echo "$(BLUE)Step 1/4: Starting vLLM (LLM inference — may take several minutes on first run)...$(NC)"; \
+		sudo docker compose up -d vllm; \
+		$(MAKE) wait-vllm; \
+	if [ "$$USE_STELLA" = "true" ]; then \
+		echo "$(BLUE)Step 2/4: Starting complete + STELLA profiles...$(NC)"; \
+		sudo docker compose --profile=complete --profile=stella up -d; \
+	else \
+		echo "$(BLUE)Step 2/4: Starting complete profile (STELLA disabled)...$(NC)"; \
+		sudo docker compose --profile=complete up -d; \
+	fi; \
+	echo "$(BLUE)Step 3/4: Verifying Elasticsearch and Neo4j...$(NC)"; \
+	$(MAKE) ensure-elasticsearch; \
+	$(MAKE) ensure-neo4j; \
+	if [ "$$USE_STELLA" = "true" ]; then \
+		echo "$(BLUE)Step 4/4: Initializing STELLA...$(NC)"; \
+		$(MAKE) wait-stella; \
+		$(MAKE) stella-init; \
+	fi
 	@echo "$(GREEN)Services started!$(NC)"
 	@echo "Dagster UI: http://localhost:3000"
 	@echo "Neo4j Browser: http://localhost:7474"
-	@echo "Elasticsearch: http://localhost:9200"
+	@echo "Elasticsearch: http://localhost:$(ELASTICSEARCH_HOST_PORT)"
+	@echo "vLLM: http://localhost:8003"
+	@echo "API: http://localhost:8008"
+	@if grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | grep -qi 'true'; then \
+		echo "STELLA App: http://localhost:8080"; \
+		echo "STELLA Server: http://localhost:8004"; \
+	fi
 
-down: ## Stop all services
+down: ## Stop all services (including STELLA when running)
 	@echo "$(BLUE)Stopping MLentory ETL services...$(NC)"
-	sudo docker compose --profile=complete down 
+	sudo docker compose --profile=complete --profile=stella --profile=mcp down
 	@echo "$(GREEN)Services stopped!$(NC)"
 
-mcp-up: ## Start MCP API service only
+mcp-up: ensure-env prepare-data-dirs ## Start MCP API service only
 	@echo "$(BLUE)Starting MCP API service...$(NC)"
 	sudo docker compose --profile=mcp up -d
+	@$(MAKE) ensure-elasticsearch
+	@$(MAKE) ensure-neo4j
 	@echo "$(GREEN)MCP API service started!$(NC)"
 	@echo "MCP API: http://localhost:8009"
 	@echo "Neo4j Browser: http://localhost:7474"
-	@echo "Elasticsearch: http://localhost:9200"
+	@echo "Elasticsearch: http://localhost:$(ELASTICSEARCH_HOST_PORT)"
 
 mcp-down: ## Stop MCP services
 	@echo "$(BLUE)Stopping MCP API services...$(NC)"
 	sudo docker compose --profile=mcp down 
 	@echo "$(GREEN)Services stopped!$(NC)"
 
-stella-up: ## Start STELLA services
-	@echo "$(BLUE)Starting STELLA services...$(NC)"
-	sudo docker compose --profile=stella up -d
-	@echo "$(GREEN)STELLA services started!$(NC)"
-	@echo "STELLA App: http://localhost:8080"
-	@echo "STELLA Server: http://localhost:8004"
+stella-up: ensure-env ## Start STELLA services and initialize when USE_STELLA=true
+	@USE_STELLA=$$(grep -E '^USE_STELLA=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' "' | tr '[:upper:]' '[:lower:]' || echo true); \
+	if [ "$$USE_STELLA" != "true" ]; then \
+		echo "$(YELLOW)USE_STELLA is not true in .env — skipping STELLA startup$(NC)"; \
+		exit 0; \
+	fi; \
+	echo "$(BLUE)Starting STELLA services...$(NC)"; \
+	sudo docker compose --profile=stella up -d; \
+	$(MAKE) wait-stella; \
+	$(MAKE) stella-init; \
+	echo "$(GREEN)STELLA services started!$(NC)"; \
+	echo "STELLA App: http://localhost:8080"; \
+	echo "STELLA Server: http://localhost:8004"
 
-stella-init: ## Initialize STELLA services
+stella-init: ## Initialize STELLA databases (idempotent)
 	@echo "$(BLUE)Initializing STELLA services...$(NC)"
-	sudo docker exec -it stella-app flask init-db
-	sudo docker exec -it stella-app flask seed-db
-	sudo docker exec -it stella-server flask init-db
-	sudo docker exec -it stella-server flask seed-db
+	@$(MAKE) stella-sync-db-passwords
+	@sudo docker exec stella-app flask init-db || true
+	@sudo docker exec stella-server flask init-db || true
+	@$(MAKE) stella-seed-if-needed
+	@$(MAKE) stella-warmup
 	@echo "$(GREEN)STELLA services initialized!$(NC)"
+
+stella-seed-if-needed: ## Seed STELLA databases only when empty (avoids duplicate-key errors)
+	@if sudo docker exec stella-app-db psql -U postgres -p 5430 -d postgres -tAc \
+		"SELECT 1 FROM systems LIMIT 1" 2>/dev/null | grep -q 1; then \
+		echo "$(YELLOW)  − stella-app already seeded — skipping seed-db$(NC)"; \
+	else \
+		echo "$(BLUE)  Seeding stella-app database...$(NC)"; \
+		sudo docker exec stella-app flask seed-db || true; \
+	fi
+	@if sudo docker exec stella-server-db psql -U postgres -p 5432 -d postgres -tAc \
+		"SELECT 1 FROM roles WHERE name='Admin' LIMIT 1" 2>/dev/null | grep -q 1; then \
+		echo "$(YELLOW)  − stella-server already seeded — skipping seed-db$(NC)"; \
+	else \
+		echo "$(BLUE)  Seeding stella-server database...$(NC)"; \
+		sudo docker exec stella-server flask seed-db || true; \
+	fi
+
+stella-warmup: ## Preload MLentory search paths used by STELLA rankers (avoids first-request timeouts)
+	@echo "$(BLUE)Warming up STELLA search paths...$(NC)"
+	@for i in $$(seq 1 60); do \
+		if sudo docker exec stella-app curl -sf http://mlentory-api:8000/health >/dev/null 2>&1; then \
+			break; \
+		fi; \
+		if [ "$$i" -eq 60 ]; then \
+			echo "$(YELLOW)mlentory-api not ready — skipping STELLA warmup$(NC)"; \
+			exit 0; \
+		fi; \
+		sleep 2; \
+	done
+	@sudo docker exec stella-app curl -sf \
+		'http://mlentory-base:5000/mlentory-api:8000/api/v1/models?query=warmup&limit=1&page=1' \
+		>/dev/null 2>&1 \
+		&& echo "$(GREEN)  ✓ baseline ranker warmed up$(NC)" \
+		|| echo "$(YELLOW)  ! baseline ranker warmup failed (non-fatal)$(NC)"
+	@sudo docker exec stella-app curl -sf --max-time 120 \
+		'http://mlentory-experiment:5000/mlentory-api:8000/api/v1/models?query=warmup&limit=1&page=1' \
+		>/dev/null 2>&1 \
+		&& echo "$(GREEN)  ✓ experiment ranker warmed up$(NC)" \
+		|| echo "$(YELLOW)  ! experiment ranker warmup failed (non-fatal)$(NC)"
+	@sudo docker exec stella-app curl -sf --max-time 120 \
+		'http://mlentory-api:8000/api/v1/stella/search_with_stella?query=warmup&page=1&limit=1&filters=%7B%7D&facets=%5B%22mlTask%22%5D&facet_query=%7B%7D&session_id=stella-warmup' \
+		>/dev/null 2>&1 \
+		&& echo "$(GREEN)  ✓ search_with_stella warmed up$(NC)" \
+		|| echo "$(YELLOW)  ! search_with_stella warmup failed (non-fatal)$(NC)"
+	
+stella-latency: ## Measure STELLA page-1 first vs cached calls (same query + session_id)
+	@python3 scripts/search_latency.py $(ARGS)
+
+stella-sync-db-passwords: ## Align STELLA DB passwords with .env (fixes stale Docker volumes)
+	@STELLA_APP_PW=$$(grep -E '^STELLA_POSTGRES_PW=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "'); \
+	STELLA_SERVER_PW=$$(grep -E '^STELLA_SERVER_POSTGRES_PW=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "'); \
+	if [ -n "$$STELLA_APP_PW" ] && sudo docker inspect stella-app-db >/dev/null 2>&1; then \
+		echo "$(BLUE)Syncing stella-app-db password from .env...$(NC)"; \
+		sudo docker exec stella-app-db psql -U postgres -p 5430 -c "ALTER USER postgres PASSWORD '$$STELLA_APP_PW';" >/dev/null 2>&1 || true; \
+	fi; \
+	if [ -n "$$STELLA_SERVER_PW" ] && sudo docker inspect stella-server-db >/dev/null 2>&1; then \
+		echo "$(BLUE)Syncing stella-server-db password from .env...$(NC)"; \
+		sudo docker exec stella-server-db psql -U postgres -p 5432 -c "ALTER USER postgres PASSWORD '$$STELLA_SERVER_PW';" >/dev/null 2>&1 || true; \
+	fi
 
 stella-down: ## Stop STELLA services
 	@echo "$(BLUE)Stopping STELLA services...$(NC)"
@@ -80,12 +327,12 @@ logs-neo4j: ## View Neo4j logs
 logs-elasticsearch: ## View Elasticsearch logs
 	docker compose logs -f elasticsearch
 
-build: ## Build Docker images
+build: prepare-data-dirs ## Build Docker images
 	@echo "$(BLUE)Building Docker images...$(NC)"
 	docker compose --profile=complete build
 	@echo "$(GREEN)Build complete!$(NC)"
 
-rebuild: ## Rebuild Docker images without cache
+rebuild: prepare-data-dirs ## Rebuild Docker images without cache
 	@echo "$(BLUE)Rebuilding Docker images...$(NC)"
 	docker compose --profile=complete build --no-cache
 	@echo "$(GREEN)Rebuild complete!$(NC)"
@@ -155,56 +402,134 @@ lint: format typecheck ## Run all linting and formatting
 
 ##@ ETL Operations
 
-extract: ## Run extraction for all sources
-	@echo "$(BLUE)Running extraction for $(SOURCE)...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="extract"' -f ./etl/repository.py
+DAGSTER_ETL := docker exec mlentory-dagster-webserver dagster asset materialize -f ./etl/repository.py
 
-transform: ## Run transformation for all sources
-	@echo "$(BLUE)Running transformation for $(SOURCE)...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="transform"' -f ./etl/repository.py
+etl-check: ## Verify Dagster and Elasticsearch are running before ETL
+	@docker inspect -f '{{.State.Running}}' mlentory-dagster-webserver 2>/dev/null | grep -q true \
+		|| { echo "$(YELLOW)Dagster not running — run 'make up' first$(NC)"; exit 1; }
+	@docker inspect -f '{{.State.Running}}' mlentory-elasticsearch 2>/dev/null | grep -q true \
+		|| { echo "$(YELLOW)Elasticsearch not running — run 'make ensure-elasticsearch' or 'make up'$(NC)"; exit 1; }
+	@curl -sf "http://localhost:$(ELASTICSEARCH_HOST_PORT)/_cluster/health" >/dev/null 2>&1 \
+		|| { echo "$(YELLOW)Elasticsearch not reachable on port $(ELASTICSEARCH_HOST_PORT) — run 'make ensure-elasticsearch'$(NC)"; exit 1; }
 
-load: ## Run loading for all sources
-	@echo "$(BLUE)Running loading for $(SOURCE)...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"stage"="load"' -f ./etl/repository.py
+etl-run: etl-check ## Run full ETL pipeline for all sources (HF + AI4Life + Kaggle + OpenML)
+	@echo "$(BLUE)Running full ETL pipeline (all sources)...$(NC)"
+	$(DAGSTER_ETL)
 
-etl-run: ## Run full ETL pipeline for all sources
-	@echo "$(BLUE)Running full ETL pipeline...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize -f ./etl/repository.py
+etl-both: etl-check ## Run full HF + AI4Life pipelines (excludes OpenML)
+	@echo "$(BLUE)Running HuggingFace + AI4Life ETL pipelines...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl" or tag:"pipeline"="ai4life_etl"'
 
-hf-etl: ## Run HuggingFace ETL pipeline (all assets tagged with "pipeline"="hf_etl")
+hf-etl: etl-check ## Run full HuggingFace ETL pipeline
 	@echo "$(BLUE)Running HuggingFace ETL pipeline...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:"pipeline"="hf_etl"' -f ./etl/repository.py
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl"'
 
-run-by-tag: ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline"="hf_etl")
+ai4life-etl: etl-check ## Run full AI4Life ETL pipeline
+	@echo "$(BLUE)Running AI4Life ETL pipeline...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl"'
+
+kaggle-etl: etl-check ## Run full Kaggle ETL pipeline
+	@echo "$(BLUE)Running Kaggle ETL pipeline...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl"'
+
+extract: etl-check ## Run extraction stage for all sources
+	@echo "$(BLUE)Running extraction stage (all sources)...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"stage"="extract"'
+
+transform: etl-check ## Run transformation stage for all sources
+	@echo "$(BLUE)Running transformation stage (all sources)...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"stage"="transform"'
+
+load: etl-check ## Run loading stage for all sources
+	@echo "$(BLUE)Running loading stage (all sources)...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"stage"="load"'
+
+hf-extract: etl-check ## HF extraction stage only
+	@echo "$(BLUE)Running HF extraction...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="extract"'
+
+hf-transform: etl-check ## HF transformation stage only
+	@echo "$(BLUE)Running HF transformation...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="transform"'
+
+hf-load: etl-check ## HF loading stage only (Neo4j, RDF)
+	@echo "$(BLUE)Running HF loading...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="load"'
+
+hf-index: etl-check ## HF Elasticsearch indexing only
+	@echo "$(BLUE)Running HF Elasticsearch indexing...$(NC)"
+	$(DAGSTER_ETL) --select 'hf_index_models_elasticsearch'
+
+hf-vector: etl-check ## HF vector backfill only
+	@echo "$(BLUE)Running HF vector backfill...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="hf_etl",tag:"stage"="vector_index"'
+
+ai4life-extract: etl-check ## AI4Life extraction stage only
+	@echo "$(BLUE)Running AI4Life extraction...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="extract"'
+
+ai4life-transform: etl-check ## AI4Life transformation stage only
+	@echo "$(BLUE)Running AI4Life transformation...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="transform"'
+
+ai4life-load: etl-check ## AI4Life loading stage only (Neo4j, RDF)
+	@echo "$(BLUE)Running AI4Life loading...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="load"'
+
+ai4life-index: etl-check ## AI4Life Elasticsearch indexing only
+	@echo "$(BLUE)Running AI4Life Elasticsearch indexing...$(NC)"
+	$(DAGSTER_ETL) --select 'ai4life_index_models_elasticsearch'
+
+ai4life-vector: etl-check ## AI4Life vector backfill only
+	@echo "$(BLUE)Running AI4Life vector backfill...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="ai4life_etl",tag:"stage"="vector_index"'
+
+kaggle-extract: etl-check ## Kaggle extraction stage only
+	@echo "$(BLUE)Running Kaggle extraction...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl",tag:"stage"="extract"'
+
+kaggle-transform: etl-check ## Kaggle transformation stage only
+	@echo "$(BLUE)Running Kaggle transformation...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl",tag:"stage"="transform"'
+
+kaggle-load: etl-check ## Kaggle loading stage only (Neo4j, RDF)
+	@echo "$(BLUE)Running Kaggle loading...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl",tag:"stage"="load"'
+
+kaggle-index: etl-check ## Kaggle Elasticsearch indexing only
+	@echo "$(BLUE)Running Kaggle Elasticsearch indexing...$(NC)"
+	$(DAGSTER_ETL) --select 'kaggle_index_models_elasticsearch'
+
+kaggle-vector: etl-check ## Kaggle vector backfill only
+	@echo "$(BLUE)Running Kaggle vector backfill...$(NC)"
+	$(DAGSTER_ETL) --select 'tag:"pipeline"="kaggle_etl",tag:"stage"="vector_index"'
+
+run-by-tag: etl-check ## Run pipeline by tag (usage: make run-by-tag TAG="pipeline"="hf_etl")
 	@if [ -z "$(TAG)" ]; then \
-		echo "$(YELLOW)Please specify TAG, e.g., make run-by-tag TAG=\"pipeline:hf_etl\"$(NC)"; \
+		echo "$(YELLOW)Please specify TAG, e.g., make run-by-tag TAG=\"pipeline\"=\"hf_etl\"$(NC)"; \
 		exit 1; \
 	fi
 	@echo "$(BLUE)Running assets with tag $(TAG)...$(NC)"
-	docker exec mlentory-dagster-webserver dagster asset materialize --select 'tag:$(TAG)' -f ./etl/repository.py
+	$(DAGSTER_ETL) --select 'tag:$(TAG)'
 
 ##@ Setup
 
-init: ## Initialize the project (copy .env.example to .env)
-	@if [ -f .env ]; then \
-		echo "$(YELLOW).env file already exists. Skipping...$(NC)"; \
-	else \
-		cp .env.example .env; \
-		echo "$(GREEN).env file created! Please edit it with your configuration.$(NC)"; \
-	fi
+init: ensure-env prepare-data-dirs ## Initialize the project (.env + data directories)
+	@echo "$(GREEN)Project initialized. Edit .env if needed, then run 'make up'.$(NC)"
 
-setup: init up ## Complete initial setup (init + start services)
+setup: up ## Complete initial setup (.env + all services per USE_STELLA)
 	@echo "$(GREEN)Setup complete!$(NC)"
 	@echo "Next steps:"
-	@echo "  1. Edit .env file with your configuration"
+	@echo "  1. Edit .env file with your configuration if needed"
 	@echo "  2. Visit http://localhost:3000 for Dagster UI"
 	@echo "  3. Visit http://localhost:7474 for Neo4j Browser"
+	@echo "  4. Run 'make hf-etl', 'make ai4life-etl', 'make kaggle-etl', or 'make etl-both' to run pipelines"
 
 ##@ Information
 
 status: ## Show status of all services
 	@echo "$(BLUE)Service Status:$(NC)"
-	@docker compose ps
+	@docker compose --profile=complete --profile=stella --profile=mcp ps
 	@echo ""
 	@echo "$(BLUE)Network Info:$(NC)"
 	@docker network inspect mlentory-network --format '{{range .Containers}}{{.Name}}: {{.IPv4Address}}{{println}}{{end}}' 2>/dev/null || echo "Network not found"
@@ -225,4 +550,3 @@ version: ## Show version information
 	@echo "Version: 0.1.0"
 	@echo "Python: 3.11+"
 	@echo "Dagster: Latest"
-

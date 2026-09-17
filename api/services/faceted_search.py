@@ -17,8 +17,49 @@ from api.schemas.responses import FacetConfig, FacetValue, ModelListItem
 logger = logging.getLogger(__name__)
 
 
+# ES field names that must carry a real value in /search and /search_with_vector responses.
+_REQUIRED_ES_FIELDS = (
+    "db_identifier",
+    "name",
+    "url",
+    "shared_by",
+    "datecreated",
+    "datemodified",
+    "description",
+    "keywords",
+    "license",
+    "readme",
+    "ml_tasks",
+    "source",
+)
+
+# Loader defaults when upstream metadata is missing; excluded from search results.
+_MISSING_INDEX_VALUES = ("", "Unknown")
+
+
 class FacetedSearchMixin:
     """Mixin that adds faceted search capabilities to Elasticsearch service."""
+
+    def _model_search_indices(self) -> List[str]:
+        """HF + AI4Life model indexes queried by search endpoints."""
+        cfg = self.config
+        return [cfg.hf_models_index, cfg.ai4life_models_index]
+
+    def _minimum_metadata_bool_filter(self) -> Dict[str, Any]:
+        """Gate search endpoints to documents with all required fields populated."""
+        must = [{"exists": {"field": field}} for field in _REQUIRED_ES_FIELDS]
+        must_not = [
+            {"terms": {field: list(_MISSING_INDEX_VALUES)}}
+            for field in (
+                "name",
+                "description",
+                "shared_by",
+                "license",
+                "readme",
+                "source",
+            )
+        ]
+        return {"bool": {"must": must, "must_not": must_not}}
 
     def get_facets_config(self) -> Dict[str, FacetConfig]:
         """
@@ -93,12 +134,22 @@ class FacetedSearchMixin:
                 pinned=False
             ),
             "platform": FacetConfig(
-                field="platform",
+                field="source",
                 label="Platform",
                 type="keyword",
                 icon="mdi-cloud",
                 is_high_cardinality=False,
                 default_size=5,
+                supports_search=False,
+                pinned=True
+            ),
+            "dateCreated": FacetConfig(
+                field="datecreated",
+                label="Date Created",
+                type="date",
+                icon="mdi-calendar-month-outline",
+                is_high_cardinality=False,
+                default_size=12,
                 supports_search=False,
                 pinned=True
             )
@@ -283,7 +334,8 @@ class FacetedSearchMixin:
         page_size: int = 50,
         facets: Optional[List[str]] = None,
         facet_size: int = 20,
-        facet_query: Optional[Dict[str, str]] = None
+        facet_query: Optional[Dict[str, str]] = None,
+        exclude_ids: Optional[List[str]] = None,
     ) -> Tuple[List[ModelListItem], int, Dict[str, List[FacetValue]]]:
         """
         Search for models with faceted navigation support.
@@ -306,17 +358,22 @@ class FacetedSearchMixin:
         """
         # Ensure page_size is within bounds
         page_size = min(max(page_size, 1), 1000)
-        from_offset = (page - 1) * page_size
+        # Page 1 may be served by STELLA; ES pages 2+ exclude those ids and continue
+        # from the start of the ES ranking (page 2 -> offset 0, page 3 -> offset RPP, ...).
+        if exclude_ids and page > 1:
+            from_offset = max(0, (page - 2) * page_size)
+        else:
+            from_offset = (page - 1) * page_size
 
         # Default facets if none specified
         if facets is None:
-            facets = ["mlTask", "license", "keywords", "platform", "datasets"]
+            facets = ["mlTask", "license", "keywords", "platform", "datasets", "dateCreated"]
 
         filters = filters or {}
         facet_query = facet_query or {}
 
-        # Build query conditions
-        must_conditions = []
+        # Build query conditions; always require the minimum metadata set.
+        must_conditions: List[Dict[str, Any]] = [self._minimum_metadata_bool_filter()]
 
         if query:
             text_query = self._build_text_search_query(query)
@@ -325,6 +382,12 @@ class FacetedSearchMixin:
 
         if filters:
             must_conditions.extend(self._build_filter_conditions(filters))
+
+        bool_query: Dict[str, Any] = {
+            "must": must_conditions if must_conditions else [{"match_all": {}}],
+        }
+        if exclude_ids:
+            bool_query["must_not"] = [{"terms": {"db_identifier": exclude_ids}}]
 
         # Build aggregations
         aggs = self._build_facet_aggregations(facets, facet_size, facet_query)
@@ -335,9 +398,7 @@ class FacetedSearchMixin:
             "size": page_size,
             "track_total_hits": True,
             "query": {
-                "bool": {
-                    "must": must_conditions if must_conditions else [{"match_all": {}}]
-                }
+                "bool": bool_query
             },
             "aggs": aggs,
             "_source": [
@@ -349,16 +410,17 @@ class FacetedSearchMixin:
                 "baseModels",
                 "license",
                 "description",
-                "platform",
+                "abstract",
+                "source",
                 "datasets",
             ],
         }
 
         try:
-            # Execute search using raw client
             response = self.client.search(
-                index=self.config.hf_models_index,
-                body=search_body
+                index=self._model_search_indices(),
+                body=search_body,
+                params={"ignore_unavailable": "true"},
             )
 
             # Extract hits
@@ -384,13 +446,14 @@ class FacetedSearchMixin:
                     mlentory_id=mlentory_id,
                     name=source.get("name", ""),
                     description=source.get("description"),
+                    abstract=source.get("abstract") or None,
                     sharedBy=source.get("shared_by"),
                     license=source.get("license"),
                     mlTask=source.get("ml_tasks", []),
                     keywords=source.get("keywords", []),
                     baseModels=source.get("baseModels", []) or [],
                     datasets=source.get("datasets", []) or [],
-                    platform=source.get("platform", "Unknown"),
+                    platform=source.get("source") or "Unknown",
                 )
                 models.append(model)
 
@@ -451,14 +514,15 @@ class FacetedSearchMixin:
         field_name = config.field
         current_filters = current_filters or {}
 
-        # Build filter conditions (excluding self-filter)
-        must_conditions = []
-        for facet_key, values in current_filters.items():
-            if values and facet_key != field:
-                filter_config = facet_config.get(facet_key)
-                if filter_config:
-                    for value in values:
-                        must_conditions.append({"term": {filter_config.field: value}})
+        # Build filter conditions (excluding self-filter); always require the
+        # minimum metadata set so facet counts match the gated result list.
+        must_conditions: List[Dict[str, Any]] = [self._minimum_metadata_bool_filter()]
+        context_filters = {
+            facet_key: values
+            for facet_key, values in current_filters.items()
+            if values and facet_key != field
+        }
+        must_conditions.extend(self._build_filter_conditions(context_filters))
 
         # Build aggregation based on whether search is needed
         if search_query:
@@ -487,18 +551,15 @@ class FacetedSearchMixin:
 
         search_body = {
             "size": 0,
-            "query": {
-                "bool": {
-                    "must": must_conditions if must_conditions else [{"match_all": {}}]
-                }
-            },
-            "aggs": {"facet_values": agg_config}
+            "query": {"bool": {"must": must_conditions}},
+            "aggs": {"facet_values": agg_config},
         }
 
         try:
             response = self.client.search(
-                index=self.config.hf_models_index,
-                body=search_body
+                index=self._model_search_indices(),
+                body=search_body,
+                params={"ignore_unavailable": "true"},
             )
 
             aggs_data = response.get("aggregations", {})

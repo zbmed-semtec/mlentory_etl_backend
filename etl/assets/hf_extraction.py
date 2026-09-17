@@ -11,7 +11,13 @@ import pandas as pd
 
 from dagster import asset, AssetIn
 
-from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper
+from etl import LLMConfig
+from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper, HFLLMSchemaPropertyExtractor
+from etl_extractors.hf.hf_citation_normalization import select_citation_chunk_per_model
+from etl_transformers.common.llm_inlanguage import (
+    LLM_INLANGUAGE_METHOD,
+    parse_llm_inlanguage_codes,
+)
 from etl.config import get_hf_config
 
 
@@ -544,27 +550,92 @@ def hf_identified_chunk_citation(chunks_data: Tuple[Dict[str, List[dict]], str])
         chunks_data: Tuple of ({model_id: list_of_chunks}, run_folder)
 
     Returns:
-        Tuple of ({model_id: identified_chunk}, run_folder)
+        Path to ``chunks_citation.json`` (per-model selected chunk dict or null)
     """
+    chunks_dict, run_folder = chunks_data
+    selected = select_citation_chunk_per_model(chunks_dict)
+    final_path = Path(run_folder) / "chunks_citation.json"
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(final_path, "w", encoding="utf-8") as f:
+        json.dump(selected, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"Citation chunks saved to {final_path}")
+    return str(final_path)
+
+@asset(
+    group_name="hf_enrichment",
+    ins={"chunks_data": AssetIn("hf_identified_modelcard_chunks")},
+    tags={"pipeline": "hf_etl", "stage": "extract"}
+)
+def hf_llm_schema_extractor(chunks_data: Tuple[Dict[str, List[dict]], str]) -> Tuple[Dict[str, Dict[str, str]], str]:
+    """
+    Uses an LLM to extract structured metadata from model card chunks,
+
+    Args:
+        chunks_data: Tuple of ({model_id: list_of_chunks}, run_folder)
+
+    Returns:
+        Tuple of ({model_id: {property: result}}, run_folder)
+    """
+    def preprocess_chunks(chunks):
+        """
+        Preprocesses ModelCard chunks by removing code blocks.
+
+        Args:
+            chunks (List[dict]): A list of chunks representing the ModelCard content.
+
+        Returns:
+            str: The preprocessed content.
+        """
+        content = ""
+        current_heading = ""
+        for chunk in chunks:
+            if chunk.get("type") in ["section", "code"]:
+                continue
+                
+            phtext = chunk.get("phtext") or ""
+            
+            if phtext != current_heading and phtext != "":
+                current_heading = phtext
+                content += current_heading + "\n"
+
+            text = chunk.get("text") or ""
+            content += text + "\n"
+
+        return content.strip()
+
     chunks_dict, run_folder = chunks_data
     enrichment = HFEnrichment()
     output_root = Path(run_folder).parent.parent
 
-    json_path = enrichment.identifiers["citation"].identify_from_chunks(chunks_dict, output_root)
+    preprocessed_chunks = {}
 
-    # Move to run folder with clean name
-    final_path = Path(run_folder) / "chunks_citation.json"
-    Path(json_path).rename(final_path)
+    for model_id, chunks in chunks_dict.items():
+        preprocessed_chunks[model_id] = preprocess_chunks(chunks)
+
+    config = LLMConfig()
+    llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=config)
+    llm_extractor.load_metadata()
+    llm_extractor.load_llm()
+    batch_size = llm_extractor.estimate_max_concurrent_cards(preprocessed_chunks, typical_visible_output_tokens=150)
+    llm_extractor.extract_properties(preprocessed_chunks, 
+                                     return_result=False,
+                                     batch_size=batch_size)
+    result = llm_extractor.parse_llm_output()
     
-    logger.info(f"Citation chunks saved to {final_path}")
-    return str(final_path)
+    final_path = Path(run_folder) / "llm_extraction_results.json"
+    with open(final_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=4)
+    
+    logger.info(f"LLM extraction results saved to {final_path}")
+    return (result, str(final_path))
 
 @asset(
     group_name="hf_enrichment",
     ins={"models_data": AssetIn("hf_add_ancestor_models")},
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
-def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, str | None], str]:
+def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, Dict[str, str] | None], str]:
     """
     Identify model size per model from raw HF models.
 
@@ -582,6 +653,7 @@ def hf_identified_modelsize(models_data: Tuple[str, str]) -> Tuple[Dict[str, str
     logger.info(f"Identified model size for {len(model_sizes)} models")
 
     return (model_sizes, run_folder)
+
 
 @asset(
     group_name="hf_enrichment",
@@ -788,69 +860,25 @@ def hf_identified_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, Lis
 
 @asset(
     group_name="hf_enrichment",
-    ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl", "stage": "extract"},
-)
-def hf_detected_readme_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[Dict[str, object]]], str]:
-    """
-    Detect documentation languages per model from model card markdown (schema:inLanguage).
-
-    Uses Lingua on stripped README/card text. May return multiple ISO codes when
-    several languages exceed the confidence threshold.
-    """
-    from etl_extractors.common.text_language_detector import (
-        detect_language_predictions,
-        strip_markdown_frontmatter,
-    )
-
-    models_json_path, run_folder = models_data
-
-    with open(models_json_path, "r", encoding="utf-8") as f:
-        raw_models = json.load(f)
-    if not isinstance(raw_models, list):
-        logger.warning("Expected list of models at %s", models_json_path)
-        return ({}, run_folder)
-
-    per_model: Dict[str, List[Dict[str, object]]] = {}
-    for raw in raw_models:
-        model_id = raw.get("modelId")
-        if not model_id:
-            continue
-        card_text = strip_markdown_frontmatter(raw.get("card", "") or "")
-        per_model[model_id] = detect_language_predictions(
-            card_text,
-            min_confidence=0.75,
-            max_languages=5,
-        )
-
-    logger.info("Detected readme languages for %s models", len(per_model))
-    return (per_model, run_folder)
-
-
-@asset(
-    group_name="hf_enrichment",
     ins={
         "languages_data": AssetIn("hf_identified_languages"),
-        "readme_languages_data": AssetIn("hf_detected_readme_languages"),
+        "llm_extraction": AssetIn("hf_llm_schema_extractor"),
     },
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_languages(
     languages_data: Tuple[Dict[str, List[str]], str],
-    readme_languages_data: Tuple[Dict[str, List[Dict[str, object]]], str],
+    llm_extraction: Tuple[Dict[str, Dict[str, str]], str],
 ) -> str:
     """
     Enrich language codes referenced by models using the pycountry dataset.
 
-    Args:
-        languages_data: Tuple of ({model_id: [language_codes]}, run_folder)
-
-    Returns:
-        Path to the saved languages JSON file.
+    Combines HF tag languages (supportedLanguages) with LLM-detected
+    documentation languages (schema:inLanguage).
     """
 
     model_languages_dict, run_folder = languages_data
-    readme_languages_dict, _ = readme_languages_data
+    llm_schema_by_model, _ = llm_extraction
     language_codes: Set[str] = set()
     language_confidences: Dict[str, float] = {}
     language_extraction_methods: Dict[str, str] = {}
@@ -863,19 +891,17 @@ def hf_enriched_languages(
             language_codes.add(code_norm)
             # supportedLanguages from HF tags/API -> pycountry baseline metadata
             language_extraction_methods.setdefault(code_norm, "pycountry")
-    for predictions in readme_languages_dict.values():
-        for prediction in (predictions or []):
-            if not isinstance(prediction, dict):
-                continue
-            code_norm = str(prediction.get("code", "")).strip()
-            if not code_norm:
-                continue
+
+    for llm_record in (llm_schema_by_model or {}).values():
+        if not isinstance(llm_record, dict):
+            continue
+        for code_norm in parse_llm_inlanguage_codes(llm_record.get("schema:inLanguage")):
             language_codes.add(code_norm)
-            confidence = float(prediction.get("confidence", 0.0) or 0.0)
-            prev = language_confidences.get(code_norm, 0.0)
-            language_confidences[code_norm] = max(prev, confidence)
-            # inLanguage detected by Lingua then normalized by pycountry
-            language_extraction_methods[code_norm] = "lingua-language-detector+pycountry"
+            language_confidences[code_norm] = max(
+                language_confidences.get(code_norm, 0.0),
+                0.85,
+            )
+            language_extraction_methods[code_norm] = LLM_INLANGUAGE_METHOD
 
     if not language_codes:
         logger.info("No languages to extract")

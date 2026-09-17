@@ -53,6 +53,10 @@ class ModelListItem(BaseModel):
     mlentory_id: str = Field(description="MLentory ID for the model")
     name: str = Field(description="Model name")
     description: Optional[str] = Field(description="Model description", default=None)
+    abstract: Optional[str] = Field(
+        description="Full model documentation or README content (schema:abstract)",
+        default=None,
+    )
     sharedBy: Optional[str] = Field(description="Entity that shared the model", default=None)
     license: Optional[str] = Field(description="Model license", default=None)
     mlTask: List[str] = Field(description="Machine learning tasks", default_factory=list)
@@ -95,6 +99,10 @@ class HealthResponse(BaseModel):
     version: str = Field(description="API version")
     elasticsearch: bool = Field(description="Elasticsearch connection status")
     neo4j: bool = Field(description="Neo4j connection status")
+    cuda: bool = Field(
+        description="Whether CUDA/GPU is available in this container",
+        default=False,
+    )
 
 
 class FacetValue(BaseModel):

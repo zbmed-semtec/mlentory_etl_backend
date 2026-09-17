@@ -17,6 +17,7 @@ from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 import pycountry
 import json
 from typing import Any, List, Dict
+from .ai4life_citations import normalize_citations_from_ai4life_raw
 from etl_transformers.common.utils import (
     extract_normalized_doi,
     build_identifier,
@@ -174,8 +175,8 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     author = _pick_first_author_name(raw_model.get("author")) or shared_by
     
     modelCategory = str(raw_model.get("modelArchitecture", "")).strip()
-    referencePublication = str(raw_model.get("referencePublication", "")).strip()
     intentedUse = str(raw_model.get("intendedUse", "")).strip()
+    citation = normalize_citations_from_ai4life_raw(raw_model)
 
     date_created = str(raw_model.get("dateCreated", "")).strip()
     date_modified = str(raw_model.get("dateModified", "")).strip()
@@ -187,6 +188,7 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
 
     description = str(raw_model.get("intendedUse", "")).strip()
     readme = validate_optional_url(raw_model.get("readme_file"))
+    abstract = AI4LifeHelper.resolve_abstract_content(raw_model)
     archived_at = _pick_archived_at(raw_model.get("archivedAt"), fallback=url)
 
     # Optional fields (often missing in AI4Life)
@@ -201,12 +203,13 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "author": author,
         "sharedBy": shared_by,
         "modelCategory": modelCategory,
-        "referencePublication": referencePublication,
-        "intendedUse":intentedUse,
+        "citation": citation,
+        "intendedUse": intentedUse,
         "dateCreated": date_created,
         "dateModified": date_modified,
         "datePublished": date_published,
         "description": description,
+        "abstract": abstract,
         "discussionUrl": discussion_url,
         "archivedAt": archived_at,
         "readme": readme,
@@ -270,6 +273,12 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
             source_field="intendedUse",
             notes=None,
         ),
+        "abstract": _create_extraction_metadata(
+            method="Fetched_from_AI4Life_documentation_url",
+            confidence=1.0,
+            source_field="readme_file",
+            notes="Full markdown content fetched from documentation URL",
+        ),
         "discussionUrl": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
             confidence=1.0,
@@ -300,11 +309,14 @@ def map_ai4life_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
             source_field="modelCategory",
             notes="Often missing in AI4Life",
         ),
-        "referencePublication": _create_extraction_metadata(
+        "citation": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
             confidence=1.0,
-            source_field="referencePublication",
-            notes="Often missing in AI4Life",
+            source_field="citation, referencePublication",
+            notes=(
+                "schema.org citation from manifest.cite and Zenodo DOI URL; "
+                "referencePublication not emitted on MLModel (aligned with HF)"
+            ),
         ),
         "intendedUse": _create_extraction_metadata(
             method="Parsed_from_AI4Life_models_json",
@@ -344,7 +356,7 @@ def normalize_ai4life_model(raw_model: Dict[str, Any]) -> MLModel:
     # - map_license(raw_model) for license extraction
     # - map_lineage(raw_model) for base_model → baseModel
     # - map_code_and_usage(raw_model) for code snippets and usage instructions
-    # - map_datasets(raw_model) for trainedOn, evaluatedOn, etc.
+    # - map_datasets(raw_model) for evaluatedOn, etc.
     # - map_ethics_and_risks(raw_model) for limitations, biases, etc.
     
     # Validate and return

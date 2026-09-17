@@ -51,9 +51,6 @@ class GraphService:
                 "schema__url",
                 "schema__identifier",
                 "fair4ml__evaluatedOn",
-                "fair4ml__validatedOn",
-                "fair4ml__testedOn",
-                "fair4ml__trainedOn",
                 "codemeta__referencePublication",
                 "fair4ml__sharedBy",
                 "schema__author",
@@ -71,17 +68,16 @@ class GraphService:
     ) -> GraphResponse:
         """
         Fetch a subgraph starting from a specific entity.
-        We ignore the adjacent metadata nodes for now.
 
-        Refactored to a 2-step approach using a helper for single-entity retrieval:
-        1. Fetch the main entity (properties + allowed relations).
-        2. Iterate over the neighbors found in step 1 and fetch their full details (properties + all relations).
+        Loads the start node and its 1-hop neighborhood, then each neighbor's
+        outgoing targets in a second indexed query. Depth beyond 1 is not
+        traversed as graph edges.
 
         Args:
             entity_id: Compact alphanumeric identifier of the starting entity (no scheme).
             depth: Traversal depth (Currently supports 1 for direct neighbors).
             relationships: Optional list of relationship types to follow
-                (e.g., ["schema__license", "fair4ml__trainedOn"]).
+                (e.g., ["schema__license", "fair4ml__evaluatedOn"]).
             direction: Traversal direction (Ignored in this version, defaults to outgoing for properties).
             entity_label: Optional Neo4j label for the start node
                 (e.g., "MLModel").
@@ -89,74 +85,40 @@ class GraphService:
         Returns:
             GraphResponse containing nodes and edges.
         """
-        # Reconstruct full URI from compact ID when possible
+        # depth>1 and direction are accepted for API compatibility but not applied yet
+        _ = (depth, direction)
+
         entity_uri = self._build_entity_uri(entity_id)
 
-        # If no relationships provided, choose sensible defaults per entity type
         if not relationships and entity_label:
             relationships = self.default_relationships.get(entity_label, [])
 
         try:
-            # --- STEP 1: Main Entity ---
-            # Fetch details for the start node, respecting the allowed relationships
-            start_data = self._get_entity_data(entity_uri, relationships)
-
-            if not start_data:
-                return GraphResponse(nodes=[], edges=[], metadata={"error": "Entity not found"})
-
-            graph_nodes: List[GraphNode] = []
-            graph_edges: List[GraphEdge] = []
-            seen_nodes: Set[str] = set()
-
-            # Add start node
-            start_node = GraphNode(
-                id=start_data["id"],
-                labels=start_data.get("labels", []),
-                properties=start_data.get("properties", {}),
+            rows, neo4j_query_count = self._fetch_entity_neighborhood(
+                entity_uri, relationships
             )
-            graph_nodes.append(start_node)
-            seen_nodes.add(start_data["id"])
 
-            # Add edges from start node
-            for edge_data in start_data.get("edges", []):
-                edge = GraphEdge(
-                    id=edge_data["id"],
-                    source=edge_data["source"],
-                    target=edge_data["target"],
-                    type=edge_data["type"],
-                    properties=edge_data["props"] or {},
+            if not rows:
+                return GraphResponse(
+                    nodes=[],
+                    edges=[],
+                    metadata={
+                        "error": "Entity not found",
+                        "neo4j_query_count": neo4j_query_count,
+                    },
                 )
-                graph_edges.append(edge)
 
-            # --- STEP 2: Neighbors ---
-            neighbor_uris = start_data.get("neighbor_uris", [])
-            
-            for neighbor_uri in neighbor_uris:
-                # Fetch details for neighbor, NO restrictions on relationships
-                neighbor_data = self._get_entity_data(neighbor_uri, allowed_relationships=None)
-                
-                
-                if neighbor_uri == entity_uri:
-                    continue
-                
-                if not neighbor_data:
-                    continue
-                    
-                nid = neighbor_data["id"]
-                if nid in seen_nodes:
-                    continue
-                
-                neighbor_node = GraphNode(
-                    id=nid,
-                    labels=neighbor_data.get("labels", []),
-                    properties=neighbor_data.get("properties", {}),
-                )
-                graph_nodes.append(neighbor_node)
-                seen_nodes.add(nid)
-                
-                # Note: We do NOT add edges from neighbors to other nodes here, 
-                # keeping the graph focused on the start node's immediate context (Depth 1).
-                # However, the neighbor_node.properties contains all its relations as keys.
+            graph_nodes, graph_edges = self._assemble_neighborhood_graph(
+                entity_uri, rows
+            )
+
+            logger.info(
+                "get_entity_graph uri=%s neo4j_query_count=%s nodes=%s edges=%s",
+                entity_uri,
+                neo4j_query_count,
+                len(graph_nodes),
+                len(graph_edges),
+            )
 
             return GraphResponse(
                 nodes=graph_nodes,
@@ -168,13 +130,221 @@ class GraphService:
                     "edge_count": len(graph_edges),
                     "relationships": relationships or [],
                     "entity_label": entity_label,
-                    "strategy": "2-step-loop"
+                    "strategy": "indexed-1hop-collect",
+                    "neo4j_query_count": neo4j_query_count,
                 },
             )
 
         except Exception as e:
             logger.error(f"Error traversing graph for {entity_uri}: {e}", exc_info=True)
             return GraphResponse(nodes=[], edges=[], metadata={"error": str(e)})
+
+    def _fetch_entity_neighborhood(
+        self,
+        entity_uri: str,
+        allowed_relationships: Optional[List[str]],
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Load start node + 1-hop neighbors, then neighbor outgoing targets.
+
+        Uses ``:Resource {uri}`` so Neo4j hits the n10s unique index instead of
+        scanning. Neighbor outgoing edges are collected per neighbor in a
+        second query so a hub neighbor cannot cartesian-expand the result.
+
+        Returns one row per start→neighbor edge. When the start node has no
+        outgoing edges, a single row with null link fields is still returned.
+        """
+        hop_query = """
+        MATCH (m:Resource {uri: $uri})
+        OPTIONAL MATCH (m)-[r]->(n)
+        WHERE $rels IS NULL OR type(r) IN $rels
+        RETURN
+            coalesce(m.uri, elementId(m)) AS m_id,
+            labels(m) AS m_labels,
+            properties(m) AS m_props,
+            type(r) AS rel_type,
+            elementId(r) AS edge_id,
+            properties(r) AS edge_props,
+            coalesce(n.uri, elementId(n)) AS n_id,
+            labels(n) AS n_labels,
+            properties(n) AS n_props
+        """
+        params: Dict[str, Any] = {
+            "uri": entity_uri,
+            "rels": allowed_relationships,
+        }
+        rows = _run_cypher(hop_query, params, self.config)
+        if not rows:
+            return [], 1
+
+        neighbor_uris: List[str] = []
+        seen_neighbors: Set[str] = set()
+        for row in rows:
+            n_id = row.get("n_id")
+            if not n_id or not isinstance(n_id, str):
+                continue
+            if not n_id.startswith(("http://", "https://")):
+                continue
+            if n_id in seen_neighbors:
+                continue
+            seen_neighbors.add(n_id)
+            neighbor_uris.append(n_id)
+
+        if not neighbor_uris:
+            return rows, 1
+
+        # Bound each neighbor's outgoing expansion so a hub node cannot
+        # materialize tens of thousands of targets into the API payload.
+        outs_query = """
+        UNWIND $uris AS uri
+        MATCH (n:Resource {uri: uri})
+        CALL {
+            WITH n
+            MATCH (n)-[nr]->(nt)
+            WITH type(nr) AS n_rel_type,
+                 coalesce(nt.uri, elementId(nt)) AS n_rel_target
+            LIMIT 80
+            RETURN n_rel_type, n_rel_target
+        }
+        RETURN n.uri AS n_id, n_rel_type,
+               collect(DISTINCT n_rel_target)[0..50] AS targets
+        """
+        outs_rows = _run_cypher(outs_query, {"uris": neighbor_uris}, self.config)
+        outs_by_neighbor: Dict[str, List[Dict[str, str]]] = {}
+        for rec in outs_rows:
+            n_id = rec.get("n_id")
+            n_rel_type = rec.get("n_rel_type")
+            if not n_id or not n_rel_type:
+                continue
+            for target in rec.get("targets") or []:
+                if not target:
+                    continue
+                outs_by_neighbor.setdefault(n_id, []).append(
+                    {"type": n_rel_type, "target": str(target)}
+                )
+
+        for row in rows:
+            n_id = row.get("n_id")
+            row["n_outs"] = outs_by_neighbor.get(n_id, []) if n_id else []
+
+        return rows, 2
+
+    def _assemble_neighborhood_graph(
+        self,
+        entity_uri: str,
+        rows: List[Dict[str, Any]],
+    ) -> Tuple[List[GraphNode], List[GraphEdge]]:
+        """Assemble GraphNode/GraphEdge lists from batched neighborhood rows."""
+        first = rows[0]
+        start_id = first.get("m_id") or entity_uri
+        start_labels = first.get("m_labels") or []
+        start_props = self._normalize_node_properties(
+            first.get("m_props") or {}, start_labels
+        )
+
+        neighbor_props: Dict[str, Dict[str, Any]] = {}
+        neighbor_labels: Dict[str, List[str]] = {}
+        seen_edges: Set[str] = set()
+        graph_edges: List[GraphEdge] = []
+
+        for row in rows:
+            rel_type = row.get("rel_type")
+            n_id = row.get("n_id")
+            if not rel_type or not n_id:
+                continue
+
+            # Fold start→neighbor relation into start node properties
+            if rel_type not in start_props:
+                start_props[rel_type] = []
+            if n_id not in start_props[rel_type]:
+                start_props[rel_type].append(n_id)
+
+            edge_id = str(row.get("edge_id") or f"{start_id}|{rel_type}|{n_id}")
+            if edge_id not in seen_edges:
+                seen_edges.add(edge_id)
+                graph_edges.append(
+                    GraphEdge(
+                        id=edge_id,
+                        source=entity_uri,
+                        target=n_id,
+                        type=rel_type,
+                        properties=row.get("edge_props") or {},
+                    )
+                )
+
+            if n_id == entity_uri:
+                continue
+
+            if n_id not in neighbor_props:
+                n_labels = row.get("n_labels") or []
+                neighbor_labels[n_id] = n_labels
+                neighbor_props[n_id] = self._normalize_node_properties(
+                    row.get("n_props") or {}, n_labels
+                )
+
+            # Neighbor outgoing relations as properties (not as graph edges)
+            props = neighbor_props[n_id]
+            n_outs = row.get("n_outs") or []
+            if n_outs:
+                for item in n_outs:
+                    if not isinstance(item, dict):
+                        continue
+                    n_rel_type = item.get("type")
+                    n_rel_target = item.get("target")
+                    if not n_rel_type or not n_rel_target:
+                        continue
+                    if n_rel_type not in props:
+                        props[n_rel_type] = []
+                    target_str = str(n_rel_target)
+                    if target_str not in props[n_rel_type]:
+                        props[n_rel_type].append(target_str)
+            else:
+                n_rel_type = row.get("n_rel_type")
+                n_rel_target = row.get("n_rel_target")
+                if n_rel_type and n_rel_target:
+                    if n_rel_type not in props:
+                        props[n_rel_type] = []
+                    if n_rel_target not in props[n_rel_type]:
+                        props[n_rel_type].append(n_rel_target)
+
+        graph_nodes: List[GraphNode] = [
+            GraphNode(id=start_id, labels=start_labels, properties=start_props)
+        ]
+        for nid, props in neighbor_props.items():
+            graph_nodes.append(
+                GraphNode(
+                    id=nid,
+                    labels=neighbor_labels.get(nid, []),
+                    properties=props,
+                )
+            )
+
+        return graph_nodes, graph_edges
+
+    @staticmethod
+    def _normalize_node_properties(
+        raw_props: Dict[str, Any],
+        labels: List[str],
+    ) -> Dict[str, Any]:
+        """Normalize Neo4j props to List[str] values and attach type from labels."""
+        normalized: Dict[str, Any] = {}
+        for k, v in raw_props.items():
+            if v is None:
+                continue
+            if isinstance(v, list):
+                normalized[k] = [str(x) for x in v if x is not None]
+            else:
+                normalized[k] = [str(v)]
+
+        if labels:
+            normalized["type"] = []
+            for label in labels:
+                if "__" in label:
+                    normalized["type"].append(label)
+            if len(labels) == 1 and labels[0] == "Resource":
+                normalized["type"].append("schema__url")
+
+        return normalized
 
     def _get_entity_data(
         self,
@@ -202,11 +372,10 @@ class GraphService:
               - neighbor_uris: List of distinct target URIs
             Returns None if entity not found.
         """
-        # 1. Get Node Properties
-        # We use OPTIONAL MATCH or just MATCH. If node exists, we want it.
+        # 1. Get Node Properties via the Resource.uri unique index.
         props_query = """
-        MATCH (n {uri: $uri})
-        RETURN 
+        MATCH (n:Resource {uri: $uri})
+        RETURN
             coalesce(n.uri, elementId(n)) as id,
             labels(n) as labels,
             properties(n) as props
@@ -227,25 +396,8 @@ class GraphService:
             labels.extend(record.get("labels", []))
             raw_props.update(record.get("props", {}))
         
-        # Normalize properties to List[str] or strict types
-        # Internal properties are treated as 'properties'
-        normalized_props = {}
-        for k, v in raw_props.items():
-            if v is None:
-                continue
-            if isinstance(v, list):
-                normalized_props[k] = [str(x) for x in v if x is not None]
-            else:
-                normalized_props[k] = [str(v)]
+        normalized_props = self._normalize_node_properties(raw_props, labels)
 
-        if labels:
-            normalized_props["type"] = []
-            for label in labels:
-                # Identify custom types like "fair4ml__MLModel" or "schema__Dataset"
-                if "__" in label:
-                    normalized_props["type"].append(label)
-            if len(labels) == 1 and labels[0] == "Resource":
-                normalized_props["type"].append("schema__url")
         # 2. Get Relations (treated as properties + explicit edges)
         # If allowed_relationships is set, we filter.
         
@@ -259,9 +411,9 @@ class GraphService:
             rel_filter = "AND type(r) IN $rels"
         
         rels_query = f"""
-        MATCH (n {{uri: $uri}})-[r]->(m)
+        MATCH (n:Resource {{uri: $uri}})-[r]->(m)
         WHERE 1=1 {rel_filter}
-        RETURN 
+        RETURN
             type(r) as type,
             coalesce(m.uri, elementId(m)) as target_uri,
             elementId(r) as edge_id,
@@ -351,60 +503,51 @@ class GraphService:
             # Return all properties
             return_clause = "properties(n)"
 
+        # Use :Resource so Neo4j can hit the uri index (unlabeled MATCH scans and
+        # dominated Extraction Info latency). Read node props without requiring an
+        # outgoing edge — leaf URL nodes were previously dropped by that join.
         props_query = f"""
-        UNWIND $uris as uri
-        MATCH (n {{uri: uri}})-[r]->(m)
-        RETURN n.uri as uri, {return_clause} as props
-        """
-        
-        rels_query = f"""
         UNWIND $uris AS uri
-        MATCH (n {{uri: uri}})-[r]->(m)
+        MATCH (n:Resource {{uri: uri}})
+        RETURN n.uri AS uri, {return_clause} AS props, labels(n) AS labels
+        """
+
+        rels_query = """
+        UNWIND $uris AS uri
+        MATCH (n:Resource {uri: uri})-[r]->(m)
         RETURN
           n.uri AS uri,
           type(r) AS rel_type,
           collect(DISTINCT m.uri) AS targets
         """
-        
-        response_data = {}
+
+        response_data: Dict[str, Dict[str, List[str]]] = {}
 
         try:
             results = _run_cypher(props_query, {"uris": clean_ids}, self.config)
             for record in results:
                 uri = record.get("uri")
-                props_raw = record.get("props", {})
-                relationships_raw = record.get("relationships", {})
-                # logger.info("\n--------------------------------\n")
-                # logger.info(f"Record: {record}")
-                # logger.info("\n--------------------------------\n")
-                targets_uri = record.get("targets_uri", {})
-                
+                props_raw = record.get("props") or {}
                 if not uri:
                     continue
-                    
-                # Normalize values to List[str]
-                normalized_props = {}
-                for key, val in props_raw.items():
-                    if val is None:
-                        continue
-                    if isinstance(val, list):
-                        normalized_props[key] = [str(v) for v in val if v is not None]
-                    else:
-                        normalized_props[key] = [str(val)]
-                
-                response_data[uri] = normalized_props
-            
+
+                response_data[uri] = self._normalize_node_properties(
+                    props_raw if isinstance(props_raw, dict) else {},
+                    record.get("labels") or [],
+                )
+
             results = _run_cypher(rels_query, {"uris": clean_ids}, self.config)
             for record in results:
                 uri = record.get("uri")
                 rel_type = record.get("rel_type")
                 targets = record.get("targets") or []
-                if not uri:
+                if not uri or not rel_type:
                     continue
-                
-                if uri in response_data:
-                    response_data[uri][rel_type] = targets
-            
+
+                if uri not in response_data:
+                    response_data[uri] = {}
+                response_data[uri][rel_type] = targets
+
             return response_data
 
         except Exception as e:
@@ -416,36 +559,25 @@ class GraphService:
         entity_ids: List[str]
     ) -> Dict[str, Dict[str, List[str]]]:
         """
-        Fetch related entities for the given entity IDs using the _get_entity_data helper.
-        
-        This method uses the same logic as get_entity_graph but returns data in a 
-        flattened format suitable for frontend consumption.
-        
+        Fetch properties and outgoing relations for the given entity IDs.
+
+        Uses the indexed batch property fetch (Resource.uri unique constraint)
+        instead of one unlabeled MATCH per id.
+
         Args:
             entity_ids: List of entity URIs or compact IDs.
-            
+
         Returns:
             Dictionary mapping Entity URI -> { Property/Relationship Name -> List[Values] }
         """
         if not entity_ids:
             return {}
-        
-        result = {}
-        
-        for entity_id in entity_ids:
-            # Build full URI
-            entity_uri = self._build_entity_uri(entity_id)
-            
-            # Fetch entity data without relationship restrictions
-            entity_data = self._get_entity_data(entity_uri, allowed_relationships=None)
-            
-            if entity_data:
-                # Use the properties dict which includes both internal props and relations
-                result[entity_uri] = entity_data.get("properties", {})
-            
-            # Get the info of 
-        
-        return result
+
+        uris = [
+            self._build_entity_uri(entity_id)
+            for entity_id in self._expand_entity_id_params(entity_ids)
+        ]
+        return self.get_entities_properties_batch(uris)
 
     def _build_entity_uri(self, entity_id: str) -> str:
         """
@@ -457,10 +589,39 @@ class GraphService:
         Returns:
             Full URI string.
         """
-        if entity_id.startswith(("http://", "https://")):
-            return entity_id
-        
-        return f"https://w3id.org/mlentory/mlentory_graph/{entity_id}"
+        normalized = entity_id.strip()
+        if normalized.startswith("<") and normalized.endswith(">"):
+            normalized = normalized[1:-1].strip()
+
+        if normalized.startswith(("http://", "https://")):
+            return normalized
+
+        return f"https://w3id.org/mlentory/mlentory_graph/{normalized}"
+
+    def _expand_entity_id_params(self, entity_ids: List[str]) -> List[str]:
+        """
+        Normalize entity ID query params.
+
+        Some reverse proxies collapse repeated ``entity_ids`` keys into a single
+        comma-separated value; split those back into individual IDs.
+        """
+        expanded: List[str] = []
+        for entity_id in entity_ids:
+            if not entity_id:
+                continue
+
+            raw = entity_id.strip()
+            if not raw:
+                continue
+
+            if "," in raw and ("mlentory_graph/" in raw or raw.startswith("http")):
+                parts = [part.strip() for part in raw.split(",") if part.strip()]
+                expanded.extend(parts)
+            else:
+                expanded.append(raw)
+
+        # Preserve order while removing duplicates
+        return list(dict.fromkeys(expanded))
 
     def find_entity_uri_by_name(self, entity_name: str) -> Optional[Dict[str, Any]]:
         """
@@ -497,29 +658,89 @@ class GraphService:
             return None
 
 
-    def get_models_by_entity_uri(self, entity_uri: str) -> List[Dict[str, Any]]:
+    # Outgoing relationships needed to render related-model cards without
+    # a follow-up full model-detail request per card.
+    _RELATED_MODEL_CARD_RELS = [
+        "schema__license",
+        "fair4ml__mlTask",
+        "schema__keywords",
+        "fair4ml__sharedBy",
+        "schema__author",
+    ]
+
+    def get_models_by_entity_uri(
+        self,
+        entity_uri: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        Get all models related to an entity URI.
-        
+        Get models related to an entity URI, optionally paginated.
+
+        Includes card-relevant outgoing relations (license, mlTask, keywords,
+        sharedBy/author) in the same Neo4j round-trip so callers do not need
+        N follow-up model-detail requests.
+
         Args:
             entity_uri: The entity URI to find related models for
-            
+            limit: Max models to return (None = all remaining after offset)
+            offset: Number of models to skip
+
         Returns:
-            List of dictionaries containing model information and relationship types
+            Tuple of (models list, total matching model count)
         """
-        query = """
-        MATCH (e {uri: $entityURI})
+        if offset < 0:
+            offset = 0
+        # Never return the full hub (e.g. apache-2.0 → tens of thousands of
+        # models). Callers paginate; the HTTP route defaults limit to 50.
+        if limit is None or limit < 1:
+            limit = 50
+        elif limit > 500:
+            limit = 500
+
+        count_query = """
+        MATCH (e:Resource {uri: $entityURI})
         MATCH (m:fair4ml__MLModel)-[r]-(e)
-        RETURN DISTINCT 
-            m.uri as model_uri,
-            m.schema__name as model_name,
-            type(r) as relationship_type,
-            properties(m) as model_properties
-        ORDER BY m.schema__name
+        RETURN count(DISTINCT m) AS count
         """
-        
+
+        # Paginate distinct models, then attach card relations in one query.
+        data_query = """
+        MATCH (e:Resource {uri: $entityURI})
+        MATCH (m:fair4ml__MLModel)-[r]-(e)
+        WITH m, collect(DISTINCT type(r))[0] AS relationship_type
+        ORDER BY coalesce(m.schema__name, m.uri)
+        SKIP $offset
+        LIMIT $limit
+        OPTIONAL MATCH (m)-[out]->(t)
+        WHERE type(out) IN $cardRels
+        RETURN
+            m.uri AS model_uri,
+            m.schema__name AS model_name,
+            relationship_type,
+            properties(m) AS model_properties,
+            collect(DISTINCT {
+                type: type(out),
+                target: coalesce(t.uri, t.schema__name)
+            }) AS relations
+        ORDER BY coalesce(m.schema__name, m.uri)
+        """
+
+        params: Dict[str, Any] = {
+            "entityURI": entity_uri,
+            "offset": int(offset),
+            "limit": int(limit),
+            "cardRels": self._RELATED_MODEL_CARD_RELS,
+        }
+
         try:
-            results = _run_cypher(query, {"entityURI": entity_uri}, self.config)
+            count_rows = _run_cypher(count_query, {"entityURI": entity_uri}, self.config)
+            total_count = int(count_rows[0].get("count", 0)) if count_rows else 0
+
+            if total_count == 0:
+                return [], 0
+
+            results = _run_cypher(data_query, params, self.config)
 
             models: List[Dict[str, Any]] = []
             for record in results:
@@ -537,6 +758,30 @@ class GraphService:
                     else:
                         normalized_props[key] = str(value)
 
+                # Fold card relations into model_properties (same shape as node props)
+                for rel in record.get("relations") or []:
+                    if not isinstance(rel, dict):
+                        continue
+                    rel_type = rel.get("type")
+                    target = rel.get("target")
+                    if not rel_type or target is None:
+                        continue
+                    existing = normalized_props.get(rel_type)
+                    if existing is None:
+                        normalized_props[rel_type] = [str(target)]
+                    elif isinstance(existing, list):
+                        target_str = str(target)
+                        if target_str not in existing:
+                            existing.append(target_str)
+                    else:
+                        existing_str = str(existing)
+                        target_str = str(target)
+                        normalized_props[rel_type] = (
+                            [existing_str, target_str]
+                            if existing_str != target_str
+                            else [existing_str]
+                        )
+
                 models.append(
                     {
                         "model_uri": record.get("model_uri"),
@@ -546,13 +791,13 @@ class GraphService:
                     }
                 )
 
-            return models
+            return models, total_count
         except Exception as e:
             logger.error(
                 f"Error getting models for entity URI '{entity_uri}': {e}",
                 exc_info=True,
             )
-            return []
+            return [], 0
 
     def grouped_facet_values(self, entity_type: List[str]) -> Tuple[Dict[str, List[str]], int]:
         """
@@ -581,9 +826,6 @@ class GraphService:
             # Dataset-related relationship types
             dataset_types = {
                 "fair4ml__baseModel",
-                "fair4ml__trainedOn",
-                "fair4ml__testedOn",
-                "fair4ml__validatedOn",
                 "fair4ml__evaluatedOn"
             }
             
@@ -653,6 +895,9 @@ class GraphService:
     def get_model_metadata(self, model_uri: str) -> Dict[str, Any]:
         """
         Fetch extraction metadata for a model's properties.
+
+        Snapshots hang off the temporal ``:MLModel`` overlay (``mlmodel_unique``),
+        not n10s ``:Resource`` catalog nodes.
         
         Args:
             model_uri: The full URI of the model.
@@ -661,7 +906,7 @@ class GraphService:
             Dict mapping property URIs to their metadata.
         """
         query = """
-        MATCH (m {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
+        MATCH (m:MLModel {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
         WHERE r.valid_to IS NULL
         RETURN 
             s.predicate_iri as predicate,
@@ -719,7 +964,7 @@ class GraphService:
             List of model states, sorted by dateModified (newest first).
         """
         query = """
-        MATCH (m {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
+        MATCH (m:MLModel {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
         RETURN 
             s.predicate_iri as predicate,
             s.value as value,

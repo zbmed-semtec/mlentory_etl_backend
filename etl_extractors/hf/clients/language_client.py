@@ -128,7 +128,7 @@ class HFLanguagesClient:
         Return a canonical ISO code string aligned with enrichment and hashing.
 
         Prefer ISO 639-1 (alpha-2); otherwise ISO 639-3 (alpha-3), lowercased.
-        Used for tag-derived languages and Lingua-detected readme languages alike.
+        Used for tag-derived languages and LLM-detected documentation languages alike.
 
         Args:
             code: Raw language tag or code (e.g. ``en``, ``ENG``, ``en-US``).

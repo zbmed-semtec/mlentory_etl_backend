@@ -11,11 +11,10 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from dagster import AssetIn, asset
-from elasticsearch_dsl import connections
 
 from etl.config import get_general_config
-from etl_loaders.elasticsearch_store import ElasticsearchConfig, create_elasticsearch_client, clean_index
-from etl_loaders.index_loader import ModelDocument, build_model_document, check_elasticsearch_connection
+from etl_loaders.elasticsearch_store import ElasticsearchConfig, clean_index
+from etl_loaders.index_loader import check_elasticsearch_connection, index_models
 from etl_loaders.rdf_loader import (
     build_and_persist_models_rdf,
     build_and_persist_licenses_rdf,
@@ -610,45 +609,22 @@ def ai4life_index_models_elasticsearch(
     if not json_file.exists():
         raise FileNotFoundError(f"Normalized models file not found: {mlmodels_json_path}")
 
-    with open(json_file, "r", encoding="utf-8") as f:
-        models = json.load(f)
-    if not isinstance(models, list):
-        raise ValueError(f"Expected list of models, got {type(models).__name__}")
-
-    with open(translation_mapping, "r", encoding="utf-8") as f:
-        translation_map = json.load(f)
-    if not isinstance(translation_map, dict):
-        raise ValueError(f"Expected dict translation mapping, got {type(translation_map).__name__}")
-
     cfg = ElasticsearchConfig.from_env()
-    es_client = create_elasticsearch_client(cfg)
-    connections.add_connection("default", es_client)
-
     index_name = es_ready.get("ai4life_models_index") or os.getenv("ELASTIC_AI4LIFE_MODELS_INDEX", "ai4life_models")
-    ModelDocument.init(index=index_name, using=es_client)
 
-    indexed = 0
-    errors = 0
-    for idx, model in enumerate(models):
-        try:
-            doc = build_model_document(model, index_name, translation_map)
-            doc.meta.index = index_name
-            doc.save(using=es_client, refresh=False)
-            indexed += 1
-        except Exception as exc:
-            errors += 1
-            identifier = model.get("https://schema.org/identifier", f"unknown_{idx}")
-            logger.error("Error indexing AI4Life model %s: %s", identifier, exc, exc_info=True)
-
-    stats = {
-        "models_indexed": indexed,
-        "errors": errors,
-        "index": index_name,
-        "input_file": str(json_file),
-        "normalized_folder": normalized_folder,
-        "cluster_name": es_ready.get("cluster_name"),
-        "rdf_run_folder": str(rdf_run_folder),
-    }
+    stats = index_models(
+        json_path=mlmodels_json_path,
+        translation_mapping_path=translation_mapping,
+        index_name=index_name,
+        es_config=cfg,
+    )
+    stats.update(
+        {
+            "normalized_folder": normalized_folder,
+            "cluster_name": es_ready.get("cluster_name"),
+            "rdf_run_folder": str(rdf_run_folder),
+        }
+    )
     elasticsearch_report_path = rdf_run_folder / "elasticsearch_report.json"
     with open(elasticsearch_report_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
