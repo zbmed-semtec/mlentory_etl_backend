@@ -346,6 +346,7 @@ class FacetedSearchMixin:
                 "shared_by",
                 "db_identifier",
                 "keywords",
+                "baseModels",
                 "license",
                 "description",
                 "platform",
@@ -369,7 +370,10 @@ class FacetedSearchMixin:
             models: List[ModelListItem] = []
             for hit in hits_data.get("hits", []):
                 source = hit.get("_source", {})
-                
+
+                print(f"BaseModel: {source.get('baseModels', [])}")
+                print(f"license: {source.get('license')}")
+
                 mlentory_id = next(
                     (id for id in source.get("db_identifier", []) if id.startswith("https://w3id.org/mlentory/mlentory_graph/")),
                     -1
