@@ -257,11 +257,11 @@ async def get_models_by_entity_uri(
         description="The full entity URI to find related models for "
         "(e.g. 'https://w3id.org/mlentory/mlentory_graph/<entity-id>')",
     ),
-    limit: Optional[int] = Query(
-        None,
+    limit: int = Query(
+        50,
         ge=1,
         le=500,
-        description="Max number of models to return (omit for all remaining after offset)",
+        description="Max number of models to return (default 50; never unbounded)",
     ),
     offset: int = Query(
         0,
@@ -272,12 +272,12 @@ async def get_models_by_entity_uri(
     """
     Get models related to an entity (optionally paginated).
 
-    Retrieves ML models connected to the given entity URI. When ``limit`` is set,
-    only that page is returned; ``count`` is always the total match count.
+    Retrieves ML models connected to the given entity URI. Only one page is
+    returned; ``count`` is always the total match count.
 
     **Parameters:**
     - `entity_uri`: The entity URI to find related models for
-    - `limit`: Optional page size
+    - `limit`: Page size (default 50, max 500)
     - `offset`: Optional page offset
 
     **Response:**

@@ -13,6 +13,10 @@ from dagster import asset, AssetIn
 
 from etl import LLMConfig
 from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper, HFLLMSchemaPropertyExtractor
+from etl_transformers.common.llm_inlanguage import (
+    LLM_INLANGUAGE_METHOD,
+    parse_llm_inlanguage_codes,
+)
 from etl.config import get_hf_config
 
 
@@ -876,69 +880,25 @@ def hf_identified_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, Lis
 
 @asset(
     group_name="hf_enrichment",
-    ins={"models_data": AssetIn("hf_add_ancestor_models")},
-    tags={"pipeline": "hf_etl", "stage": "extract"},
-)
-def hf_detected_readme_languages(models_data: Tuple[str, str]) -> Tuple[Dict[str, List[Dict[str, object]]], str]:
-    """
-    Detect documentation languages per model from model card markdown (schema:inLanguage).
-
-    Uses Lingua on stripped README/card text. May return multiple ISO codes when
-    several languages exceed the confidence threshold.
-    """
-    from etl_extractors.common.text_language_detector import (
-        detect_language_predictions,
-        strip_markdown_frontmatter,
-    )
-
-    models_json_path, run_folder = models_data
-
-    with open(models_json_path, "r", encoding="utf-8") as f:
-        raw_models = json.load(f)
-    if not isinstance(raw_models, list):
-        logger.warning("Expected list of models at %s", models_json_path)
-        return ({}, run_folder)
-
-    per_model: Dict[str, List[Dict[str, object]]] = {}
-    for raw in raw_models:
-        model_id = raw.get("modelId")
-        if not model_id:
-            continue
-        card_text = strip_markdown_frontmatter(raw.get("card", "") or "")
-        per_model[model_id] = detect_language_predictions(
-            card_text,
-            min_confidence=0.75,
-            max_languages=5,
-        )
-
-    logger.info("Detected readme languages for %s models", len(per_model))
-    return (per_model, run_folder)
-
-
-@asset(
-    group_name="hf_enrichment",
     ins={
         "languages_data": AssetIn("hf_identified_languages"),
-        "readme_languages_data": AssetIn("hf_detected_readme_languages"),
+        "llm_extraction": AssetIn("hf_llm_schema_extractor"),
     },
     tags={"pipeline": "hf_etl", "stage": "extract"}
 )
 def hf_enriched_languages(
     languages_data: Tuple[Dict[str, List[str]], str],
-    readme_languages_data: Tuple[Dict[str, List[Dict[str, object]]], str],
+    llm_extraction: Tuple[Dict[str, Dict[str, str]], str],
 ) -> str:
     """
     Enrich language codes referenced by models using the pycountry dataset.
 
-    Args:
-        languages_data: Tuple of ({model_id: [language_codes]}, run_folder)
-
-    Returns:
-        Path to the saved languages JSON file.
+    Combines HF tag languages (supportedLanguages) with LLM-detected
+    documentation languages (schema:inLanguage).
     """
 
     model_languages_dict, run_folder = languages_data
-    readme_languages_dict, _ = readme_languages_data
+    llm_schema_by_model, _ = llm_extraction
     language_codes: Set[str] = set()
     language_confidences: Dict[str, float] = {}
     language_extraction_methods: Dict[str, str] = {}
@@ -951,19 +911,17 @@ def hf_enriched_languages(
             language_codes.add(code_norm)
             # supportedLanguages from HF tags/API -> pycountry baseline metadata
             language_extraction_methods.setdefault(code_norm, "pycountry")
-    for predictions in readme_languages_dict.values():
-        for prediction in (predictions or []):
-            if not isinstance(prediction, dict):
-                continue
-            code_norm = str(prediction.get("code", "")).strip()
-            if not code_norm:
-                continue
+
+    for llm_record in (llm_schema_by_model or {}).values():
+        if not isinstance(llm_record, dict):
+            continue
+        for code_norm in parse_llm_inlanguage_codes(llm_record.get("schema:inLanguage")):
             language_codes.add(code_norm)
-            confidence = float(prediction.get("confidence", 0.0) or 0.0)
-            prev = language_confidences.get(code_norm, 0.0)
-            language_confidences[code_norm] = max(prev, confidence)
-            # inLanguage detected by Lingua then normalized by pycountry
-            language_extraction_methods[code_norm] = "lingua-language-detector+pycountry"
+            language_confidences[code_norm] = max(
+                language_confidences.get(code_norm, 0.0),
+                0.85,
+            )
+            language_extraction_methods[code_norm] = LLM_INLANGUAGE_METHOD
 
     if not language_codes:
         logger.info("No languages to extract")

@@ -69,10 +69,9 @@ class GraphService:
         """
         Fetch a subgraph starting from a specific entity.
 
-        Loads the start node and its 1-hop neighborhood in a single Cypher
-        query (model props, outgoing edges, neighbor props, and each
-        neighbor's outgoing relation targets), then assembles GraphResponse
-        in Python. Depth beyond 1 is not traversed.
+        Loads the start node and its 1-hop neighborhood, then each neighbor's
+        outgoing targets in a second indexed query. Depth beyond 1 is not
+        traversed as graph edges.
 
         Args:
             entity_id: Compact alphanumeric identifier of the starting entity (no scheme).
@@ -95,8 +94,9 @@ class GraphService:
             relationships = self.default_relationships.get(entity_label, [])
 
         try:
-            rows = self._fetch_entity_neighborhood(entity_uri, relationships)
-            neo4j_query_count = 1
+            rows, neo4j_query_count = self._fetch_entity_neighborhood(
+                entity_uri, relationships
+            )
 
             if not rows:
                 return GraphResponse(
@@ -130,7 +130,7 @@ class GraphService:
                     "edge_count": len(graph_edges),
                     "relationships": relationships or [],
                     "entity_label": entity_label,
-                    "strategy": "batched-1hop",
+                    "strategy": "indexed-1hop-collect",
                     "neo4j_query_count": neo4j_query_count,
                 },
             )
@@ -143,24 +143,21 @@ class GraphService:
         self,
         entity_uri: str,
         allowed_relationships: Optional[List[str]],
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        Load start node + 1-hop neighbors (and neighbor outgoing targets) in one query.
+        Load start node + 1-hop neighbors, then neighbor outgoing targets.
 
-        Returns one row per (start→neighbor edge × neighbor→target edge) combination.
-        When the start node has no outgoing edges, a single row with null link fields
-        is still returned so the start node can be assembled.
+        Uses ``:Resource {uri}`` so Neo4j hits the n10s unique index instead of
+        scanning. Neighbor outgoing edges are collected per neighbor in a
+        second query so a hub neighbor cannot cartesian-expand the result.
+
+        Returns one row per start→neighbor edge. When the start node has no
+        outgoing edges, a single row with null link fields is still returned.
         """
-        # Single round-trip: start node + allowed outgoing edges + neighbor
-        # properties + each neighbor's outgoing targets (folded into props later).
-        # WHERE on OPTIONAL MATCH nullifies non-matching optionals without
-        # dropping the start-node row when there are no edges.
-        query = """
-        MATCH (m {uri: $uri})
-        WHERE 'Resource' IN labels(m)
+        hop_query = """
+        MATCH (m:Resource {uri: $uri})
         OPTIONAL MATCH (m)-[r]->(n)
         WHERE $rels IS NULL OR type(r) IN $rels
-        OPTIONAL MATCH (n)-[nr]->(nt)
         RETURN
             coalesce(m.uri, elementId(m)) AS m_id,
             labels(m) AS m_labels,
@@ -170,15 +167,67 @@ class GraphService:
             properties(r) AS edge_props,
             coalesce(n.uri, elementId(n)) AS n_id,
             labels(n) AS n_labels,
-            properties(n) AS n_props,
-            type(nr) AS n_rel_type,
-            coalesce(nt.uri, elementId(nt)) AS n_rel_target
+            properties(n) AS n_props
         """
         params: Dict[str, Any] = {
             "uri": entity_uri,
             "rels": allowed_relationships,
         }
-        return _run_cypher(query, params, self.config)
+        rows = _run_cypher(hop_query, params, self.config)
+        if not rows:
+            return [], 1
+
+        neighbor_uris: List[str] = []
+        seen_neighbors: Set[str] = set()
+        for row in rows:
+            n_id = row.get("n_id")
+            if not n_id or not isinstance(n_id, str):
+                continue
+            if not n_id.startswith(("http://", "https://")):
+                continue
+            if n_id in seen_neighbors:
+                continue
+            seen_neighbors.add(n_id)
+            neighbor_uris.append(n_id)
+
+        if not neighbor_uris:
+            return rows, 1
+
+        # Bound each neighbor's outgoing expansion so a hub node cannot
+        # materialize tens of thousands of targets into the API payload.
+        outs_query = """
+        UNWIND $uris AS uri
+        MATCH (n:Resource {uri: uri})
+        CALL {
+            WITH n
+            MATCH (n)-[nr]->(nt)
+            WITH type(nr) AS n_rel_type,
+                 coalesce(nt.uri, elementId(nt)) AS n_rel_target
+            LIMIT 80
+            RETURN n_rel_type, n_rel_target
+        }
+        RETURN n.uri AS n_id, n_rel_type,
+               collect(DISTINCT n_rel_target)[0..50] AS targets
+        """
+        outs_rows = _run_cypher(outs_query, {"uris": neighbor_uris}, self.config)
+        outs_by_neighbor: Dict[str, List[Dict[str, str]]] = {}
+        for rec in outs_rows:
+            n_id = rec.get("n_id")
+            n_rel_type = rec.get("n_rel_type")
+            if not n_id or not n_rel_type:
+                continue
+            for target in rec.get("targets") or []:
+                if not target:
+                    continue
+                outs_by_neighbor.setdefault(n_id, []).append(
+                    {"type": n_rel_type, "target": str(target)}
+                )
+
+        for row in rows:
+            n_id = row.get("n_id")
+            row["n_outs"] = outs_by_neighbor.get(n_id, []) if n_id else []
+
+        return rows, 2
 
     def _assemble_neighborhood_graph(
         self,
@@ -234,14 +283,29 @@ class GraphService:
                 )
 
             # Neighbor outgoing relations as properties (not as graph edges)
-            n_rel_type = row.get("n_rel_type")
-            n_rel_target = row.get("n_rel_target")
-            if n_rel_type and n_rel_target:
-                props = neighbor_props[n_id]
-                if n_rel_type not in props:
-                    props[n_rel_type] = []
-                if n_rel_target not in props[n_rel_type]:
-                    props[n_rel_type].append(n_rel_target)
+            props = neighbor_props[n_id]
+            n_outs = row.get("n_outs") or []
+            if n_outs:
+                for item in n_outs:
+                    if not isinstance(item, dict):
+                        continue
+                    n_rel_type = item.get("type")
+                    n_rel_target = item.get("target")
+                    if not n_rel_type or not n_rel_target:
+                        continue
+                    if n_rel_type not in props:
+                        props[n_rel_type] = []
+                    target_str = str(n_rel_target)
+                    if target_str not in props[n_rel_type]:
+                        props[n_rel_type].append(target_str)
+            else:
+                n_rel_type = row.get("n_rel_type")
+                n_rel_target = row.get("n_rel_target")
+                if n_rel_type and n_rel_target:
+                    if n_rel_type not in props:
+                        props[n_rel_type] = []
+                    if n_rel_target not in props[n_rel_type]:
+                        props[n_rel_type].append(n_rel_target)
 
         graph_nodes: List[GraphNode] = [
             GraphNode(id=start_id, labels=start_labels, properties=start_props)
@@ -308,11 +372,10 @@ class GraphService:
               - neighbor_uris: List of distinct target URIs
             Returns None if entity not found.
         """
-        # 1. Get Node Properties
-        # We use OPTIONAL MATCH or just MATCH. If node exists, we want it.
+        # 1. Get Node Properties via the Resource.uri unique index.
         props_query = """
-        MATCH (n {uri: $uri})
-        RETURN 
+        MATCH (n:Resource {uri: $uri})
+        RETURN
             coalesce(n.uri, elementId(n)) as id,
             labels(n) as labels,
             properties(n) as props
@@ -348,9 +411,9 @@ class GraphService:
             rel_filter = "AND type(r) IN $rels"
         
         rels_query = f"""
-        MATCH (n {{uri: $uri}})-[r]->(m)
+        MATCH (n:Resource {{uri: $uri}})-[r]->(m)
         WHERE 1=1 {rel_filter}
-        RETURN 
+        RETURN
             type(r) as type,
             coalesce(m.uri, elementId(m)) as target_uri,
             elementId(r) as edge_id,
@@ -446,7 +509,7 @@ class GraphService:
         props_query = f"""
         UNWIND $uris AS uri
         MATCH (n:Resource {{uri: uri}})
-        RETURN n.uri AS uri, {return_clause} AS props
+        RETURN n.uri AS uri, {return_clause} AS props, labels(n) AS labels
         """
 
         rels_query = """
@@ -468,16 +531,10 @@ class GraphService:
                 if not uri:
                     continue
 
-                normalized_props: Dict[str, List[str]] = {}
-                for key, val in props_raw.items():
-                    if val is None:
-                        continue
-                    if isinstance(val, list):
-                        normalized_props[key] = [str(v) for v in val if v is not None]
-                    else:
-                        normalized_props[key] = [str(val)]
-
-                response_data[uri] = normalized_props
+                response_data[uri] = self._normalize_node_properties(
+                    props_raw if isinstance(props_raw, dict) else {},
+                    record.get("labels") or [],
+                )
 
             results = _run_cypher(rels_query, {"uris": clean_ids}, self.config)
             for record in results:
@@ -502,36 +559,25 @@ class GraphService:
         entity_ids: List[str]
     ) -> Dict[str, Dict[str, List[str]]]:
         """
-        Fetch related entities for the given entity IDs using the _get_entity_data helper.
-        
-        This method uses the same logic as get_entity_graph but returns data in a 
-        flattened format suitable for frontend consumption.
-        
+        Fetch properties and outgoing relations for the given entity IDs.
+
+        Uses the indexed batch property fetch (Resource.uri unique constraint)
+        instead of one unlabeled MATCH per id.
+
         Args:
             entity_ids: List of entity URIs or compact IDs.
-            
+
         Returns:
             Dictionary mapping Entity URI -> { Property/Relationship Name -> List[Values] }
         """
         if not entity_ids:
             return {}
-        
-        result = {}
-        
-        for entity_id in self._expand_entity_id_params(entity_ids):
-            # Build full URI
-            entity_uri = self._build_entity_uri(entity_id)
-            
-            # Fetch entity data without relationship restrictions
-            entity_data = self._get_entity_data(entity_uri, allowed_relationships=None)
-            
-            if entity_data:
-                # Use the properties dict which includes both internal props and relations
-                result[entity_uri] = entity_data.get("properties", {})
-            
-            # Get the info of 
-        
-        return result
+
+        uris = [
+            self._build_entity_uri(entity_id)
+            for entity_id in self._expand_entity_id_params(entity_ids)
+        ]
+        return self.get_entities_properties_batch(uris)
 
     def _build_entity_uri(self, entity_id: str) -> str:
         """
@@ -645,27 +691,27 @@ class GraphService:
         """
         if offset < 0:
             offset = 0
-        if limit is not None and limit < 0:
-            limit = None
+        # Never return the full hub (e.g. apache-2.0 → tens of thousands of
+        # models). Callers paginate; the HTTP route defaults limit to 50.
+        if limit is None or limit < 1:
+            limit = 50
+        elif limit > 500:
+            limit = 500
 
         count_query = """
-        MATCH (e {uri: $entityURI})
+        MATCH (e:Resource {uri: $entityURI})
         MATCH (m:fair4ml__MLModel)-[r]-(e)
         RETURN count(DISTINCT m) AS count
         """
 
         # Paginate distinct models, then attach card relations in one query.
         data_query = """
-        MATCH (e {uri: $entityURI})
+        MATCH (e:Resource {uri: $entityURI})
         MATCH (m:fair4ml__MLModel)-[r]-(e)
         WITH m, collect(DISTINCT type(r))[0] AS relationship_type
         ORDER BY coalesce(m.schema__name, m.uri)
         SKIP $offset
-        """
-        if limit is not None:
-            data_query += "\nLIMIT $limit"
-
-        data_query += """
+        LIMIT $limit
         OPTIONAL MATCH (m)-[out]->(t)
         WHERE type(out) IN $cardRels
         RETURN
@@ -683,10 +729,9 @@ class GraphService:
         params: Dict[str, Any] = {
             "entityURI": entity_uri,
             "offset": int(offset),
+            "limit": int(limit),
             "cardRels": self._RELATED_MODEL_CARD_RELS,
         }
-        if limit is not None:
-            params["limit"] = int(limit)
 
         try:
             count_rows = _run_cypher(count_query, {"entityURI": entity_uri}, self.config)
@@ -850,6 +895,9 @@ class GraphService:
     def get_model_metadata(self, model_uri: str) -> Dict[str, Any]:
         """
         Fetch extraction metadata for a model's properties.
+
+        Snapshots hang off the temporal ``:MLModel`` overlay (``mlmodel_unique``),
+        not n10s ``:Resource`` catalog nodes.
         
         Args:
             model_uri: The full URI of the model.
@@ -858,7 +906,7 @@ class GraphService:
             Dict mapping property URIs to their metadata.
         """
         query = """
-        MATCH (m {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
+        MATCH (m:MLModel {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
         WHERE r.valid_to IS NULL
         RETURN 
             s.predicate_iri as predicate,
@@ -916,7 +964,7 @@ class GraphService:
             List of model states, sorted by dateModified (newest first).
         """
         query = """
-        MATCH (m {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
+        MATCH (m:MLModel {uri: $uri})-[r:HAS_PROPERTY_SNAPSHOT]->(s:MLModelPropertySnapshot)
         RETURN 
             s.predicate_iri as predicate,
             s.value as value,

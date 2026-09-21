@@ -3,8 +3,10 @@
 from etl_transformers.common.entity_link_metadata import (
     AI4LIFE_ENTITY_LINK_METADATA,
     HF_ENTITY_LINK_METADATA,
+    KAGGLE_ENTITY_LINK_METADATA,
     apply_entity_link_extraction_metadata,
 )
+from etl_transformers.common.llm_inlanguage import LLM_INLANGUAGE_METHOD
 
 
 def test_hf_entity_link_metadata_covers_expected_fields():
@@ -15,7 +17,6 @@ def test_hf_entity_link_metadata_covers_expected_fields():
         "keywords",
         "baseModel",
         "supportedLanguages",
-        "inLanguage",
         "mlTask",
         "sharedBy",
     }
@@ -37,6 +38,11 @@ def test_ai4life_entity_link_metadata_covers_expected_fields():
     assert expected == set(AI4LIFE_ENTITY_LINK_METADATA.keys())
     assert AI4LIFE_ENTITY_LINK_METADATA["license"]["extraction_method"] == "Hypha API"
     assert AI4LIFE_ENTITY_LINK_METADATA["mlTask"]["extraction_method"] == "ai4life_task_identifier"
+    assert AI4LIFE_ENTITY_LINK_METADATA["inLanguage"]["extraction_method"] == LLM_INLANGUAGE_METHOD
+
+
+def test_kaggle_entity_link_metadata_inlanguage_uses_llm():
+    assert KAGGLE_ENTITY_LINK_METADATA["inLanguage"]["extraction_method"] == LLM_INLANGUAGE_METHOD
 
 
 def test_apply_hf_entity_link_metadata_on_merge_shape():

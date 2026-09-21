@@ -67,22 +67,28 @@ class KaggleInstancesClient:
     @staticmethod
     def _display_name(variation: str, parent_title: str, framework: str) -> str:
         """
-        Build a name that identifies the instance on its own.
+        Catalog label for a variation.
 
-        Kaggle names the sole variation of a model "default", so that slug
-        carries no information. Anything else is a real variation name and is
-        used as-is.
+        Always include the parent title and the framework so two runtimes of
+        the same slug (PyTorch mini vs TensorFlow2 mini) do not share a name.
+        Drop only generic slugs (``default``, ``1``) that Kaggle uses when a
+        model has a single unnamed variation. The identifier stays
+        ``owner/model/framework/variation``.
         """
         generic = {"default", "", "1"}
-        if variation.lower() not in generic:
-            return variation
+        parent = (parent_title or "").strip()
+        runtime = (framework or "").strip()
+        slug = (variation or "").strip()
+        keep_slug = bool(slug) and slug.lower() not in generic
 
-        parts = [p for p in (parent_title, framework) if p]
-        if len(parts) == 2:
-            return f"{parts[0]} ({parts[1]})"
-        if parts:
-            return parts[0]
-        return variation
+        inner = [part for part in (runtime, slug if keep_slug else "") if part]
+        if parent and inner:
+            return f"{parent} ({' · '.join(inner)})"
+        if parent:
+            return parent
+        if inner:
+            return " · ".join(inner)
+        return slug
 
     @staticmethod
     def _clean_framework(framework: str) -> str:
@@ -118,6 +124,23 @@ class KaggleInstancesClient:
         # of their own, so it is carried down: a search for everything an
         # account published should return their variations too.
         parent_shared_by = self._to_str((record or {}).get("author", ""))
+        # models/get has no timestamps. Meta Kaggle CreationDate is merged
+        # onto the parent record; variations inherit that parent created date.
+        # dateModified prefers an API update time, else the same CreationDate.
+        parent_created = (
+            record.get("publishTime")
+            or record.get("CreationDate")
+            or record.get("creationDate")
+            or record.get("dateCreated")
+            or ""
+        )
+        parent_modified = (
+            record.get("lastUpdateTime")
+            or record.get("updateTime")
+            or record.get("LastUpdateTime")
+            or record.get("dateModified")
+            or parent_created
+        )
 
         raw_instances = record.get("instances")
         raw_instances = raw_instances if isinstance(raw_instances, list) else []
@@ -176,6 +199,8 @@ class KaggleInstancesClient:
             out["parent_name"] = parent_title
             out["parent_description"] = parent_description
             out["sharedBy"] = parent_shared_by
+            out["dateCreated"] = self._to_str(parent_created)
+            out["dateModified"] = self._to_str(parent_modified)
             out["extraction_timestamp"] = self._to_str(
                 self.records_data.get("timestamp", "")
             )
@@ -186,11 +211,8 @@ class KaggleInstancesClient:
 
             # ---- schema-aligned fields ----
             out["slug"] = variation
-            # A single-variation model always uses the slug "default", so the
-            # slug alone is not a usable display name - a catalog would show
-            # dozens of identical "default" entries with no way to tell them
-            # apart. Fall back to the parent title plus framework, keeping the
-            # real slug in the `slug` field.
+            # Parent title plus framework, with the variation slug when it is
+            # informative. Generic slugs stay in `slug`, not in `name`.
             out["name"] = self._display_name(variation, parent_title, framework_display)
             out["description"] = self._to_str(instance.get("overview", ""))
             out["modelArchitecture"] = framework

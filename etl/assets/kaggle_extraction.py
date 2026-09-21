@@ -31,7 +31,12 @@ from etl.config import get_kaggle_config
 from etl_extractors.kaggle import KaggleExtractor
 from etl_extractors.kaggle.kaggle_crawler import KaggleCrawler
 from etl_extractors.kaggle.kaggle_helper import KaggleHelper
+from etl_extractors.kaggle.model_readme import KaggleModelReadmeFetcher
 from etl_extractors.kaggle.kaggle_enrichment import KaggleEnrichment
+from etl_transformers.common.llm_inlanguage import (
+    LLM_INLANGUAGE_METHOD,
+    detect_inlanguage_with_llm,
+)
 
 # temporary import from HF for LLM-based schema extraction
 from etl import LLMConfig
@@ -201,10 +206,32 @@ def kaggle_instances_raw(
  
     extractor = KaggleExtractor(records_data=records)
     instances_df = extractor.extract_specific_instances(sorted(instance_ids))
- 
+
+    config = get_kaggle_config()
+    if config.fetch_instance_readmes and not instances_df.empty:
+        instance_records = instances_df.to_dict(orient="records")
+        crawler = KaggleCrawler(
+            output_dir=str(STATE_DIR),
+            threads=config.threads,
+            max_retries=config.max_retries,
+            request_timeout_seconds=config.request_timeout_seconds,
+        )
+        fetcher = KaggleModelReadmeFetcher(
+            crawler,
+            cache_dir=STATE_DIR / "instance_readmes",
+            force_refresh=config.force_full_refresh,
+        )
+        found = fetcher.attach_readmes(instance_records)
+        instances_df = pd.DataFrame(instance_records)
+        logger.info(
+            "Attached README.md on %d/%d Kaggle models",
+            found,
+            len(instance_records),
+        )
+
     instances_path = Path(run_folder) / "instances.json"
     instances_df.to_json(str(instances_path), orient="records", indent=2)
- 
+
     logger.info("Saved %d instances to %s", len(instances_df), instances_path)
     return (str(instances_path), run_folder)
 
@@ -478,10 +505,9 @@ def kaggle_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[D
 
     Kaggle stores the model card in ``intendedUse`` (from the API description
     field), so detection uses that text plus the model name, matching AI4Life.
+    Uses the shared LLM schema extractor (same ``schema:inLanguage`` question as HF).
     """
-    from etl_extractors.common.text_language_detector import detect_language_predictions
-
-    models_json_path, _ = models_data
+    models_json_path, run_folder = models_data
     with open(models_json_path, "r", encoding="utf-8") as file_handle:
         raw_models = json.load(file_handle)
 
@@ -489,7 +515,7 @@ def kaggle_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[D
         logger.warning("Expected list of models at %s", models_json_path)
         return {}
 
-    detected: Dict[str, List[Dict[str, Any]]] = {}
+    texts: Dict[str, str] = {}
     for idx, raw_model in enumerate(raw_models):
         if not isinstance(raw_model, dict):
             continue
@@ -499,11 +525,12 @@ def kaggle_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[D
             str(raw_model.get("intendedUse", "")).strip(),
             str(raw_model.get("name", "")).strip(),
         ]
-        detected[model_id] = detect_language_predictions(
-            "\n\n".join([part for part in text_parts if part]),
-            min_confidence=0.75,
-            max_languages=5,
-        )
+        texts[model_id] = "\n\n".join([part for part in text_parts if part])
+
+    detected = detect_inlanguage_with_llm(texts, log=logger)
+    out_path = Path(run_folder) / "llm_inlanguage_results.json"
+    with open(out_path, "w", encoding="utf-8") as file_handle:
+        json.dump(detected, file_handle, indent=2, ensure_ascii=False)
 
     logger.info("Detected inLanguage values for %d Kaggle models", len(detected))
     return detected
@@ -555,7 +582,7 @@ def kaggle_languages_raw(
                 "entity_type": "Language",
                 "platform": "Kaggle",
                 "extraction_metadata": {
-                    "extraction_method": "lingua-language-detector+pycountry",
+                    "extraction_method": LLM_INLANGUAGE_METHOD,
                     "confidence": per_code_confidence[code],
                     "source_field": "intendedUse",
                 },

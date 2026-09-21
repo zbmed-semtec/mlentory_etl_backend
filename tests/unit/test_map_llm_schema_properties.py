@@ -4,7 +4,12 @@ Unit tests for LLM schema property mapping into FAIR4ML partial dicts.
 
 from __future__ import annotations
 
-from etl_transformers.hf.map_llm_schema_properties import map_llm_schema_properties
+from etl_transformers.hf.map_llm_schema_properties import (
+    map_llm_schema_properties,
+    parse_llm_inlanguage_codes,
+)
+from etl_transformers.common.llm_inlanguage import predictions_from_llm_output
+from etl_extractors.hf.hf_helper import HFHelper
 
 
 def _sample_llm_record() -> dict:
@@ -83,3 +88,54 @@ class TestMapLlmSchemaProperties:
 
     def test_empty_record_returns_empty_dict(self):
         assert map_llm_schema_properties({}, {"description": "x"}) == {}
+
+    def test_inlanguage_codes_become_language_iris(self):
+        record = {"schema:inLanguage": "en, zh"}
+        result = map_llm_schema_properties(record, {})
+
+        assert result["inLanguage"] == [
+            HFHelper.generate_mlentory_entity_hash_id("Language", "en"),
+            HFHelper.generate_mlentory_entity_hash_id("Language", "zh"),
+        ]
+        assert result["extraction_metadata"]["inLanguage"]["extraction_method"] == (
+            "LLM_schema_extraction"
+        )
+
+    def test_inlanguage_names_and_na_are_normalized(self):
+        record = {"schema:inLanguage": "English and NA"}
+        result = map_llm_schema_properties(record, {})
+
+        assert result["inLanguage"] == [
+            HFHelper.generate_mlentory_entity_hash_id("Language", "en"),
+        ]
+
+    def test_inlanguage_na_skipped(self):
+        result = map_llm_schema_properties({"schema:inLanguage": "NA"}, {})
+        assert "inLanguage" not in result
+
+
+class TestParseLlmInlanguageCodes:
+    def test_comma_separated_iso_codes(self):
+        assert parse_llm_inlanguage_codes("en, zh, de") == ["en", "zh", "de"]
+
+    def test_language_names(self):
+        assert parse_llm_inlanguage_codes("English, Chinese") == ["en", "zh"]
+
+    def test_empty_and_na(self):
+        assert parse_llm_inlanguage_codes("NA") == []
+        assert parse_llm_inlanguage_codes("") == []
+        assert parse_llm_inlanguage_codes(None) == []
+
+
+class TestPredictionsFromLlmOutput:
+    def test_converts_codes_to_lingua_shaped_predictions(self):
+        parsed = {
+            "model-a": {"schema:inLanguage": "en, zh"},
+            "model-b": {"schema:inLanguage": "NA"},
+        }
+        detected = predictions_from_llm_output(parsed)
+        assert detected["model-a"] == [
+            {"code": "en", "confidence": 0.85},
+            {"code": "zh", "confidence": 0.85},
+        ]
+        assert detected["model-b"] == []

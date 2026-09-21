@@ -34,33 +34,8 @@ _METHOD = "Parsed_from_Kaggle_models_json"
 
 
 def _parse_datetime(value: Any) -> Optional[datetime]:
-    """
-    Parse a datetime value from various formats.
-
-    Args:
-        value: Input value (string, datetime, or None)
-
-    Returns:
-        Parsed datetime or None
-    """
-    if value is None:
-        return None
-
-    if isinstance(value, datetime):
-        return value
-
-    if isinstance(value, str):
-        cleaned = value.strip()
-        if not cleaned:
-            return None
-        try:
-            # Try parsing ISO format
-            return datetime.fromisoformat(cleaned.replace('Z', '+00:00'))
-        except (ValueError, AttributeError):
-            logger.warning(f"Could not parse datetime: {value}")
-            return None
-
-    return None
+    """Parse a datetime value from Kaggle or ISO formats."""
+    return KaggleHelper.parse_kaggle_datetime(value)
 
 
 def _create_extraction_metadata(
@@ -245,10 +220,7 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     date_created = str(raw_model.get("dateCreated", "")).strip()
-    date_modified = str(raw_model.get("dateModified", "")).strip()
-    # Kaggle returns publishTime on only a minority of records, so dateCreated
-    # is usually empty while dateModified (from updateTime) is reliable. Fall
-    # back to dateModified rather than leaving datePublished unset.
+    date_modified = str(raw_model.get("dateModified", "")).strip() or date_created
     date_published = (
         str(raw_model.get("datePublished", "")).strip()
         or date_created
@@ -338,13 +310,13 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
             method=_METHOD,
             confidence=1.0,
             source_field="dateCreated",
-            notes="From publishTime; absent on most Kaggle records",
+            notes="From publishTime or Meta Kaggle CreationDate",
         ),
         "dateModified": _create_extraction_metadata(
             method=_METHOD,
             confidence=1.0,
             source_field="dateModified",
-            notes="From updateTime",
+            notes="From updateTime; else Meta Kaggle CreationDate",
         ),
         "datePublished": _create_extraction_metadata(
             method=_METHOD,

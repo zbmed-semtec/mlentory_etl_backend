@@ -89,6 +89,11 @@ class KaggleExtractor:
                 summary = crawler.fetch_model_cards(refs=refs, limit=num_models)
 
             records = crawler.load_records()
+            attached = crawler.attach_meta_dates(records)
+            if attached:
+                logger.info(
+                    "Attached Meta Kaggle CreationDate onto %d records", attached
+                )
             payload = {"data": records, "summary": summary}
             return payload, extraction_timestamp
         except Exception as exc:  # noqa: BLE001
