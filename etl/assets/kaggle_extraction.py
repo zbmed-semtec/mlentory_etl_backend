@@ -652,7 +652,7 @@ def kaggle_llm_schema_extractors(raw_data: Dict[str, Any]) -> Tuple[Dict[str, Di
     llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=config)
     llm_extractor.load_metadata()
     llm_extractor.load_llm()
-    batch_size = llm_extractor.estimate_max_concurrent_cards(model_texts, typical_visible_output_tokens=150)
+    batch_size = llm_extractor.estimate_max_concurrent_cards(model_texts, typical_visible_output_tokens=2048)
     llm_extractor.extract_properties(model_texts, 
                                      return_result=False,
                                      batch_size=batch_size)

@@ -76,7 +76,7 @@ profiles:
       enable_prefix_caching: true
       extra_args: "--language-model-only"
 
-  "L40S":
+  "L40S-48C":
     match:
       gpu_name_contains: "L40S"
       min_gpu_count: 1
