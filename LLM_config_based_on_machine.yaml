@@ -76,6 +76,25 @@ profiles:
       enable_prefix_caching: true
       extra_args: "--language-model-only"
 
+  "L40S":
+    match:
+      gpu_name_contains: "L40S"
+      min_gpu_count: 1
+      min_vram_gb_per_gpu: 44
+    llm:
+      image: "vllm/vllm-openai:v0.29.0"
+      model_name: "RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic"
+      max_model_len: 32768
+      max_num_seqs: 600
+      tensor_parallel_size: 1
+      gpu_kv_cache_size: 525584
+      reasoning_start_str: "<|channel>"
+      reasoning_end_str: "<channel|>"
+      thinking_token_budget: 768
+      enable_thinking: true
+      enable_prefix_caching: true
+      extra_args: '--language-model-only --kv-cache-dtype fp8'
+
 default:
   llm:
       image: "vllm/vllm-openai:latest"
