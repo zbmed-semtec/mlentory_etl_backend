@@ -23,9 +23,8 @@ class LLMConfig:
     })
     
     sampler_kwargs: Dict[str, Any] = field(default_factory=lambda: {
-        "max_tokens": 8096, 
+        "max_tokens": 2048, 
         "temperature": 1.0, 
-        "repetition_penalty": 1.1, 
         "top_p": 0.95, 
         "skip_special_tokens": False,
     })
