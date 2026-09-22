@@ -123,6 +123,16 @@ class FacetedSearchMixin:
                 supports_search=True,
                 pinned=False
             ),
+            "baseModels": FacetConfig(
+                field="baseModels",
+                label="Base Models",
+                type="keyword",
+                icon="mdi-family-tree",
+                is_high_cardinality=True,
+                default_size=20,
+                supports_search=True,
+                pinned=False
+            ),
             "platform": FacetConfig(
                 field="source",
                 label="Platform",
@@ -397,6 +407,7 @@ class FacetedSearchMixin:
                 "shared_by",
                 "db_identifier",
                 "keywords",
+                "baseModels",
                 "license",
                 "description",
                 "abstract",
@@ -421,7 +432,10 @@ class FacetedSearchMixin:
             models: List[ModelListItem] = []
             for hit in hits_data.get("hits", []):
                 source = hit.get("_source", {})
-                
+
+                print(f"BaseModel: {source.get('baseModels', [])}")
+                print(f"license: {source.get('license')}")
+
                 mlentory_id = next(
                     (id for id in source.get("db_identifier", []) if id.startswith("https://w3id.org/mlentory/mlentory_graph/")),
                     -1
@@ -437,6 +451,7 @@ class FacetedSearchMixin:
                     license=source.get("license"),
                     mlTask=source.get("ml_tasks", []),
                     keywords=source.get("keywords", []),
+                    baseModels=source.get("baseModels", []) or [],
                     datasets=source.get("datasets", []) or [],
                     platform=source.get("source") or "Unknown",
                 )

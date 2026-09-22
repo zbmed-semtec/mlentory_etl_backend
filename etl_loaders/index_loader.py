@@ -39,6 +39,7 @@ class ModelDocument(Document):
     license = Keyword()
     ml_tasks = Keyword(multi=True)
     keywords = Keyword(multi=True)
+    baseModels = Keyword(multi=True)
     datasets = Keyword(multi=True)
     source = Keyword()
     url = Keyword(multi=True)
@@ -86,6 +87,24 @@ def _resolve_model_identifiers(model: Dict[str, Any]) -> tuple[str, List[str]]:
     return mlentory_id, db_identifier
 
 
+def _extract_base_models(model: Dict[str, Any]) -> List[str]:
+    """Extract base-model lineage from canonical and legacy model fields."""
+    fields = (
+        "https://w3id.org/fair4ml/baseModel",
+        "baseModel",
+        "baseModels",
+        "base_models",
+        "https://w3id.org/fair4ml/fineTunedFrom",
+        "fineTunedFrom",
+    )
+    base_models: List[str] = []
+    for field in fields:
+        for value in _extract_list(model.get(field)):
+            if value not in base_models:
+                base_models.append(value)
+    return base_models
+
+
 def build_model_document(model: Dict[str, Any], index_name: str, translation_mapping: Dict[str, str]) -> ModelDocument:
     """
     Create `ModelDocument` from a normalized FAIR4ML model dict.
@@ -113,6 +132,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
 
     ml_tasks = model.get("https://w3id.org/fair4ml/mlTask") or []
     keywords = model.get("https://schema.org/keywords") or []
+    base_models = _extract_base_models(model)
     source_iri = model.get("https://schema.org/source")
     url = model.get("https://schema.org/url") or []
     readme = model.get("https://w3id.org/codemeta/readme")
@@ -149,6 +169,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     datasets = [translation_mapping.get(dataset, dataset) for dataset in datasets]
     ml_tasks = [translation_mapping.get(ml_task, ml_task) for ml_task in ml_tasks]
     keywords = [translation_mapping.get(keyword, keyword) for keyword in keywords]
+    base_models = [translation_mapping.get(base_model, base_model) for base_model in base_models]
     license_value = translation_mapping.get(license_value, license_value)
     shared_by = translation_mapping.get(shared_by, shared_by)
     source_name = translation_mapping.get(source_iri, source_iri)
@@ -166,6 +187,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         ml_tasks=_extract_list(ml_tasks),
         keywords=_extract_list(keywords),
         datasets=_extract_list(datasets),
+        baseModels=_extract_list(base_models),
         source=source_value,
         url=_extract_list(url),
         readme=str(readme) if readme is not None else "",
