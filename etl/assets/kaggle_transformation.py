@@ -26,7 +26,10 @@ from pydantic import BaseModel, ValidationError
 from dagster import asset, AssetIn
 
 from etl_extractors.kaggle.kaggle_helper import KaggleHelper
-from etl_extractors.kaggle.model_readme import compose_model_documentation
+from etl_extractors.kaggle.model_readme import (
+    compose_model_documentation,
+    documentation_source_notes,
+)
 from etl_transformers.kaggle.transform_mlmodel import map_kaggle_basic_properties
 from etl_transformers.common.entity_link_metadata import (
     apply_entity_link_extraction_metadata,
@@ -164,24 +167,24 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
     if external_base and external_base not in base_models:
         base_models.append(external_base)
 
-    overview = str(rec.get("description", "")).strip()
+    overview = str(rec.get("overview") or "").strip()
     usage = str(rec.get("usage", "")).strip()
     readme_markdown = str(rec.get("readme_markdown") or "").strip()
-    full_docs = compose_model_documentation(
-        parent_card=str(rec.get("parent_description") or "").strip(),
-        overview=overview,
-        usage=usage,
-        readme_markdown=readme_markdown,
-    )
-    if readme_markdown:
-        docs_source = "model README.md"
-        docs_notes = "Uploaded README.md from the Kaggle model file list"
-    else:
-        docs_source = "parent description, overview, usage"
-        docs_notes = (
-            "No variation README.md; joined parent model card with "
-            "variation overview and usage"
+    docs_source = str(rec.get("documentation_source") or "").strip()
+    docs_notes = str(rec.get("documentation_notes") or "").strip()
+    full_docs = str(rec.get("abstract") or "").strip()
+    # New extracts already composed abstract. Older instances.json stored the
+    # short overview in description and needs the join here.
+    if not docs_source:
+        if not overview:
+            overview = str(rec.get("description") or "").strip()
+        full_docs = compose_model_documentation(
+            parent_card=str(rec.get("parent_description") or "").strip(),
+            overview=overview,
+            usage=usage,
+            readme_markdown=readme_markdown,
         )
+        docs_source, docs_notes = documentation_source_notes(readme_markdown)
 
     meta = {
         "extraction_method": "Parsed_from_Kaggle_instances_json",
@@ -203,7 +206,6 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
         "dateCreated": date_created,
         "dateModified": date_modified,
         "datePublished": date_created,
-        "description": full_docs or None,
         "abstract": full_docs or None,
         "license": str(rec.get("license", "")).strip() or None,
         "modelCategory": [
@@ -257,11 +259,6 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
                     "CreationDate as dateCreated"
                 ),
             },
-            "description": {
-                **meta,
-                "source_field": docs_source,
-                "notes": docs_notes,
-            },
             "abstract": {
                 **meta,
                 "source_field": docs_source,
@@ -290,8 +287,7 @@ def normalize_kaggle_instance(rec: Dict[str, Any]) -> Dict[str, Any]:
                 **meta,
                 "source_field": "url",
                 "notes": (
-                    "Public instance page URL; markdown body is on "
-                    "description/abstract"
+                    "Public instance page URL; markdown body is on abstract"
                 ),
             },
         },
@@ -382,7 +378,6 @@ def kaggle_extract_basic_properties(models_data: Tuple[str, str]) -> str:
                     "dateCreated": "",
                     "dateModified": "",
                     "datePublished": "",
-                    "description": "",
                     "abstract": "",
                     "discussionUrl": "",
                     "archivedAt": "",
@@ -427,7 +422,6 @@ def kaggle_extract_basic_properties(models_data: Tuple[str, str]) -> str:
                     "dateModified": str(raw_model.get("dateModified", "")).strip(),
                     "datePublished": str(raw_model.get("datePublished", "")).strip()
                                    or str(raw_model.get("dateModified", "")).strip(),
-                    "description": str(raw_model.get("intendedUse", "")).strip(),
                     "abstract": str(raw_model.get("intendedUse", "")).strip(),
                     "discussionUrl": "",
                     "archivedAt": str(raw_model.get("url", "")).strip(),
