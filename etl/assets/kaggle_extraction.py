@@ -29,7 +29,10 @@ from etl.config import get_kaggle_config
 from etl_extractors.kaggle import KaggleExtractor
 from etl_extractors.kaggle.kaggle_crawler import KaggleCrawler
 from etl_extractors.kaggle.kaggle_helper import KaggleHelper
-from etl_extractors.kaggle.model_readme import KaggleModelReadmeFetcher
+from etl_extractors.kaggle.model_readme import (
+    KaggleModelReadmeFetcher,
+    attach_description_and_abstract,
+)
 from etl_extractors.kaggle.kaggle_enrichment import KaggleEnrichment
 from etl_transformers.common.llm_inlanguage import (
     LLM_INLANGUAGE_METHOD,
@@ -114,10 +117,15 @@ def kaggle_raw_records(run_folder: str, refs: List[str]) -> Dict[str, Any]:
     
     records_data["timestamp"] = extraction_timestamp
 
+    records = records_data.get("data") or []
+    if config.num_models:
+        records = records[: config.num_models]
+        records_data["data"] = records
+
     summary = records_data.get("summary", {})
     logger.info(
         "Kaggle fetch: %d records, %d failed, %.1f min, %.2f rec/s",
-        len(records_data.get("data", [])), summary.get("failed", 0),
+        len(records), summary.get("failed", 0),
         summary.get("elapsed_s", 0) / 60, summary.get("records_per_second", 0),
     )
     
@@ -138,6 +146,15 @@ def kaggle_models_raw(raw_data: Dict[str, Any]) -> Tuple[str, str]:
     extractor = KaggleExtractor(records_data=raw_data['data'])
     models_df = extractor.extract_models()
     models_df = KaggleHelper.deduplicate_models(models_df)
+
+    model_records = models_df.to_dict(orient="records")
+    for rec in model_records:
+        if not isinstance(rec, dict):
+            continue
+        rec["abstract"] = str(
+            rec.get("intendedUse") or rec.get("documentation_content") or ""
+        ).strip()
+    models_df = pd.DataFrame(model_records)
 
     models_path = Path(raw_data['run_folder']) / "models.json"
     models_df.to_json(models_path, orient="records", indent=2)
@@ -202,8 +219,10 @@ def kaggle_instances_raw(
     instances_df = extractor.extract_specific_instances(sorted(instance_ids))
 
     config = get_kaggle_config()
-    if config.fetch_instance_readmes and not instances_df.empty:
-        instance_records = instances_df.to_dict(orient="records")
+    instance_records: List[Dict[str, Any]] = (
+        instances_df.to_dict(orient="records") if not instances_df.empty else []
+    )
+    if config.fetch_instance_readmes and instance_records:
         crawler = KaggleCrawler(
             output_dir=str(STATE_DIR),
             threads=config.threads,
@@ -216,10 +235,18 @@ def kaggle_instances_raw(
             force_refresh=config.force_full_refresh,
         )
         found = fetcher.attach_readmes(instance_records)
-        instances_df = pd.DataFrame(instance_records)
         logger.info(
             "Attached README.md on %d/%d Kaggle models",
             found,
+            len(instance_records),
+        )
+
+    if instance_records:
+        filled = attach_description_and_abstract(instance_records)
+        instances_df = pd.DataFrame(instance_records)
+        logger.info(
+            "Set abstract on %d/%d Kaggle instances",
+            filled,
             len(instance_records),
         )
 

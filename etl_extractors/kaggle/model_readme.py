@@ -25,6 +25,17 @@ from etl_extractors.kaggle.kaggle_crawler import KAGGLE_BASE, KaggleCrawler, RET
 
 logger = logging.getLogger(__name__)
 
+
+def _text(value: Any) -> str:
+    """Stringify a record field, treating None / NaN as empty."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and value != value:
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() == "nan" else text
+
+
 README_BASENAME = re.compile(r"^readme\.md$", re.IGNORECASE)
 MAX_README_BYTES = 2 * 1024 * 1024
 FILES_PAGE_SIZE = 100
@@ -61,6 +72,52 @@ def compose_model_documentation(
     if usage_text and usage_text not in parent and usage_text != overview_text:
         parts.append(usage_text)
     return "\n\n".join(parts)
+
+
+def documentation_source_notes(readme_markdown: str = "") -> Tuple[str, str]:
+    """Extraction-method notes for abstract."""
+    if str(readme_markdown or "").strip():
+        return (
+            "README.md",
+            "Uploaded README.md from the Kaggle model file list",
+        )
+    return (
+        "model card",
+        "No variation README.md; used the parent model card, joined "
+        "with variation overview and usage when present",
+    )
+
+
+def attach_description_and_abstract(records: Iterable[Dict[str, Any]]) -> int:
+    """
+    Set FAIR4ML ``abstract`` on extracted instance records.
+
+    Prefers ``readme_markdown`` when a variation README was fetched; otherwise
+    joins parent card + overview + usage. Stores ``overview`` separately so
+    the short API overview is not lost. Returns how many records received a
+    non-empty abstract.
+    """
+    filled = 0
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        overview = _text(record.get("overview")) or _text(record.get("description"))
+        if not _text(record.get("overview")):
+            record["overview"] = overview
+        readme = _text(record.get("readme_markdown"))
+        docs = compose_model_documentation(
+            parent_card=_text(record.get("parent_description")),
+            overview=overview,
+            usage=_text(record.get("usage")),
+            readme_markdown=readme,
+        )
+        source, notes = documentation_source_notes(readme)
+        record["abstract"] = docs
+        record["documentation_source"] = source
+        record["documentation_notes"] = notes
+        if docs:
+            filled += 1
+    return filled
 
 
 def _file_name(entry: Dict[str, Any]) -> str:

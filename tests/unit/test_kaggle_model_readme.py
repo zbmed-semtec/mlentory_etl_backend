@@ -6,6 +6,7 @@ import unittest
 
 from etl.assets.kaggle_transformation import normalize_kaggle_instance
 from etl_extractors.kaggle.model_readme import (
+    attach_description_and_abstract,
     compose_model_documentation,
     select_readme_file,
     split_instance_ref,
@@ -106,30 +107,78 @@ class TestNormalizeKaggleInstanceDocs(unittest.TestCase):
         rec.update(overrides)
         return rec
 
-    def test_readme_fills_description_and_abstract(self):
+    def test_readme_fills_abstract(self):
         mapped = normalize_kaggle_instance(
             self._base(readme_markdown="# Combined card and extras")
         )
-        assert mapped["description"] == "# Combined card and extras"
         assert mapped["abstract"] == "# Combined card and extras"
-        assert mapped["extraction_metadata"]["description"]["source_field"] == (
-            "model README.md"
+        assert mapped["extraction_metadata"]["abstract"]["source_field"] == (
+            "README.md"
         )
         assert mapped["usageInstructions"] == "example use"
 
     def test_fallback_without_readme(self):
         mapped = normalize_kaggle_instance(self._base())
-        assert mapped["description"] == (
+        assert mapped["abstract"] == (
             "Parent model card\n\nshort overview\n\nexample use"
         )
-        assert mapped["abstract"] == mapped["description"]
         assert mapped["extraction_metadata"]["abstract"]["source_field"] == (
-            "parent description, overview, usage"
+            "model card"
         )
 
     def test_parent_container_is_not_base_model(self):
         mapped = normalize_kaggle_instance(self._base())
         assert mapped["baseModel"] == []
+
+
+class TestAttachDescriptionAndAbstractAtExtract(unittest.TestCase):
+    def test_readme_sets_abstract(self):
+        rec = {
+            "description": "short overview",
+            "usage": "pip install",
+            "parent_description": "Parent card",
+            "readme_markdown": "# Variation README",
+        }
+        filled = attach_description_and_abstract([rec])
+        assert filled == 1
+        assert rec["overview"] == "short overview"
+        assert rec["abstract"] == "# Variation README"
+        assert rec["documentation_source"] == "README.md"
+
+    def test_fallback_without_readme(self):
+        rec = {
+            "overview": "Variation overview",
+            "usage": "example",
+            "parent_description": "Parent card",
+        }
+        attach_description_and_abstract([rec])
+        assert rec["abstract"] == "Parent card\n\nVariation overview\n\nexample"
+        assert rec["documentation_source"] == "model card"
+
+    def test_transform_keeps_extract_values(self):
+        rec = {
+            "instanceId": "owner/model/PyTorch/default",
+            "mlentory_id": "https://w3id.org/mlentory/mlentory_graph/abc",
+            "parent_mlentory_id": "https://w3id.org/mlentory/mlentory_graph/parent",
+            "url": "https://www.kaggle.com/models/owner/model/PyTorch/default",
+            "name": "default",
+            "sharedBy": "owner",
+            "overview": "short overview",
+            "abstract": "# Combined card and extras",
+            "documentation_source": "README.md",
+            "documentation_notes": "Uploaded README.md from the Kaggle model file list",
+            "usage": "example use",
+            "parent_description": "Parent model card",
+            "frameworkName": "PyTorch",
+            "license": "Apache 2.0",
+            "contentSize": "12",
+            "readme_markdown": "# Combined card and extras",
+        }
+        mapped = normalize_kaggle_instance(rec)
+        assert mapped["abstract"] == "# Combined card and extras"
+        assert mapped["extraction_metadata"]["abstract"]["source_field"] == (
+            "README.md"
+        )
 
 
 class TestInheritParentCatalogFields(unittest.TestCase):

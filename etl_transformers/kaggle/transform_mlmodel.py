@@ -231,11 +231,11 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
     date_created = _parse_datetime(date_created)
     date_modified = _parse_datetime(date_modified)
 
-    description = str(raw_model.get("intendedUse", "")).strip()
     readme = validate_optional_url(raw_model.get("readme_file")) or validate_optional_url(url)
-    # No network call: Kaggle serves the model card inline as the description,
-    # which extraction already persisted.
-    abstract = KaggleHelper.resolve_abstract_content(raw_model)
+    abstract = (
+        str(raw_model.get("abstract") or "").strip()
+        or KaggleHelper.resolve_abstract_content(raw_model)
+    )
     archived_at = _pick_archived_at(raw_model.get("archivedAt"), fallback=url)
 
     # Optional fields (not present in the Kaggle models endpoint)
@@ -263,7 +263,6 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
         "dateCreated": date_created,
         "dateModified": date_modified,
         "datePublished": date_published,
-        "description": description,
         "abstract": abstract,
         "discussionUrl": discussion_url,
         "archivedAt": archived_at,
@@ -324,17 +323,11 @@ def map_kaggle_basic_properties(raw_model: Dict[str, Any]) -> Dict[str, Any]:
             source_field="datePublished",
             notes="Fallback to dateCreated, then dateModified",
         ),
-        "description": _create_extraction_metadata(
-            method=_METHOD,
-            confidence=1.0,
-            source_field="intendedUse",
-            notes=None,
-        ),
         "abstract": _create_extraction_metadata(
             method=_METHOD,
             confidence=1.0,
-            source_field="description",
-            notes="Model card served inline by Kaggle; no separate fetch",
+            source_field="model card",
+            notes="Kaggle model card from the models/get API",
         ),
         "discussionUrl": _create_extraction_metadata(
             method=_METHOD,
