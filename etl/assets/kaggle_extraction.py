@@ -625,54 +625,26 @@ def kaggle_languages_raw(
 
 @asset(group_name="kaggle_extraction", 
        tags={"pipeline": "kaggle_etl", "stage": "extract"}, 
-       ins={"raw_data": AssetIn("kaggle_raw_records")})
-def kaggle_llm_schema_extractors(raw_data: Dict[str, Any]) -> Tuple[Dict[str, Dict[str, str]], str]:
+       ins={"raw_data": AssetIn("kaggle_models_raw")})
+def kaggle_llm_schema_extractors(raw_data: Tuple[str, str]) -> Tuple[Dict[str, Dict[str, str]], str]:
     """
     Uses an LLM to extract structured metadata from model cards.
  
     Args:
-        raw_data:  Dict[str, Any]
+        raw_data:  Tuple[str, str]
  
     Returns:
         Tuple of ({model_id: {property: result}}, run_folder)
     """
 
-    def preprocess_model_cards(json_data):
-        """
-        Extracts text from Kaggle model JSON(s), removing markdown code blocks.
-        Returns a dictionary of { "model_ref": "combined_clean_text" }
-        """
-        logger.info("Preprocessing %d Kaggle model cards for LLM extraction", len(json_data))
-        if isinstance(json_data, dict):
-            json_data = [json_data]
-            
-        extracted_data = {}
-        
-        for model in json_data:
-            model_id = model.get("ref") or str(model.get("id"))
-            text_parts = []
-            for field in ["title", "subtitle", "description", "provenanceSources"]:
-                val = model.get(field)
-                if val:
-                    text_parts.append(str(val))
+    run_folder = raw_data[1]
+    models_data_dir = raw_data[0]
+    with open(models_data_dir, 'r') as file:
+        models_data = json.load(file)
 
-            for instance in model.get("instances", []):
-                for field in ["overview", "usage"]:
-                    val = instance.get(field)
-                    if val:
-                        text_parts.append(str(val))
-
-            combined_text = "\n\n".join(text_parts)
-            clean_text = re.sub(r'```.*?```', '', combined_text, flags=re.DOTALL)
-            clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text).strip()
-            
-            extracted_data[model_id] = clean_text
-            
-        return extracted_data
-
-    run_folder = raw_data.get("run_folder")
-    models_data = raw_data.get("data", {}).get("data", [])
-    model_texts = preprocess_model_cards(models_data)
+    model_texts = {}
+    for model in models_data:
+        model_texts[model['modelId']] = model['abstract']
 
     logger.info("Prepared %d model texts for LLM extraction. Average length: %.2f characters", len(model_texts), np.mean([len(text) for text in model_texts.values()]))
     config = LLMConfig()
