@@ -315,11 +315,11 @@ class RelatedModelsController:
             similar_task_models = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"mlTask": reference_tasks},
-                limit=limit + 1
+                page_size=limit + 1
             )
             
             return [
-                model for model in similar_task_models 
+                model for model in similar_task_models[0]
                 if model.db_identifier != reference_model_id
             ][:limit]
             
@@ -420,8 +420,9 @@ class RelatedModelsController:
             models_with_keyword_matches = elasticsearch_service.search_models_with_facets(
                 query="",
                 filters={"keywords": keyword_subset},  # Use keywords filter directly
-                limit=limit * 5  # Get more candidates for better ranking
+                page_size=limit * 5  # Get more candidates for better ranking
             )
+            models_with_keyword_matches = models_with_keyword_matches[0]
             
             # Remove the reference model and calculate detailed overlap counts
             models_with_overlap = []
@@ -436,7 +437,7 @@ class RelatedModelsController:
                     
                     # Only include models with at least one keyword match
                     if overlap_count > 0:
-                        model_copy = model.copy()
+                        model_copy = model.model_dump()
                         model_copy["keyword_overlap_count"] = overlap_count
                         model_copy["overlapping_keywords"] = list(overlapping_keywords)
                         models_with_overlap.append(model_copy)
@@ -510,14 +511,16 @@ class RelatedModelsController:
             if len(base_name.strip()) <= 3:  # Skip if base name too short
                 return []
                 
-            different_size_models = self.searchController.search_models_by_phrase(
-                query=base_name.strip(),            )
+            different_size_models = self.searchService.search_models_by_phrase(
+                query=base_name.strip(),
+                extended=extended,
+            )
             
             # Filter and limit results
             return [
                 model for model in different_size_models 
-                if (model.db_identifier != reference_model_id and 
-                    model.score > min_score)
+                if (model.get("db_identifier") != reference_model_id and
+                    model.get("score", 0) > min_score)
             ][:limit]
             
         except Exception as e:

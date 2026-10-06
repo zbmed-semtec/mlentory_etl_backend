@@ -267,8 +267,7 @@ class FacetedSearchMixin:
                         must_conditions.append({"term": {field_name: str(date_filter)}})
             else:
                 # Handle keyword/text filters
-                for value in values:
-                    must_conditions.append({"term": {field_name: value}})
+                must_conditions.append({"terms": {field_name: values}})
 
         return must_conditions
 
