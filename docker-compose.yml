@@ -59,7 +59,7 @@ services:
         - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_API_TOKEN}
         - VLLM_USE_V2_MODEL_RUNNER=0
       command: >
-        --model "${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+        --model "${LLM_MODEL:-google/gemma-3-4b-it}"
         --host 0.0.0.0
         --port 8000
         --max-num-seqs "${MAX_NUM_SEQS:-600}"
