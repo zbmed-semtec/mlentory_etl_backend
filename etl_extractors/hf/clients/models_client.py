@@ -145,40 +145,36 @@ class HFModelsClient:
         model_data: List[dict] = []
 
         def process_model(model_id: str):
-            models_to_process = self.api.list_models(model_name=model_id, limit=1, full=True)
-            full_metadata = self.api.model_info(model_id)
-            results = []
-            for model in models_to_process:
-                try:
-                    card = (
-                        ModelCard.load(model.modelId, token=self.token)
-                        if self.token
-                        else ModelCard.load(model.modelId)
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Error loading model card for %s: %s", model_id, e)
-                    continue
+            # Exact lookup: list_models(model_name=...) is a search and can return a different model
+            model = self.api.model_info(model_id)
+            try:
+                card = (
+                    ModelCard.load(model.id, token=self.token)
+                    if self.token
+                    else ModelCard.load(model.id)
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Error loading model card for %s: %s", model_id, e)
+                return []
 
-                model_info = {
-                    "modelId": model.id,
-                    "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Model", model.id),
-                    "author": model.author,
-                    "last_modified": model.last_modified,
-                    "downloads": model.downloads,
-                    "likes": model.likes,
-                    "library_name": model.library_name,
-                    "safetensors": full_metadata.safetensors if hasattr(full_metadata, 'safetensors') and full_metadata.safetensors else {},
-                    "tags": model.tags,
-                    "pipeline_tag": model.pipeline_tag,
-                    "createdAt": model.created_at,
-                    "card": card.content if card else "",
-                    "enriched": True,
-                    "entity_type": "Model",
-                    "platform": "HF",
-                }
-                if self.has_model_enough_information(model_info):
-                    results.append(model_info)
-            return results
+            model_info = {
+                "modelId": model.id,
+                "mlentory_id": HFHelper.generate_mlentory_entity_hash_id("Model", model.id),
+                "author": model.author,
+                "last_modified": model.last_modified,
+                "downloads": model.downloads,
+                "likes": model.likes,
+                "library_name": model.library_name,
+                "safetensors": model.safetensors if hasattr(model, 'safetensors') and model.safetensors else {},
+                "tags": model.tags,
+                "pipeline_tag": model.pipeline_tag,
+                "createdAt": model.created_at,
+                "card": card.content if card else "",
+                "enriched": True,
+                "entity_type": "Model",
+                "platform": "HF",
+            }
+            return [model_info] if self.has_model_enough_information(model_info) else []
 
         with ThreadPoolExecutor(max_workers=threads) as executor:
             futures = [executor.submit(process_model, model_id) for model_id in model_ids]
