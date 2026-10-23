@@ -22,10 +22,13 @@ from dagster import asset, AssetIn
 from etl_extractors.ai4life.ai4life_enrichment import AI4LifeEnrichment
 from etl_extractors.ai4life.ai4life_helper import AI4LifeHelper
 from etl_extractors.ai4life.ai4life_extractor import AI4LifeExtractor
+from etl_extractors.ai4life.ai4life_llm_extraction import AI4LifeLLMSchemaPropertyExtractor
+from etl_extractors.common.llm import LLMConfig
 from etl.config import get_ai4life_config, get_general_config
 from etl_transformers.common.llm_inlanguage import (
+    INLANGUAGE_PROPERTY,
     LLM_INLANGUAGE_METHOD,
-    detect_inlanguage_with_llm,
+    predictions_from_llm_output,
 )
 
 
@@ -372,7 +375,7 @@ def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[
     """
     Detect documentation/description languages per model for schema:inLanguage.
 
-    Uses the shared LLM schema extractor (same ``schema:inLanguage`` question as HF).
+    Asks the LLM the ``schema:inLanguage`` question about each model's description, intended use and name.
     """
     models_json_path, run_folder = models_data
     with open(models_json_path, "r", encoding="utf-8") as file_handle:
@@ -382,20 +385,10 @@ def ai4life_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[
         logger.warning("Expected list of models at %s", models_json_path)
         return {}
 
-    texts: Dict[str, str] = {}
-    for idx, raw_model in enumerate(raw_models):
-        if not isinstance(raw_model, dict):
-            continue
-
-        model_id = str(raw_model.get("modelId", "")).strip() or f"unknown_{idx}"
-        text_parts = [
-            str(raw_model.get("description", "")).strip(),
-            str(raw_model.get("intendedUse", "")).strip(),
-            str(raw_model.get("name", "")).strip(),
-        ]
-        texts[model_id] = "\n\n".join([part for part in text_parts if part])
-
-    detected = detect_inlanguage_with_llm(texts, log=logger)
+    documents = AI4LifeLLMSchemaPropertyExtractor.prepare_documents(raw_models)
+    llm_extractor = AI4LifeLLMSchemaPropertyExtractor(logger=logger, config=LLMConfig())
+    parsed = llm_extractor.extract(documents, properties=[INLANGUAGE_PROPERTY], typical_visible_output_tokens=150)
+    detected = predictions_from_llm_output(parsed)
     out_path = Path(run_folder) / "llm_inlanguage_results.json"
     with open(out_path, "w", encoding="utf-8") as file_handle:
         json.dump(detected, file_handle, indent=2, ensure_ascii=False)

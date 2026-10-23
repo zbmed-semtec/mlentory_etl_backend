@@ -11,7 +11,7 @@ import pandas as pd
 
 from dagster import asset, AssetIn
 
-from etl import LLMConfig
+from etl_extractors.common.llm import LLMConfig
 from etl_extractors.hf import HFExtractor, HFEnrichment, HFHelper, HFLLMSchemaPropertyExtractor
 from etl_transformers.common.llm_inlanguage import (
     LLM_INLANGUAGE_METHOD,
@@ -573,49 +573,11 @@ def hf_llm_schema_extractor(chunks_data: Tuple[Dict[str, List[dict]], str]) -> T
     Returns:
         Tuple of ({model_id: {property: result}}, run_folder)
     """
-    def preprocess_chunks(chunks):
-        """
-        Preprocesses ModelCard chunks by removing code blocks.
-
-        Args:
-            chunks (List[dict]): A list of chunks representing the ModelCard content.
-
-        Returns:
-            str: The preprocessed content.
-        """
-        content = ""
-        current_heading = ""
-        for chunk in chunks:
-            if chunk.get("type") in ["section", "code"]:
-                continue
-                
-            phtext = chunk.get("phtext") or ""
-            
-            if phtext != current_heading and phtext != "":
-                current_heading = phtext
-                content += current_heading + "\n"
-
-            text = chunk.get("text") or ""
-            content += text + "\n"
-
-        return content.strip()
-
     chunks_dict, run_folder = chunks_data
-    preprocessed_chunks = {}
+    documents = HFLLMSchemaPropertyExtractor.prepare_documents(chunks_dict)
+    llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=LLMConfig())
+    result = llm_extractor.extract(documents, typical_visible_output_tokens=150)
 
-    for model_id, chunks in chunks_dict.items():
-        preprocessed_chunks[model_id] = preprocess_chunks(chunks)
-
-    config = LLMConfig()
-    llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=config)
-    llm_extractor.load_metadata()
-    llm_extractor.load_llm()
-    batch_size = llm_extractor.estimate_max_concurrent_cards(preprocessed_chunks, typical_visible_output_tokens=150)
-    llm_extractor.extract_properties(preprocessed_chunks, 
-                                     return_result=False,
-                                     batch_size=batch_size)
-    result = llm_extractor.parse_llm_output()
-    
     final_path = Path(run_folder) / "llm_extraction_results.json"
     with open(final_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=4)

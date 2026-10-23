@@ -165,9 +165,9 @@ wait-stella: ## Wait for STELLA containers to be running
 	echo "$(YELLOW)STELLA containers did not become ready in time$(NC)"; \
 	exit 1
 
-detect-profile: ## Detect GPU and update .env with the matching LLM profile
+detect-profile: ## Detect GPU and update .env with the matching LLM profile (PROFILE=<name> to force one)
 	@echo "$(BLUE)Detecting GPU machine profile...$(NC)"
-	python3 scripts/detect_machine_profile.py --config $(LLM_CONFIG) --out .env
+	python3 scripts/detect_machine_profile.py --config $(LLM_CONFIG) --out .env $(if $(PROFILE),--profile "$(PROFILE)")
 	@echo "$(GREEN)Machine profile applied to .env$(NC)"
 
 up: ensure-env prepare-data-dirs detect-profile ## Start all services (vLLM first, STELLA when USE_STELLA=true in .env)

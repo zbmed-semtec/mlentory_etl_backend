@@ -36,14 +36,13 @@ from etl_extractors.kaggle.model_readme import (
     attach_description_and_abstract,
 )
 from etl_extractors.kaggle.kaggle_enrichment import KaggleEnrichment
+from etl_extractors.kaggle.kaggle_llm_extraction import KaggleLLMSchemaPropertyExtractor
+from etl_extractors.common.llm import LLMConfig
 from etl_transformers.common.llm_inlanguage import (
+    INLANGUAGE_PROPERTY,
     LLM_INLANGUAGE_METHOD,
-    detect_inlanguage_with_llm,
+    predictions_from_llm_output,
 )
-
-# temporary import from HF for LLM-based schema extraction
-from etl import LLMConfig
-from etl_extractors.hf import HFLLMSchemaPropertyExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -530,9 +529,7 @@ def kaggle_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[D
     """
     Detect documentation/description languages per model for schema:inLanguage.
 
-    Kaggle stores the model card in ``intendedUse`` (from the API description
-    field), so detection uses that text plus the model name, matching AI4Life.
-    Uses the shared LLM schema extractor (same ``schema:inLanguage`` question as HF).
+    Asks the LLM the ``schema:inLanguage`` question about each model's documentation (``abstract``).
     """
     models_json_path, run_folder = models_data
     with open(models_json_path, "r", encoding="utf-8") as file_handle:
@@ -542,19 +539,10 @@ def kaggle_detected_inlanguage(models_data: Tuple[str, str]) -> Dict[str, List[D
         logger.warning("Expected list of models at %s", models_json_path)
         return {}
 
-    texts: Dict[str, str] = {}
-    for idx, raw_model in enumerate(raw_models):
-        if not isinstance(raw_model, dict):
-            continue
-
-        model_id = str(raw_model.get("modelId", "")).strip() or f"unknown_{idx}"
-        text_parts = [
-            str(raw_model.get("intendedUse", "")).strip(),
-            str(raw_model.get("name", "")).strip(),
-        ]
-        texts[model_id] = "\n\n".join([part for part in text_parts if part])
-
-    detected = detect_inlanguage_with_llm(texts, log=logger)
+    documents = KaggleLLMSchemaPropertyExtractor.prepare_documents(raw_models)
+    llm_extractor = KaggleLLMSchemaPropertyExtractor(logger=logger, config=LLMConfig())
+    parsed = llm_extractor.extract(documents, properties=[INLANGUAGE_PROPERTY], typical_visible_output_tokens=150)
+    detected = predictions_from_llm_output(parsed)
     out_path = Path(run_folder) / "llm_inlanguage_results.json"
     with open(out_path, "w", encoding="utf-8") as file_handle:
         json.dump(detected, file_handle, indent=2, ensure_ascii=False)
@@ -611,7 +599,7 @@ def kaggle_languages_raw(
                 "extraction_metadata": {
                     "extraction_method": LLM_INLANGUAGE_METHOD,
                     "confidence": per_code_confidence[code],
-                    "source_field": "intendedUse",
+                    "source_field": "abstract",
                 },
             }
         )
@@ -642,20 +630,10 @@ def kaggle_llm_schema_extractors(raw_data: Tuple[str, str]) -> Tuple[Dict[str, D
     with open(models_data_dir, 'r') as file:
         models_data = json.load(file)
 
-    model_texts = {}
-    for model in models_data:
-        model_texts[model['modelId']] = model['abstract']
-
-    logger.info("Prepared %d model texts for LLM extraction. Average length: %.2f characters", len(model_texts), np.mean([len(text) for text in model_texts.values()]))
-    config = LLMConfig()
-    llm_extractor = HFLLMSchemaPropertyExtractor(logger=logger, config=config)
-    llm_extractor.load_metadata()
-    llm_extractor.load_llm()
-    batch_size = llm_extractor.estimate_max_concurrent_cards(model_texts, typical_visible_output_tokens=2048)
-    llm_extractor.extract_properties(model_texts, 
-                                     return_result=False,
-                                     batch_size=batch_size)
-    result = llm_extractor.parse_llm_output()
+    documents = KaggleLLMSchemaPropertyExtractor.prepare_documents(models_data)
+    logger.info("Prepared %d model texts for LLM extraction. Average length: %.2f characters", len(documents), np.mean([len(text) for text in documents.values()]))
+    llm_extractor = KaggleLLMSchemaPropertyExtractor(logger=logger, config=LLMConfig())
+    result = llm_extractor.extract(documents, typical_visible_output_tokens=2048)
     final_path = Path(run_folder) / "llm_extraction_results.json"
     with open(final_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=4)

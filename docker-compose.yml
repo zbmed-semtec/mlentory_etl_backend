@@ -40,12 +40,11 @@ services:
   vllm:
       container_name: vllm
       hostname: vllm
-      image: "${IMAGE:-vllm/vllm-openai:latest}"
+      image: "${IMAGE:-vllm/vllm-openai:v0.32.0}"
       ports:
         - "8003:8000"
       volumes:
         - ../deploy/vllm_models:/root/.cache/huggingface
-        - ./etl_extractors/hf/hf_llm_extractor_resources:/app/metadata:ro
       networks:
         - mlentory-network
       deploy:

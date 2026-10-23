@@ -9,7 +9,8 @@ the matched profile's `llm` variables into an .env file.
 Usage:
     python3 detect_machine_profile.py \
         --config LLM_config_based_on_machine.yaml \
-        --out .env
+        --out .env \
+        [--profile default]   # skip GPU detection and use this profile
 """
 
 import argparse
@@ -48,6 +49,29 @@ def match_profile(gpus, config):
     return None, None
 
 
+def all_profiles(config):
+    profiles = {name: profile["llm"] for name, profile in config["profiles"].items()}
+    if "default" in config:
+        profiles["default"] = config["default"]["llm"]
+    return profiles
+
+
+def check_same_keys(profiles):
+    """Every profile must define every key, otherwise switching profiles leaves stale values in .env."""
+    all_keys = set().union(*(p.keys() for p in profiles.values()))
+    problems = [f"{name}: missing {sorted(all_keys - p.keys())}" for name, p in profiles.items() if all_keys - p.keys()]
+    if problems:
+        sys.exit("ERROR: profiles must define the same keys:\n  " + "\n  ".join(problems))
+
+
+def check_pinned_images(profiles):
+    """vLLM images must be pinned to a version tag, `latest` silently changes the server."""
+    unpinned = [f"{name}: {p['image']}" for name, p in profiles.items()
+                if ":" not in p["image"] or p["image"].endswith(":latest")]
+    if unpinned:
+        sys.exit("ERROR: pin the vLLM image to a version tag:\n  " + "\n  ".join(unpinned))
+
+
 def format_value(v):
     s = str(v)
     if any(c in s for c in ' \t<>"\'$`#'):
@@ -75,14 +99,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--profile", help="use this profile instead of detecting the GPUs")
     args = parser.parse_args()
 
-    gpus = get_gpus()
     config = yaml.safe_load(args.config.read_text())
-    profile_name, llm_config = match_profile(gpus, config)
+    profiles = all_profiles(config)
+    check_same_keys(profiles)
+    check_pinned_images(profiles)
 
-    if llm_config is None:
-        sys.exit(f"ERROR: no matching profile (and no default) for detected GPUs: {gpus}")
+    if args.profile:
+        if args.profile not in profiles:
+            sys.exit(f"ERROR: unknown profile '{args.profile}'. Available: {list(profiles)}")
+        profile_name, llm_config = args.profile, profiles[args.profile]
+    else:
+        gpus = get_gpus()
+        profile_name, llm_config = match_profile(gpus, config)
+        if llm_config is None:
+            sys.exit(f"ERROR: no matching profile (and no default) for detected GPUs: {gpus}")
 
     llm_config = dict(llm_config)  # copy so we don't mutate the loaded yaml
     enable_prefix_caching = llm_config.pop("enable_prefix_caching", None)
@@ -91,9 +124,11 @@ def main():
     updates = {"MACHINE_PROFILE": profile_name}
     updates.update({k.upper(): v for k, v in llm_config.items()})
 
-    parts = []
-    if enable_prefix_caching is True:
-        parts.append("--enable-prefix-caching")
+    # always explicit: newer vLLM enables prefix caching by default, and compose falls back to enabling it
+    parts = ["--enable-prefix-caching" if enable_prefix_caching else "--no-enable-prefix-caching"]
+    # kept in updates too: the extractor only sends request priorities when the server accepts them
+    if llm_config.get("priority_scheduling") is True:
+        parts.append("--scheduling-policy priority")
     if extra_args:
         parts.append(extra_args)
     updates["EXTRA_VLLM_ARGS"] = " ".join(parts)
