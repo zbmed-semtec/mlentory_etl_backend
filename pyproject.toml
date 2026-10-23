@@ -17,6 +17,10 @@ python = ">=3.10,<3.14"
 dagster = "^1.11.0"
 dagster-webserver = "^1.10.0"
 dagster-postgres = "^0.27.0"
+# SQLAlchemy 2.1 defaults postgresql:// to psycopg3; dagster-postgres 0.27 ships psycopg2 only
+sqlalchemy = ">=2.0,<2.1"
+# pyarrow 26 requires numpy>=2 (undeclared), but numpy is pinned to 1.x below
+pyarrow = "<26"
 dagster-docker = "^0.27.0"
 pydantic = "^2.5.0"
 neo4j = "^5.14.0"
