@@ -839,13 +839,12 @@ def summarize_models_endpoint(
         # Define the question for the process_and_answer method
         question_for_llm = f"Summarize the model information, commonalities, and differences for models: {', '.join(model_names)}"
 
-        # Use LLMService to generate the summary
-        # We use process_and_answer to leverage its context handling and vectorization
-        # even though we are primarily generating text based on the full context.
+        # Send all formatted model details together so every selected model is summarized.
         result = llm_service.process_and_answer(
             question=question_for_llm, # The conceptual task for the LLM
             context_documents=[combined_context], # Provide all model details as one document
-            prompt_template=formatted_prompt
+            prompt_template=formatted_prompt,
+            use_retrieval=False,
         )
 
         # We might want to adapt the response structure if needed
