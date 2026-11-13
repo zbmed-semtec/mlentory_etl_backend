@@ -18,6 +18,26 @@ from etl_extractors.kaggle.kaggle_crawler import KaggleCrawler
 logger = logging.getLogger(__name__)
 
 
+def _records_in_window(
+    records: List[Dict[str, Any]], window: List[str]
+) -> List[Dict[str, Any]]:
+    """Keep only cards whose ref is in ``window``, in catalog order."""
+    by_ref: Dict[str, Dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        ref = record.get("ref")
+        if isinstance(ref, str) and ref:
+            by_ref[ref] = record
+    selected = [by_ref[ref] for ref in window if ref in by_ref]
+    logger.info(
+        "Kaggle window: %d catalog refs, %d records passed downstream",
+        len(window),
+        len(selected),
+    )
+    return selected
+
+
 class KaggleExtractor:
     """Extractor for fetching raw model metadata from the Kaggle platform.
 
@@ -51,6 +71,7 @@ class KaggleExtractor:
         self,
         output_dir: str,
         num_models: Optional[int] = None,
+        offset: int = 0,
         incremental: bool = True,
         force_full_refresh: bool = False,
         refresh_metadata: bool = True,
@@ -80,15 +101,26 @@ class KaggleExtractor:
 
             extraction_timestamp = datetime.utcnow().isoformat()
 
+            window: Optional[List[str]] = None
             if incremental and not force_full_refresh:
+                if offset:
+                    logger.warning(
+                        "Kaggle offset=%d is ignored because incremental=True",
+                        offset,
+                    )
                 summary = crawler.fetch_incremental(
                     refresh_csvs=refresh_metadata, limit=num_models
                 )
             else:
                 refs = crawler.load_or_build_refs(rebuild=refresh_metadata)
-                summary = crawler.fetch_model_cards(refs=refs, limit=num_models)
+                window = refs[offset:] if offset else list(refs)
+                if num_models:
+                    window = window[:num_models]
+                summary = crawler.fetch_model_cards(refs=window)
 
             records = crawler.load_records()
+            if window is not None:
+                records = _records_in_window(records, window)
             attached = crawler.attach_meta_dates(records)
             if attached:
                 logger.info(

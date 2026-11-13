@@ -25,3 +25,6 @@ env
 *.md
 Dockerfile*
 docker-compose*.yml
+
+# ETL working data (not needed in images; huge build context)
+data/

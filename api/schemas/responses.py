@@ -64,6 +64,7 @@ class ModelListItem(BaseModel):
     baseModels: List[str] = Field(description="Base models used by the model", default_factory=list)
     datasets: List[str] = Field(description="Datasets the model was trained on", default_factory=list)
     platform: str = Field(description="Platform where model is hosted (e.g., 'Hugging Face')")
+    downloads: Optional[int] = Field(description="Platform download count", default=None)
 
 
 class VectorModelListItem(ModelListItem):
@@ -139,7 +140,7 @@ class FacetedSearchResponse(BaseModel):
 class FacetedRelatedModelsResponse(BaseModel):
     """Response for faceted search of related models."""
 
-    related_models: gitDict[str, List[ModelListItem]] = Field(description="Related models grouped by category")
+    related_models: Dict[str, List[ModelListItem]] = Field(description="Related models grouped by category")
     total_related: int = Field(description="Total number of related models")
     filters: Dict[str, List[str]] = Field(description="Applied filters", default_factory=dict)
     facets: Dict[str, List[FacetValue]] = Field(description="Facet aggregations with counts", default_factory=dict)
