@@ -184,10 +184,34 @@ class KaggleCrawler:
         self._auth_mode: Optional[str] = None
         self._local = threading.local()
         self._stop = threading.Event()
+        self._proxies = self._load_proxies()
 
     # ------------------------------------------------------------------
     # Auth
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_proxies() -> Optional[Dict[str, str]]:
+        """
+        Optional egress proxy for Kaggle API calls.
+
+        Set either ``KAGGLE_HTTPS_PROXY`` or standard ``HTTPS_PROXY`` /
+        ``HTTP_PROXY`` (e.g. ``http://user:pass@host:port``).
+        """
+        proxy = (
+            os.getenv("KAGGLE_HTTPS_PROXY")
+            or os.getenv("HTTPS_PROXY")
+            or os.getenv("https_proxy")
+            or os.getenv("HTTP_PROXY")
+            or os.getenv("http_proxy")
+            or ""
+        ).strip()
+        if not proxy:
+            return None
+        # Avoid logging credentials if user:pass@ is present.
+        safe = proxy.split("@")[-1] if "@" in proxy else proxy
+        logger.info("Kaggle API egress proxy enabled (%s)", safe)
+        return {"http": proxy, "https": proxy}
 
     def _auth_candidates(self) -> List[Tuple[str, Dict[str, Any], str]]:
         out = []
@@ -216,7 +240,9 @@ class KaggleCrawler:
             try:
                 r = requests.get(f"{KAGGLE_BASE}/models/list",
                                  params={"pageSize": 1},
-                                 timeout=self.timeout, **kwargs)
+                                 timeout=self.timeout,
+                                 proxies=self._proxies,
+                                 **kwargs)
             except requests.RequestException as e:
                 errors.append(f"{label}: {type(e).__name__}: {e}")
                 continue
@@ -241,7 +267,10 @@ class KaggleCrawler:
                 s.auth = (os.environ["KAGGLE_USERNAME"].strip(),
                           os.environ["KAGGLE_KEY"].strip())
             s.headers["Accept"] = "application/json"
-            s.mount("https://", HTTPAdapter(pool_connections=4, pool_maxsize=4,
+            if self._proxies:
+                s.proxies.update(self._proxies)
+            pool = max(1, self.threads)
+            s.mount("https://", HTTPAdapter(pool_connections=pool, pool_maxsize=pool,
                                             max_retries=0))
             self._local.session = s
         return s

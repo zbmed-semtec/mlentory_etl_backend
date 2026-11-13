@@ -200,14 +200,7 @@ class HFModelsClient:
         return filtered_dataset
 
     def has_model_enough_information(self, model_info: Dict) -> bool:
-        pipeline_tag = model_info.get("pipeline_tag")
-        if isinstance(pipeline_tag, str):
-            if pipeline_tag == "" or pipeline_tag is None:
-                return False
-        else:
-            if pipeline_tag is None or getattr(pipeline_tag, "isna", lambda: False)():
-                return False
-
+        # pipeline_tag is optional: transform/LLM can fill mlTask when absent.
         tags = model_info.get("tags", [])
         if len(tags) == 0:
             return False

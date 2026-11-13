@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from elasticsearch_dsl import Date, Document, Keyword, Text, connections
+from elasticsearch_dsl import Date, Document, Keyword, Long, Text, connections
 
 from etl_loaders.elasticsearch_store import (
     ElasticsearchConfig,
@@ -52,11 +52,24 @@ class ModelDocument(Document):
     data_splits = Text()
     adaption_techniques = Keyword()
     parameter_count = Keyword()
+    downloads = Long()
 
     class Index:
         # Default name; actual index is configured by caller/env.
         name = "hf_models"
         settings = {"number_of_shards": 1, "number_of_replicas": 0}
+
+
+def _download_count(model: Dict[str, Any]) -> int:
+    """Hugging Face stores downloads under metrics. Kaggle stores downloadCount."""
+    metrics = model.get("https://w3id.org/fair4ml/metrics") or model.get("metrics") or {}
+    raw = metrics.get("downloads") if isinstance(metrics, dict) else None
+    if raw in (None, ""):
+        raw = model.get("downloadCount")
+    try:
+        return max(int(float(raw)), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _extract_list(value: Any) -> List[str]:
@@ -199,6 +212,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         data_splits=str(data_splits) if data_splits is not None else None,
         adaption_techniques=str(adaption_techniques) if adaption_techniques is not None else None,
         parameter_count=str(parameter_count) if parameter_count is not None else None,
+        downloads=_download_count(model),
         meta={"id": mlentory_id},
     )
 
