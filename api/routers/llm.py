@@ -801,57 +801,50 @@ def summarize_models_endpoint(
         if not model_details_list:
              raise HTTPException(status_code=404, detail="No valid models found for summarization.")
 
-        # Format models context using ModelContextService
-        # Using format_models_for_comparison as it structures multiple models well
-        print(model_names)
-        print(model_names[0])
-        print(type(model_names[0]))
-        combined_context = model_context_service.format_models_for_comparison(
-            model_details_list = model_details_list,
-            model_names = model_names,
-            include_raw_json = request.include_raw_json
-        )
+        # Summarize each model in isolation so none can be displaced by another
+        # model in the context or by retrieval.
+        summaries = []
+        source_documents = []
+        for model_index, (model_details, model_name) in enumerate(
+            zip(model_details_list, model_names),
+            start=1,
+        ):
+            context_document = (
+                f"=== MODEL {model_index}: {model_name} ===\n"
+                + model_context_service.format_model_details(
+                    model_details,
+                    include_raw_json=request.include_raw_json,
+                )
+            )
 
-        # Define the summarization prompt
-        summarization_prompt_template = """
-        You are an AI assistant specializing in summarizing information about Machine Learning models.
-        Based on the provided details for the following models: 
-        {model_names_str}
+            summarization_prompt_template = """
+            You are an AI assistant specializing in machine learning models.
+            Write a short summary of the single model in the context, in one or two sentences.
+            Do not discuss other models or repeat the model name.
 
-        Please generate a concise summary that covers:
-        1.  A brief overview of all the models.
-        2.  Any notable commonalities (e.g., shared tasks, base models, licenses).
-        3.  Any significant differences or unique features.
+            Model context:
+            {context}
 
-        Use the following context:
-        {context}
+            Question:
+            {question}
 
-        Summary not in markdown format:
-        """
-        model_names_str = ", ".join(model_names)
-        
-        formatted_prompt = summarization_prompt_template.format(
-            model_names_str=model_names_str,
-            context="{context}",  # Keep context placeholder for process_and_answer
-            question="{question}" # Keep question placeholder for process_and_answer
-        )
-        
-        # Define the question for the process_and_answer method
-        question_for_llm = f"Summarize the model information, commonalities, and differences for models: {', '.join(model_names)}"
+            Summary:
+            """
+            result = llm_service.process_and_answer(
+                question=f"Briefly summarize {model_name}.",
+                context_documents=[context_document],
+                prompt_template=summarization_prompt_template,
+                use_retrieval=False,
+            )
+            model_summary = result.get("answer")
+            if not isinstance(model_summary, str) or not model_summary.strip():
+                raise RuntimeError(f"Failed to generate summary for model {model_name}.")
+            summaries.append(f"{model_name}: {model_summary.strip()}")
+            source_documents.extend(result.get("source_documents", []))
 
-        # Send all formatted model details together so every selected model is summarized.
-        result = llm_service.process_and_answer(
-            question=question_for_llm, # The conceptual task for the LLM
-            context_documents=[combined_context], # Provide all model details as one document
-            prompt_template=formatted_prompt,
-            use_retrieval=False,
-        )
-
-        # We might want to adapt the response structure if needed
         return SummarizeModelsResponse(
-            summary=result.get("answer", "Failed to generate summary."),
-            source_documents=result.get("source_documents", []),
-            # raw_llm_output=result.get("raw_llm_output") # Assuming process_and_answer returns raw output
+            summary="\n\n".join(summaries),
+            source_documents=source_documents,
         )
 
     except ValueError as ve:
