@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir --upgrade "attrs>=23.2.0" "cffi>=1.15" && \
     pip install --no-cache-dir --force-reinstall \
         torch==2.6.0 torchvision==0.21.0 \
         --index-url https://download.pytorch.org/whl/cu124 && \
-    pip install --no-cache-dir faiss-gpu==1.7.2
+    python -c "import faiss"
 # Copy application code
 COPY . ./api/
 COPY etl_loaders/ ./etl_loaders/

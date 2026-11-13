@@ -344,7 +344,8 @@ class LLMService:
         question: str, 
         context_documents: List[Union[str, Document]],
         prompt_template: Optional[str] = None,
-        expect_json_output: bool = False # Added flag (though not strictly used internally here)
+        expect_json_output: bool = False,
+        use_retrieval: bool = True,
     ) -> Dict[str, Any]:
         """
         Process documents and answer a question in one step.
@@ -353,6 +354,7 @@ class LLMService:
             question: Question to answer
             context_documents: List of documents or text strings for context
             prompt_template: Optional custom prompt template
+            use_retrieval: Whether to retrieve matching chunks or use the full context
             
         Returns:
             Dict[str, Any]: Answer, source documents, and raw LLM output.
@@ -365,6 +367,32 @@ class LLMService:
         
         if not context_documents:
             raise ValueError("Context documents cannot be empty")
+
+        if not use_retrieval:
+            doc_objects = []
+            for doc in context_documents:
+                if isinstance(doc, str):
+                    doc_objects.append(Document(page_content=doc))
+                elif isinstance(doc, Document):
+                    doc_objects.append(doc)
+                else:
+                    raise TypeError(f"Unsupported document type: {type(doc)}")
+
+            full_context = "\n\n".join(doc.page_content for doc in doc_objects)
+            prompt = PromptTemplate(
+                template=prompt_template or "Context:\n{context}\n\nQuestion:\n{question}",
+                input_variables=["context", "question"],
+            )
+            formatted_prompt = prompt.format(context=full_context, question=question)
+            raw_llm_output = self.llm_runner.invoke(formatted_prompt)
+            return {
+                "answer": raw_llm_output,
+                "source_documents": [
+                    {"content": doc.page_content, "metadata": doc.metadata}
+                    for doc in doc_objects
+                ],
+                "raw_llm_output": raw_llm_output,
+            }
         
         # Create vector store from documents
         vector_store = self.create_vector_store(context_documents)

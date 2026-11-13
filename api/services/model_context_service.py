@@ -8,6 +8,7 @@ create specialized prompt templates, and handle model comparison operations.
 from typing import Dict, List, Any, Optional, Union
 import json
 import logging
+from pydantic import BaseModel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -61,11 +62,19 @@ class ModelContextService:
         }
         
         # Define priority properties for formatting
-        self.priority_props = ["MLtask", "license", "keywords"]
+        self.priority_props = {
+            "ML Tasks": ("mlTask", "MLtask", "ml_tasks"),
+            "License": ("license",),
+            "Keywords": ("keywords",),
+        }
         
         logger.info("ModelContextService initialized")
     
-    def format_model_details(self, model_details: Dict[str, Any], include_raw_json: bool = False) -> str:
+    def format_model_details(
+        self,
+        model_details: Union[Dict[str, Any], BaseModel],
+        include_raw_json: bool = False,
+    ) -> str:
         """
         Format model details into a structured, readable text format for LLM context.
         
@@ -79,6 +88,9 @@ class ModelContextService:
         Raises:
             ValueError: If model_details is None or empty
         """
+        if isinstance(model_details, BaseModel):
+            model_details = model_details.model_dump()
+
         if not model_details:
             raise ValueError("Model details cannot be None or empty")
             
@@ -86,52 +98,44 @@ class ModelContextService:
         formatted_text = []
         
         # Add model name and ID if available
-        if model_details.name:
-            formatted_text.append(f"Model Name: {model_details.name}")
+        if model_details.get("name"):
+            formatted_text.append(f"Model Name: {model_details['name']}")
         
         # if "id" in model_details:
         #     formatted_text.append(f"Model ID: {model_details['id'][0]}")
         
         # Add description if available
-        if model_details.description:
-            formatted_text.append(f"\nDescription: {model_details.description}")
+        if model_details.get("description"):
+            formatted_text.append(f"\nDescription: {model_details['description']}")
         
         # Add key model properties in sections
         formatted_text.append("\n== Model Properties ==")
         
         # Process priority properties first
-        for prop in self.priority_props:
-            if prop in model_details and model_details[prop]:
-                if isinstance(model_details[prop], list):
-                    formatted_text.append(f"{prop.capitalize()}: {', '.join(str(item) for item in model_details[prop])}")
-                else:
-                    formatted_text.append(f"{prop.capitalize()}: {model_details[prop]}")
-        
-        # Process remaining properties
-        # for key, value in model_details.items():
-        #     # Skip already processed properties and empty values
-        #     if key in self.priority_props or key in ["name", "id", "description"] or not value:
-        #         continue
-                
-        #     # Format based on value type
-        #     if isinstance(value, list):
-        #         if all(isinstance(item, dict) for item in value):
-        #             # Handle list of dictionaries
-        #             formatted_text.append(f"\n{key.capitalize()}:")
-        #             for item in value:
-        #                 for k, v in item.items():
-        #                     formatted_text.append(f"  - {k}: {v}")
-        #         else:
-        #             # Handle simple lists
-        #             formatted_text.append(f"{key.capitalize()}: {', '.join(str(item) for item in value)}")
-        #     elif isinstance(value, dict):
-        #         # Handle dictionaries
-        #         formatted_text.append(f"\n{key.capitalize()}:")
-        #         for k, v in value.items():
-        #             formatted_text.append(f"  - {k}: {v}")
-        #     else:
-        #         # Handle simple values
-        #         formatted_text.append(f"{key.capitalize()}: {value}")
+        formatted_props = set()
+        for label, keys in self.priority_props.items():
+            value = next((model_details[key] for key in keys if model_details.get(key)), None)
+            if value is not None:
+                formatted_value = (
+                    ", ".join(str(item) for item in value)
+                    if isinstance(value, list)
+                    else str(value)
+                )
+                formatted_text.append(f"{label}: {formatted_value}")
+                formatted_props.update(keys)
+
+        for key, value in model_details.items():
+            if key in {"name", "description"} or key in formatted_props or value in (None, "", [], {}):
+                continue
+            label = key.replace("_", " ")
+            label = label[0].upper() + label[1:] if label else label
+            if isinstance(value, list):
+                formatted_value = ", ".join(str(item) for item in value)
+            elif isinstance(value, dict):
+                formatted_value = json.dumps(value, ensure_ascii=False)
+            else:
+                formatted_value = str(value)
+            formatted_text.append(f"{label}: {formatted_value}")
         
         # Add performance metrics if available
         # if "metrics" in model_details and model_details["metrics"]:
@@ -264,7 +268,7 @@ class ModelContextService:
     
     def format_models_for_comparison(
         self, 
-        model_details_list: List[Dict[str, Any]], 
+        model_details_list: List[Union[Dict[str, Any], BaseModel]],
         model_names: List[str],
         include_raw_json: bool = False
     ) -> str:
@@ -296,7 +300,7 @@ class ModelContextService:
         
         for i, model_details in enumerate(model_details_list):
             model_context = f"=== MODEL {i+1}: {model_names[i]} ===\n"
-            model_context += self.format_model_details(model_details, False)  # Don't include JSON here
+            model_context += self.format_model_details(model_details, include_raw_json)
             
             # if include_raw_json:
             #     raw_json = json.dumps(model_details, indent=2)
