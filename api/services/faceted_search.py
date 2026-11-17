@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from api.config import get_es_client, get_es_config
 from api.schemas.responses import FacetConfig, FacetValue, ModelListItem
+from api.services.improved_keyword_query import build_improved_keyword_query
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,13 @@ class FacetedSearchMixin:
     """Mixin that adds faceted search capabilities to Elasticsearch service."""
 
     def _model_search_indices(self) -> List[str]:
-        """HF + AI4Life model indexes queried by search endpoints."""
+        """HF + AI4Life + Kaggle model indexes queried by search endpoints."""
         cfg = self.config
-        return [cfg.hf_models_index, cfg.ai4life_models_index]
+        return [
+            cfg.hf_models_index,
+            cfg.ai4life_models_index,
+            cfg.kaggle_models_index,
+        ]
 
     def _minimum_metadata_bool_filter(self) -> Dict[str, Any]:
         """Gate search endpoints to documents with all required fields populated."""
@@ -222,6 +227,47 @@ class FacetedSearchMixin:
             }
         }
 
+    def _indexed_task_labels(self) -> List[str]:
+        """Task labels stored on models, loaded once per process."""
+        cached = getattr(self, "_improved_task_labels", None)
+        if cached is not None:
+            return cached
+        try:
+            response = self.client.search(
+                index=self._model_search_indices(),
+                body={
+                    "size": 0,
+                    "aggs": {"tasks": {"terms": {"field": "ml_tasks", "size": 5000}}},
+                },
+                params={"ignore_unavailable": "true"},
+            )
+            buckets = ((response.get("aggregations") or {}).get("tasks") or {}).get("buckets") or []
+            labels = [str(bucket["key"]) for bucket in buckets if bucket.get("key")]
+        except Exception as exc:
+            logger.warning("Could not load task labels for improved keyword search: %s", exc)
+            return []
+        self._improved_task_labels = labels
+        logger.info("Loaded %s task labels for improved keyword search", len(labels))
+        return labels
+
+    def _ensure_downloads_field(self) -> None:
+        """Add the downloads column if this index was created before it existed."""
+        if getattr(self, "_downloads_field_ready", False):
+            return
+        for index_name in self._model_search_indices():
+            if not self.client.indices.exists(index=index_name):
+                continue
+            self.client.indices.put_mapping(
+                index=index_name,
+                body={"properties": {"downloads": {"type": "long"}}},
+            )
+        self._downloads_field_ready = True
+
+    def _build_improved_text_search_query(self, query: str) -> Optional[Dict[str, Any]]:
+        """Exact name, task, and property matches, then a stricter full-text clause."""
+        self._ensure_downloads_field()
+        return build_improved_keyword_query(query, task_labels=self._indexed_task_labels())
+
     def _build_filter_conditions(self, filters: Dict[str, List[str]]) -> List[Dict[str, Any]]:
         """
         Build filter conditions for Elasticsearch query.
@@ -335,6 +381,7 @@ class FacetedSearchMixin:
         facet_size: int = 20,
         facet_query: Optional[Dict[str, str]] = None,
         exclude_ids: Optional[List[str]] = None,
+        text_query_builder: Optional[Any] = None,
     ) -> Tuple[List[ModelListItem], int, Dict[str, List[FacetValue]]]:
         """
         Search for models with faceted navigation support.
@@ -375,7 +422,8 @@ class FacetedSearchMixin:
         must_conditions: List[Dict[str, Any]] = [self._minimum_metadata_bool_filter()]
 
         if query:
-            text_query = self._build_text_search_query(query)
+            builder = text_query_builder or self._build_text_search_query
+            text_query = builder(query)
             if text_query:
                 must_conditions.append(text_query)
 
@@ -412,6 +460,7 @@ class FacetedSearchMixin:
                 "abstract",
                 "source",
                 "datasets",
+                "downloads",
             ],
         }
 
@@ -453,6 +502,7 @@ class FacetedSearchMixin:
                     baseModels=source.get("baseModels", []) or [],
                     datasets=source.get("datasets", []) or [],
                     platform=source.get("source") or "Unknown",
+                    downloads=source.get("downloads"),
                 )
                 models.append(model)
 
@@ -478,6 +528,30 @@ class FacetedSearchMixin:
         except Exception as e:
             logger.error(f"Error in faceted search: {e}", exc_info=True)
             return [], 0, {}
+
+    def search_models_with_improved_keyword(
+        self,
+        query: str = "",
+        filters: Optional[Dict[str, List[str]]] = None,
+        page: int = 1,
+        page_size: int = 50,
+        facets: Optional[List[str]] = None,
+        facet_size: int = 20,
+        facet_query: Optional[Dict[str, str]] = None,
+        exclude_ids: Optional[List[str]] = None,
+    ) -> Tuple[List[ModelListItem], int, Dict[str, List[FacetValue]]]:
+        """Same filters and facets as keyword search, with the improved text query."""
+        return self.search_models_with_facets(
+            query=query,
+            filters=filters,
+            page=page,
+            page_size=page_size,
+            facets=facets,
+            facet_size=facet_size,
+            facet_query=facet_query,
+            exclude_ids=exclude_ids,
+            text_query_builder=self._build_improved_text_search_query,
+        )
 
     def fetch_facet_values(
         self,

@@ -266,16 +266,12 @@ services:
   # STELLA SERVICES
   #=============================================================================
 
-  stella-app:
+  stella-app-v2:
     profiles: ["stella"]
     image: thestellaproject/stella-app:latest
-    container_name: stella-app
-    volumes:
-      - stella_data:/data
-    expose:
-      - "8005"
+    container_name: stella-app-v2
     ports:
-      - "${STELLA_APP_PORT:-8080}:8005"
+      - "8081:8005"
     networks:
       - mlentory-network
     environment:
@@ -288,85 +284,174 @@ services:
       SESSION_EXPIRATION: 3600
       SESSION_KILL: 7200
       SENDFEEDBACK: "True"
-
-      # Systems
       SYSTEMS_CONFIG: |
         {
-            "mlentory_base": {"type": "ranker", "base": true, "docid": "mlentory_id", "hits_path": "$.models", "url": "http://mlentory-base:5000"},
-            "mlentory_experiment": {"type": "ranker", "docid": "mlentory_id", "hits_path": "$.models", "url": "http://mlentory-experiment:5000"}
+            "mlentory_improved_keyword": {"type": "ranker", "base": true, "docid": "mlentory_id", "hits_path": "$.models", "url": "http://mlentory-improved-keyword:5000"},
+            "mlentory_bge_m3": {"type": "ranker", "docid": "mlentory_id", "hits_path": "$.models", "url": "http://mlentory-bge-m3:5000"}
         }
-
-      # Stella Server
-      STELLA_SERVER_ADDRESS: ${STELLA_SERVER_ADDRESS:-http://stella-server:8000}
-      STELLA_SERVER_USER: ${STELLA_SERVER_USER:-site@stella-project.org}
-      STELLA_SERVER_PASS: ${STELLA_SERVER_PASS:-pass}
-      STELLA_SERVER_USERNAME: ${STELLA_SERVER_USERNAME:-site}
-
-      # Database
-      POSTGRES_USER: ${STELLA_POSTGRES_USER:-postgres}
-      POSTGRES_PW: ${STELLA_POSTGRES_PW:-change-me}
-      POSTGRES_DB: ${STELLA_POSTGRES_DB:-postgres}
-      POSTGRES_URL: stella-app-db:5430
-
+      STELLA_SERVER_ADDRESS: http://stella-server:8000
+      STELLA_SERVER_USER: site@stella-project.org
+      STELLA_SERVER_PASS: pass
+      STELLA_SERVER_USERNAME: site
+      POSTGRES_USER: postgres
+      POSTGRES_PW: change-me
+      POSTGRES_DB: postgres
+      POSTGRES_URL: stella-app-db-v2:5430
     command: gunicorn -w 4 --timeout 60 -b :8005 'app.app:create_app()'
     depends_on:
-      stella-app-db:
+      stella-app-db-v2:
         condition: service_healthy
-      stella-mlentory-base:
+      stella-improved-keyword:
         condition: service_started
-      stella-mlentory-experiment:
+      stella-bge-m3:
         condition: service_started
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8005/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
-  stella-app-db:
+  stella-app-db-v2:
     profiles: ["stella"]
     image: postgres:16
-    container_name: stella-app-db
-    expose:
-      - "5430"
+    container_name: stella-app-db-v2
     ports:
-      - "${STELLA_APP_DB_PORT:-5430}:5430"
+      - "5434:5430"
     networks:
       - mlentory-network
     environment:
-      - POSTGRES_USER=${STELLA_POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${STELLA_POSTGRES_PW:-change-me}
-      - POSTGRES_DB=${STELLA_POSTGRES_DB:-postgres}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: postgres
     command: -p 5430
     volumes:
-      - stella_app_db_data:/var/lib/postgresql/data
+      - stella_app_db_v2_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${STELLA_POSTGRES_USER:-postgres} -d ${STELLA_POSTGRES_DB:-postgres} -p 5430"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres -p 5430"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+
+  # stella-app:
+  #   profiles: ["stella"]
+  #   image: thestellaproject/stella-app:latest
+  #   container_name: stella-app
+  #   volumes:
+  #     - stella_data:/data
+  #   expose:
+  #     - "8005"
+  #   ports:
+  #     - "${STELLA_APP_PORT:-8080}:8005"
+  #   networks:
+  #     - mlentory-network
+  #   environment:
+  #     FLASK_APP: app.app
+  #     FLASK_CONFIG: postgres
+  #     INTERLEAVE: "True"
+  #     BULK_INDEX: "False"
+  #     DELETE_SENT_SESSION: "True"
+  #     INTERVAL_DB_CHECK: 10
+  #     SESSION_EXPIRATION: 3600
+  #     SESSION_KILL: 7200
+  #     SENDFEEDBACK: "True"
+
+  #     # Systems
+  #     SYSTEMS_CONFIG: |
+  #       {
+  #           "mlentory_base": {"type": "ranker", "docid": "mlentory_id", "hits_path": "$.models", "url": "http://mlentory-base:5000"},
+  #           "mlentory_experiment": {"type": "ranker", "docid": "mlentory_id", "hits_path": "$.models", "url": "http://mlentory-experiment:5000"}
+  #       }
+
+  #     # Stella Server
+  #     STELLA_SERVER_ADDRESS: ${STELLA_SERVER_ADDRESS:-http://stella-server:8000}
+  #     STELLA_SERVER_USER: ${STELLA_SERVER_USER:-site@stella-project.org}
+  #     STELLA_SERVER_PASS: ${STELLA_SERVER_PASS:-pass}
+  #     STELLA_SERVER_USERNAME: ${STELLA_SERVER_USERNAME:-site}
+
+  #     # Database
+  #     POSTGRES_USER: ${STELLA_POSTGRES_USER:-postgres}
+  #     POSTGRES_PW: ${STELLA_POSTGRES_PW:-change-me}
+  #     POSTGRES_DB: ${STELLA_POSTGRES_DB:-postgres}
+  #     POSTGRES_URL: stella-app-db:5430
+
+  #   command: gunicorn -w 4 --timeout 60 -b :8005 'app.app:create_app()'
+  #   depends_on:
+  #     stella-app-db:
+  #       condition: service_healthy
+  #     stella-mlentory-base:
+  #       condition: service_started
+  #     stella-mlentory-experiment:
+  #       condition: service_started
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:8005/ || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
+
+  # stella-app-db:
+  #   profiles: ["stella"]
+  #   image: postgres:16
+  #   container_name: stella-app-db
+  #   expose:
+  #     - "5430"
+  #   ports:
+  #     - "${STELLA_APP_DB_PORT:-5430}:5430"
+  #   networks:
+  #     - mlentory-network
+  #   environment:
+  #     - POSTGRES_USER=${STELLA_POSTGRES_USER:-postgres}
+  #     - POSTGRES_PASSWORD=${STELLA_POSTGRES_PW:-change-me}
+  #     - POSTGRES_DB=${STELLA_POSTGRES_DB:-postgres}
+  #   command: -p 5430
+  #   volumes:
+  #     - stella_app_db_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${STELLA_POSTGRES_USER:-postgres} -d ${STELLA_POSTGRES_DB:-postgres} -p 5430"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
   
-  stella-mlentory-base:
+  # stella-mlentory-base:
+  #   profiles: ["stella"]
+  #   image: thestellaproject/mlentory-base:latest
+  #   container_name: mlentory-base
+  #   networks:
+  #     - mlentory-network
+  #   ports:
+  #     - "${STELLA_EXPERIMENT_PORT:-5000}:5000"
+  #   command: ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
+  #   restart: unless-stopped
+
+  # stella-mlentory-experiment:
+  #   profiles: ["stella"]
+  #   image: thestellaproject/mlentory-experiment:latest
+  #   container_name: mlentory-experiment
+  #   networks:
+  #     - mlentory-network
+  #   ports:
+  #     - "${STELLA_EXPERIMENT_PORT:-5001}:5000"
+  #   command: ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
+  #   restart: unless-stopped
+
+  stella-improved-keyword:
     profiles: ["stella"]
-    image: thestellaproject/mlentory-base:latest
-    container_name: mlentory-base
+    image: thestellaproject/mlentory-improved-keyword:latest
+    container_name: mlentory-improved-keyword
     networks:
       - mlentory-network
     ports:
-      - "${STELLA_EXPERIMENT_PORT:-5000}:5000"
+      - "${STELLA_EXPERIMENT_PORT:-5002}:5000"
     command: ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
     restart: unless-stopped
 
-  stella-mlentory-experiment:
+  stella-bge-m3:
     profiles: ["stella"]
-    image: thestellaproject/mlentory-experiment:latest
-    container_name: mlentory-experiment
+    image: thestellaproject/mlentory-bge-m3:latest
+    container_name: mlentory-bge-m3
     networks:
       - mlentory-network
     ports:
-      - "${STELLA_EXPERIMENT_PORT:-5001}:5000"
+      - "${STELLA_EXPERIMENT_PORT:-5003}:5000"
     command: ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
     restart: unless-stopped
 
@@ -471,5 +556,7 @@ volumes:
     name: stella-data
   stella_app_db_data:
     name: stella-app-db-data
+  stella_app_db_v2_data:
+    name: stella-app-db-v2-data
   stella_server_db_data:
     name: stella-server-db-data

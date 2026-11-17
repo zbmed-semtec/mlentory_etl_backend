@@ -167,13 +167,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     elif llm_provider == "vllm":
         vllm_base_url = os.environ.get("VLLM_BASE_URL", "http://vllm:8000")
         # vllm_base_url = os.environ.get("VLLM_BASE_URL", "http://193.196.29.16:8003")
-        llm_runner = VLLMRunner(
-            base_url=vllm_base_url,
-            model_name=llm_model,
-            temperature=llm_temperature,
-            max_retries=20,  # Increased for model loading time
-            retry_delay=20   # Longer delay between retries
-        )
+        try:
+            llm_runner = VLLMRunner(
+                base_url=vllm_base_url,
+                model_name=llm_model,
+                temperature=llm_temperature,
+                max_retries=20,  # Increased for model loading time
+                retry_delay=20   # Longer delay between retries
+            )
+        except (ConnectionError, RuntimeError) as exc:
+            logger.error("vLLM is not available (%s). Starting the API without LLM features.", exc)
+            llm_runner = None
     elif llm_provider == "openai":
         # Placeholder for future OpenAI implementation
         # Will need to implement OpenAIRunner first
@@ -202,9 +206,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     
     # Initialize LLMService with the configured runner
-    llmService = LLMService(
-        llm_runner=llm_runner
-    )
+    if llm_runner is None:
+        llmService = None
+    else:
+        llmService = LLMService(
+            llm_runner=llm_runner
+        )
     
     # Initialize ModelContextService
     modelContextService = ModelContextService()

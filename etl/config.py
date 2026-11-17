@@ -78,6 +78,15 @@ class KaggleConfig(BaseModel):
         ge=1,
         description="Cap the number of models fetched. None = all (~42k).",
     )
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Skip this many refs from the front of the sorted catalog before "
+            "applying num_models. Use this to fetch the next slice without "
+            "reprocessing models already in the NDJSON."
+        ),
+    )
     incremental: bool = Field(
         default=True,
         description=(

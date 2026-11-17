@@ -31,6 +31,7 @@ class ElasticsearchConfig:
     password: Optional[str]
     hf_models_index: str
     ai4life_models_index: str
+    kaggle_models_index: str
 
     @classmethod
     def from_env(cls) -> "ElasticsearchConfig":
@@ -43,6 +44,8 @@ class ElasticsearchConfig:
             ES_USERNAME: Optional basic auth username
             ES_PASSWORD: Optional basic auth password
             HF_MODELS_INDEX: Index name for HF models (default: "hf_models")
+            ELASTIC_AI4LIFE_MODELS_INDEX: AI4Life index (default: "ai4life_models")
+            ELASTIC_KAGGLE_MODELS_INDEX: Kaggle index (default: "kaggle_models")
 
         Returns:
             ElasticsearchConfig instance.
@@ -54,10 +57,12 @@ class ElasticsearchConfig:
         password = os.getenv("ELASTIC_PASSWORD", "changeme")
         hf_models_index = os.getenv("ELASTIC_HF_MODELS_INDEX", "hf_models")
         ai4life_models_index = os.getenv("ELASTIC_AI4LIFE_MODELS_INDEX", "ai4life_models")
+        kaggle_models_index = os.getenv("ELASTIC_KAGGLE_MODELS_INDEX", "kaggle_models")
 
         logger.info(
             "Loaded Elasticsearch config from env: host=%s, port=%s, scheme=%s, "
-            "username=%s, password=%s, hf_models_index=%s, ai4life_models_index=%s",
+            "username=%s, password=%s, hf_models_index=%s, ai4life_models_index=%s, "
+            "kaggle_models_index=%s",
             host,
             port_raw,
             scheme,
@@ -65,6 +70,7 @@ class ElasticsearchConfig:
             password,
             hf_models_index,
             ai4life_models_index,
+            kaggle_models_index,
         )
 
         try:
@@ -74,12 +80,13 @@ class ElasticsearchConfig:
 
         logger.info(
             "Loaded Elasticsearch config from env: host=%s, port=%s, scheme=%s, "
-            "hf_models_index=%s, ai4life_models_index=%s",
+            "hf_models_index=%s, ai4life_models_index=%s, kaggle_models_index=%s",
             host,
             port,
             scheme,
             hf_models_index,
             ai4life_models_index,
+            kaggle_models_index,
         )
 
         return cls(
@@ -90,6 +97,7 @@ class ElasticsearchConfig:
             password=password,
             hf_models_index=hf_models_index,
             ai4life_models_index=ai4life_models_index,
+            kaggle_models_index=kaggle_models_index,
         )
 
 
@@ -104,6 +112,7 @@ def _config_cache_key(config: ElasticsearchConfig) -> str:
             config.password or "",
             config.hf_models_index,
             config.ai4life_models_index,
+            config.kaggle_models_index,
         ]
     )
     return hashlib.sha256(materialized.encode("utf-8")).hexdigest()

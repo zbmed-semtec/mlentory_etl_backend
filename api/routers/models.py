@@ -40,6 +40,7 @@ from api.schemas.responses import (
     VectorFacetedSearchResponse,
 )
 from api.services.elasticsearch_service import elasticsearch_service
+from api.services.splade_search_service import splade_search_service
 from api.services.vector_search_service import vector_search_service
 from api.services.graph_service import graph_service
 from api.services.model_service import model_service
@@ -234,6 +235,93 @@ async def search_models_with_facets(
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 
+@router.get("/models/improved_keyword_search", response_model=FacetedSearchResponse)
+async def improved_keyword_search(
+    query: str = Query("", description="Keyword query ranked by exact name, task, and other property values"),
+    filters: str = Query(
+        "{}",
+        description="JSON string of property filters (e.g., {'license': ['MIT', 'Apache-2.0']})",
+        examples=['{"license": ["MIT"], "mlTask": ["text-classification"]}'],
+    ),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(50, ge=1, le=1000, description="Results per page (max 1000)"),
+    facets: str = Query(
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
+        description="JSON array of facet field names to aggregate",
+        examples=['["mlTask", "license", "keywords", "datasets"]'],
+    ),
+    facet_size: int = Query(20, ge=1, le=100, description="Maximum values per facet (max 100)"),
+    facet_query: str = Query(
+        "{}",
+        description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
+        examples=['{"keywords": "medical", "mlTask": "text"}'],
+    ),
+    exclude_ids: str = Query(
+        "[]",
+        description="JSON array of model identifiers to exclude",
+    ),
+) -> FacetedSearchResponse:
+    """
+    Keyword search with exact-name, task, and property ranking.
+
+    Uses the same filters, facets, and metadata requirements as `/models/search`.
+    An exact `name` match ranks above an exact task, which ranks above an exact
+    author, keyword, dataset, base model, architecture, or domain value.
+    A task matches when the stored label's words appear in the same order.
+    `text to image` matches `text-to-image` and not `image-to-text`.
+    """
+    try:
+        filter_dict = json.loads(filters) if filters else {}
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "platform", "dateCreated"]
+        facet_query_dict = json.loads(facet_query) if facet_query else {}
+        exclude_id_list = json.loads(exclude_ids) if exclude_ids else []
+
+        if not isinstance(filter_dict, dict):
+            raise ValueError("Filters must be a JSON object/dictionary")
+        if not isinstance(facets_list, list):
+            raise ValueError("Facets must be a JSON array/list")
+        if not isinstance(facet_query_dict, dict):
+            raise ValueError("Facet query must be a JSON object/dictionary")
+        if not isinstance(exclude_id_list, list):
+            raise ValueError("exclude_ids must be a JSON array/list")
+
+        for key, values in filter_dict.items():
+            if not isinstance(values, list):
+                raise ValueError(f"Filter values for '{key}' must be a list")
+
+        models, total_count, facet_results = elasticsearch_service.search_models_with_improved_keyword(
+            query=query,
+            filters=filter_dict,
+            page=page,
+            page_size=page_size,
+            facets=facets_list,
+            facet_size=facet_size,
+            facet_query=facet_query_dict,
+            exclude_ids=exclude_id_list,
+        )
+
+        all_facet_config = elasticsearch_service.get_facets_config()
+        facet_config = {k: v for k, v in all_facet_config.items() if k in facets_list}
+
+        return FacetedSearchResponse(
+            models=models,
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            filters=filter_dict,
+            facets={k: v for k, v in facet_results.items()},
+            facet_config=facet_config,
+        )
+
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except json.JSONDecodeError as je:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
+    except Exception as e:
+        logger.error("Error in improved keyword search: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+
 @router.get("/models/search_with_vector", response_model=VectorFacetedSearchResponse)
 async def search_models_with_vector(
     query: str = Query("", description="Semantic search query (encoded to vector)"),
@@ -243,7 +331,7 @@ async def search_models_with_vector(
         examples=['{"license": ["MIT"], "mlTask": ["text-generation"]}'],
     ),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
-    limit: int = Query(50, ge=1, le=1000, description="Results per page (max 1000)"),
+    limit: int = Query(50, ge=1, le=100, description="Results per page (max 100)"),
     facets: str = Query(
         '["mlTask", "license", "keywords", "datasets", "platform"]',
         description="JSON array of facet field names to aggregate",
@@ -291,6 +379,192 @@ async def search_models_with_vector(
         raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
     except Exception as e:
         logger.error("Error in vector search: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+
+@router.get("/models/bge_m3_vector_search", response_model=VectorFacetedSearchResponse)
+async def bge_m3_vector_search(
+    query: str = Query("", description="Semantic search query (encoded with BGE-M3)"),
+    filters: str = Query(
+        "{}",
+        description="JSON string of property filters (e.g., {'license': ['MIT'], 'mlTask': ['text-generation']})",
+        examples=['{"license": ["MIT"], "mlTask": ["text-generation"]}'],
+    ),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(50, ge=1, le=100, description="Results per page (max 100)"),
+    facets: str = Query(
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
+        description="JSON array of facet field names to aggregate",
+        examples=['["mlTask", "license", "keywords"]'],
+    ),
+    facet_size: int = Query(20, ge=1, le=100, description="Maximum values per facet (max 100)"),
+    facet_query: str = Query(
+        "{}",
+        description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
+        examples=['{"keywords": "medical"}'],
+    ),
+) -> VectorFacetedSearchResponse:
+    """
+    Vector search over `bge_m3_vector`, embedded with `BAAI/bge-m3`.
+
+    Cosine is between the raw query and each model's searchable card text
+    (name, author, task, keywords, datasets, domain, architecture, modalities,
+    description). At most 100 results are returned.
+    """
+    try:
+        filter_dict = json.loads(filters) if filters else {}
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "datasets", "platform"]
+        facet_query_dict = json.loads(facet_query) if facet_query else {}
+
+        if not isinstance(filter_dict, dict):
+            raise ValueError("Filters must be a JSON object/dictionary")
+        if not isinstance(facets_list, list):
+            raise ValueError("Facets must be a JSON array/list")
+        if not isinstance(facet_query_dict, dict):
+            raise ValueError("Facet query must be a JSON object/dictionary")
+        for key, values in filter_dict.items():
+            if not isinstance(values, list):
+                raise ValueError(f"Filter values for '{key}' must be a list")
+
+        return vector_search_service.bge_m3_vector_search(
+            query=query,
+            filters=filter_dict,
+            limit=limit,
+            page=page,
+            facets=facets_list,
+            facet_size=facet_size,
+            facet_query=facet_query_dict,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except json.JSONDecodeError as je:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
+    except Exception as e:
+        logger.error("Error in BGE-M3 vector search: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+
+@router.get("/models/hybrid_bge_m3_search", response_model=VectorFacetedSearchResponse)
+async def hybrid_bge_m3_search(
+    query: str = Query("", description="Search query ranked by improved keyword search and BGE-M3, fused with RRF"),
+    filters: str = Query(
+        "{}",
+        description="JSON string of property filters (e.g., {'license': ['MIT'], 'mlTask': ['text-generation']})",
+        examples=['{"license": ["MIT"], "mlTask": ["text-generation"]}'],
+    ),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(50, ge=1, le=100, description="Results per page (max 100)"),
+    facets: str = Query(
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
+        description="JSON array of facet field names to aggregate",
+        examples=['["mlTask", "license", "keywords"]'],
+    ),
+    facet_size: int = Query(20, ge=1, le=100, description="Maximum values per facet (max 100)"),
+    facet_query: str = Query(
+        "{}",
+        description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
+        examples=['{"keywords": "medical"}'],
+    ),
+) -> VectorFacetedSearchResponse:
+    """
+    Hybrid search: the keyword query from `/models/improved_keyword_search` plus
+    BGE-M3 cosine from `/models/bge_m3_vector_search`, fused with reciprocal rank fusion.
+
+    Only models that already have `bge_m3_vector` are ranked. `score` is the
+    fused rank score scaled to 0..1, where 1 means rank 1 on both lists.
+    """
+    try:
+        filter_dict = json.loads(filters) if filters else {}
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "datasets", "platform"]
+        facet_query_dict = json.loads(facet_query) if facet_query else {}
+
+        if not isinstance(filter_dict, dict):
+            raise ValueError("Filters must be a JSON object/dictionary")
+        if not isinstance(facets_list, list):
+            raise ValueError("Facets must be a JSON array/list")
+        if not isinstance(facet_query_dict, dict):
+            raise ValueError("Facet query must be a JSON object/dictionary")
+        for key, values in filter_dict.items():
+            if not isinstance(values, list):
+                raise ValueError(f"Filter values for '{key}' must be a list")
+
+        return vector_search_service.hybrid_bge_m3_search(
+            query=query,
+            filters=filter_dict,
+            limit=limit,
+            page=page,
+            facets=facets_list,
+            facet_size=facet_size,
+            facet_query=facet_query_dict,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except json.JSONDecodeError as je:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
+    except Exception as e:
+        logger.error("Error in hybrid BGE-M3 search: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+
+@router.get("/models/splade_search", response_model=VectorFacetedSearchResponse)
+async def splade_search(
+    query: str = Query("", description="Search query encoded with SPLADE"),
+    filters: str = Query(
+        "{}",
+        description="JSON string of property filters (e.g., {'license': ['MIT'], 'mlTask': ['text-generation']})",
+        examples=['{"license": ["MIT"], "mlTask": ["text-generation"]}'],
+    ),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(50, ge=1, le=100, description="Results per page (max 100)"),
+    facets: str = Query(
+        '["mlTask", "license", "keywords", "datasets", "platform"]',
+        description="JSON array of facet field names to aggregate",
+        examples=['["mlTask", "license", "keywords"]'],
+    ),
+    facet_size: int = Query(20, ge=1, le=100, description="Maximum values per facet (max 100)"),
+    facet_query: str = Query(
+        "{}",
+        description="JSON object for searching within specific facets (e.g., {'keywords': 'medical'})",
+        examples=['{"keywords": "medical"}'],
+    ),
+) -> VectorFacetedSearchResponse:
+    """
+    Learned-sparse search over ``splade_vector``.
+
+    The raw query is encoded with SPLADE. ``score`` is the sparse dot product.
+    ``searchable_text`` is the values-only card stored as ``splade_searchable_text``.
+    At most 100 results are returned.
+    """
+    try:
+        filter_dict = json.loads(filters) if filters else {}
+        facets_list = json.loads(facets) if facets else ["mlTask", "license", "keywords", "datasets", "platform"]
+        facet_query_dict = json.loads(facet_query) if facet_query else {}
+
+        if not isinstance(filter_dict, dict):
+            raise ValueError("Filters must be a JSON object/dictionary")
+        if not isinstance(facets_list, list):
+            raise ValueError("Facets must be a JSON array/list")
+        if not isinstance(facet_query_dict, dict):
+            raise ValueError("Facet query must be a JSON object/dictionary")
+        for key, values in filter_dict.items():
+            if not isinstance(values, list):
+                raise ValueError(f"Filter values for '{key}' must be a list")
+
+        return splade_search_service.splade_search(
+            query=query,
+            filters=filter_dict,
+            limit=limit,
+            page=page,
+            facets=facets_list,
+            facet_size=facet_size,
+            facet_query=facet_query_dict,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except json.JSONDecodeError as je:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(je)}")
+    except Exception as e:
+        logger.error("Error in SPLADE search: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 

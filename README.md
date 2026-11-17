@@ -268,6 +268,7 @@ Target coverage: ≥ 80%
 
 - [Architecture Overview](docs/architecture.md)
 - [FAIR4ML Schema](docs/fair4ml.md)
+- [Platform catalogs and the UI gate](docs/platform_catalogs.md)
 - [Adding a New Source](docs/adding_sources.md)
 
 ## 🐛 Troubleshooting

@@ -17,9 +17,43 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query
 
+from api.schemas.responses import FacetedSearchResponse
+from api.services.elasticsearch_service import elasticsearch_service
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _keyword_results(
+    query: str,
+    filter_dict: Dict[str, Any],
+    page: int,
+    limit: int,
+    facets_list: list,
+    facet_size: int,
+    facet_query_dict: Dict[str, Any],
+) -> FacetedSearchResponse:
+    """Keyword ranking used when STELLA drops or fails to return the hits."""
+    models, total_count, facet_results = elasticsearch_service.search_models_with_improved_keyword(
+        query=query,
+        filters=filter_dict,
+        page=page,
+        page_size=limit,
+        facets=facets_list,
+        facet_size=facet_size,
+        facet_query=facet_query_dict,
+    )
+    all_facet_config = elasticsearch_service.get_facets_config()
+    return FacetedSearchResponse(
+        models=models,
+        total=total_count,
+        page=page,
+        page_size=limit,
+        filters=filter_dict,
+        facets=facet_results,
+        facet_config={key: value for key, value in all_facet_config.items() if key in facets_list},
+    )
 
 
 @router.get("/stella/search_with_stella")
@@ -70,10 +104,16 @@ async def search_models_with_stella(
         "filters": json.dumps(filter_dict),
         "extended": extended,
         "limit": limit,
+        # Keyword ranker reads page_size; vector ranker reads limit.
+        "page_size": limit,
         "page": page,
         "facets": json.dumps(facets_list),
         "facet_size": facet_size,
         "facet_query": json.dumps(facet_query_dict),
+        # STELLA interleaves with rpp = min(baseline hits, experiment hits)
+        # when this is omitted. A ranker with zero hits then replaces the
+        # other ranker's models with an empty list while leaving total intact.
+        "stella-rpp": limit,
     }
     if session_id:
         stella_params["stella-sid"] = session_id
@@ -84,20 +124,27 @@ async def search_models_with_stella(
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(stella_proxy_url, params=stella_params)
             response.raise_for_status()
-            return response.json()
-    except httpx.HTTPStatusError as e:
-        logger.error("STELLA proxy HTTP error: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=e.response.status_code,
-            detail=f"STELLA proxy error: {e.response.text[:500]}",
+            payload = response.json()
+    except (httpx.HTTPStatusError, httpx.RequestError) as e:
+        logger.warning("STELLA proxy failed (%s); returning keyword results", e)
+        return _keyword_results(
+            query, filter_dict, page, limit, facets_list, facet_size, facet_query_dict
         )
-    except httpx.RequestError as e:
-        logger.error("STELLA proxy request failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"STELLA proxy unreachable: {e}")
     except Exception as e:
         logger.error("search_with_stella failed: %s", e, exc_info=True)
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+    models = payload.get("models") if isinstance(payload, dict) else None
+    total = payload.get("total") if isinstance(payload, dict) else 0
+    if isinstance(payload, dict) and not models and total:
+        logger.warning(
+            "STELLA returned total=%s with no models; returning keyword results", total
+        )
+        return _keyword_results(
+            query, filter_dict, page, limit, facets_list, facet_size, facet_query_dict
+        )
+    return payload
 
 
 @router.post("/stella/stella_feedback")
