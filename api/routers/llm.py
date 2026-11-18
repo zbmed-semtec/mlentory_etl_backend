@@ -36,6 +36,11 @@ KNOWN_FILTERABLE_FIELDS = {
 # Service dependencies
 def get_llm_service():
     from api.main import llmService
+    if llmService is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM features are disabled because vLLM is unavailable",
+        )
     return llmService
 
 def get_model_context_service():
