@@ -5,6 +5,7 @@ Abstraction for interacting with different Large Language Model (LLM) providers.
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 import requests
+import threading
 import time
 import logging
 import json
@@ -269,6 +270,7 @@ class VLLMRunner(LLMRunner):
         max_tokens: int = 2048,
         max_retries: int = 3,
         retry_delay: int = 5,
+        stop_event: Optional[threading.Event] = None,
     ):
         """
         Initialize the VLLMRunner.
@@ -278,8 +280,9 @@ class VLLMRunner(LLMRunner):
             model_name (str): Name of the model to use in vLLM.
             temperature (float): Temperature parameter for LLM generation.
             max_tokens (int): Maximum number of tokens to generate.
-            max_retries (int): Maximum retries for API calls.
-            retry_delay (int): Delay between retries in seconds.
+            max_retries (int): Kept for callers. The availability check tries once.
+            retry_delay (int): Kept for callers. The availability check does not sleep.
+            stop_event (threading.Event | None): When set, the availability check stops.
 
         Returns:
             None
@@ -290,16 +293,47 @@ class VLLMRunner(LLMRunner):
         self.max_tokens = max_tokens
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self._stop_event = stop_event
         self._langchain_llm = None  # Lazy initialization
         self.ensure_model_available()
         self._initialize_langchain_llm()
 
+    def _get_once(self, url: str, timeout: float = 10):
+        """One GET. If shutdown is requested, close the request and return."""
+        stop_event = self._stop_event
+        if stop_event is None:
+            return requests.get(url, timeout=timeout)
+        if stop_event.is_set():
+            raise ConnectionError("Stopped waiting for vLLM.")
+
+        session = requests.Session()
+        finished = threading.Event()
+
+        def close_on_stop() -> None:
+            while not finished.is_set():
+                if stop_event.wait(0.2):
+                    session.close()
+                    return
+
+        watcher = threading.Thread(
+            target=close_on_stop,
+            name="vllm-check-stop",
+            daemon=True,
+        )
+        watcher.start()
+        try:
+            return session.get(url, timeout=timeout)
+        finally:
+            finished.set()
+            session.close()
+            watcher.join(timeout=1)
+
     def ensure_model_available(self) -> None:
         """
-        Ensure the vLLM service is available and the model is loaded.
+        Check vLLM once. The configured model must be listed.
 
-        vLLM loads models at startup, so we just need to verify the service
-        is running and the model is accessible.
+        Later waits belong to the background attach loop. This method does
+        not sleep and does not try again.
 
         Args:
             None
@@ -308,56 +342,47 @@ class VLLMRunner(LLMRunner):
             None
 
         Raises:
-            ConnectionError: If unable to connect to vLLM service.
-            RuntimeError: If model is not available in vLLM.
+            ConnectionError: If vLLM cannot be reached, returns an error, or shutdown was requested.
+            RuntimeError: If vLLM answers but the configured model is not listed.
         """
         logger.info(f"Checking availability of vLLM model: {self.model_name} at {self.base_url}")
-        logger.info(f"vLLM might take several minutes to download and load the model, please be patient...")
-        
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                logger.info(f"Attempt {attempt}/{self.max_retries} - Connecting to vLLM service...")
-                # Check if vLLM service is running by querying the models endpoint
-                base_url = f"{self.base_url}/v1/models"
-                print(f"Asking response from vLLM base_url: {base_url}")
-                response = requests.get(base_url, timeout=10)
-                
-                response.raise_for_status()
-                
-                models_data = response.json()
-                available_models = [model["id"] for model in models_data.get("data", [])]
-                
-                if self.model_name in available_models:
-                    logger.info(f"✅ Model {self.model_name} is available in vLLM.")
-                    return
-                else:
-                    logger.warning(f"Model {self.model_name} not found in vLLM. Available models: {available_models}")
-                    # For vLLM, we'll still proceed as the model might be loaded but not listed
-                    # or it might be the exact model path
-                    logger.info(f"✅ Proceeding with model {self.model_name} (may be model path)")
-                    return
-                    
-            except (requests.ConnectionError, requests.Timeout) as e:
-                logger.error(
-                    "vLLM at %s cannot be reached: %s. Not retrying.",
-                    self.base_url,
-                    e,
-                )
-                raise ConnectionError(
-                    f"Could not connect to vLLM service at {self.base_url}: {e}"
-                ) from e
-            except requests.RequestException as e:
-                if attempt < self.max_retries:
-                    logger.warning(f"⏳ Attempt {attempt}/{self.max_retries} - vLLM not ready yet: {e}")
-                    logger.info(f"   Waiting {self.retry_delay} seconds before next attempt...")
-                    logger.info(f"   (vLLM may still be downloading/loading the model)")
-                    time.sleep(self.retry_delay)
-                else:
-                    logger.error(f"❌ Failed to connect to vLLM service after {self.max_retries} attempts")
-                    raise ConnectionError(f"Could not connect to vLLM service at {self.base_url} after {self.max_retries} attempts: {e}") from e
-            except Exception as e:
-                logger.error(f"Unexpected error checking vLLM service: {e}")
-                raise RuntimeError(f"Unexpected error during vLLM service check: {e}")
+        models_url = f"{self.base_url}/v1/models"
+        logger.info(f"Attempt 1 - Connecting to vLLM service at {self.base_url}")
+        print(f"Asking response from vLLM base_url: {models_url}")
+        try:
+            response = self._get_once(models_url)
+            response.raise_for_status()
+            models_data = response.json()
+            available_models = [model["id"] for model in models_data.get("data", [])]
+        except requests.RequestException as e:
+            if self._stop_event is not None and self._stop_event.is_set():
+                raise ConnectionError("Stopped waiting for vLLM.") from e
+            logger.error(
+                "vLLM at %s cannot be reached: %s. Not retrying.",
+                self.base_url,
+                e,
+            )
+            raise ConnectionError(
+                f"Could not connect to vLLM service at {self.base_url}: {e}"
+            ) from e
+        except Exception as e:
+            if self._stop_event is not None and self._stop_event.is_set():
+                raise ConnectionError("Stopped waiting for vLLM.") from e
+            logger.error(f"Unexpected error checking vLLM service: {e}")
+            raise RuntimeError(f"Unexpected error during vLLM service check: {e}") from e
+
+        if self.model_name not in available_models:
+            logger.error(
+                "Model %s is not listed by vLLM at %s. Available models: %s.",
+                self.model_name,
+                self.base_url,
+                available_models,
+            )
+            raise RuntimeError(
+                f"Model {self.model_name} is not listed by vLLM at {self.base_url}. "
+                f"Available models: {available_models}"
+            )
+        logger.info(f"✅ Model {self.model_name} is available in vLLM.")
 
     def _initialize_langchain_llm(self) -> None:
         """Initialize the LangChain compatible OpenAI object for vLLM."""

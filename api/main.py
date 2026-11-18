@@ -202,8 +202,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 base_url=vllm_base_url,
                 model_name=llm_model,
                 temperature=llm_temperature,
-                max_retries=20,  # Increased for model loading time
-                retry_delay=20   # Longer delay between retries
+                max_retries=1,
+                retry_delay=0,
             )
         except (ConnectionError, RuntimeError) as exc:
             logger.error(

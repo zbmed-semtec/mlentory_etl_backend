@@ -82,3 +82,24 @@ def test_retry_waits_grow_until_five_minutes():
     )
 
     assert waits == [20, 40, 80, 160, 300, 300]
+
+
+def test_shutdown_during_check_does_not_enable():
+    stop_event = threading.Event()
+    enabled = []
+
+    def connect(base_url, model_name, temperature):
+        stop_event.set()
+        return "runner"
+
+    keep_trying_vllm(
+        base_url="http://vllm:8000",
+        model_name="google/gemma-3-4b-it",
+        temperature=0.1,
+        stop_event=stop_event,
+        on_ready=enabled.append,
+        connect=connect,
+        wait=lambda seconds: False,
+    )
+
+    assert enabled == []
