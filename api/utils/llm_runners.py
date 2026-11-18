@@ -337,6 +337,15 @@ class VLLMRunner(LLMRunner):
                     logger.info(f"✅ Proceeding with model {self.model_name} (may be model path)")
                     return
                     
+            except (requests.ConnectionError, requests.Timeout) as e:
+                logger.error(
+                    "vLLM at %s cannot be reached: %s. Not retrying.",
+                    self.base_url,
+                    e,
+                )
+                raise ConnectionError(
+                    f"Could not connect to vLLM service at {self.base_url}: {e}"
+                ) from e
             except requests.RequestException as e:
                 if attempt < self.max_retries:
                     logger.warning(f"⏳ Attempt {attempt}/{self.max_retries} - vLLM not ready yet: {e}")
@@ -345,7 +354,7 @@ class VLLMRunner(LLMRunner):
                     time.sleep(self.retry_delay)
                 else:
                     logger.error(f"❌ Failed to connect to vLLM service after {self.max_retries} attempts")
-                    raise ConnectionError(f"Could not connect to vLLM service at {self.base_url} after {self.max_retries} attempts: {e}")
+                    raise ConnectionError(f"Could not connect to vLLM service at {self.base_url} after {self.max_retries} attempts: {e}") from e
             except Exception as e:
                 logger.error(f"Unexpected error checking vLLM service: {e}")
                 raise RuntimeError(f"Unexpected error during vLLM service check: {e}")
