@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -92,6 +93,7 @@ from api.services.RelatedModelsController import RelatedModelsController
 
 # Import LLMRunner implementations
 from api.utils.llm_runners import LLMRunner, OllamaRunner, VLLMRunner, OpenAIRunner
+from api.utils.vllm_attach import keep_trying_vllm
 
 # Global service instances
 sqlHandler = None
@@ -101,6 +103,8 @@ entityService = None
 llmService = None
 modelContextService = None
 relatedModelsController = None
+_vllm_stop = threading.Event()
+_vllm_thread: threading.Thread | None = None
 
 # Configure logging
 logging.basicConfig(
@@ -108,6 +112,32 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _enable_question_answering(runner) -> None:
+    """Turn question answering on after the runner is fully built."""
+    global llmService
+    service = LLMService(llm_runner=runner)
+    llmService = service
+
+
+def _start_vllm_retry(base_url: str, model_name: str, temperature: float) -> None:
+    """Keep trying vLLM beside the running API."""
+    global _vllm_thread
+    _vllm_stop.clear()
+    _vllm_thread = threading.Thread(
+        target=keep_trying_vllm,
+        kwargs={
+            "base_url": base_url,
+            "model_name": model_name,
+            "temperature": temperature,
+            "stop_event": _vllm_stop,
+            "on_ready": _enable_question_answering,
+        },
+        name="vllm-attach",
+        daemon=True,
+    )
+    _vllm_thread.start()
 
 
 @asynccontextmanager
@@ -172,11 +202,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 base_url=vllm_base_url,
                 model_name=llm_model,
                 temperature=llm_temperature,
-                max_retries=20,  # Increased for model loading time
-                retry_delay=20   # Longer delay between retries
+                max_retries=1,
+                retry_delay=0,
             )
         except (ConnectionError, RuntimeError) as exc:
-            logger.error("vLLM is not available (%s). Starting the API without LLM features.", exc)
+            logger.error(
+                "vLLM is not available (%s). Starting the API without question answering. Will keep trying.",
+                exc,
+            )
             llm_runner = None
     elif llm_provider == "openai":
         # Placeholder for future OpenAI implementation
@@ -212,12 +245,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         llmService = LLMService(
             llm_runner=llm_runner
         )
+
+    if llm_provider == "vllm" and llm_runner is None:
+        _start_vllm_retry(vllm_base_url, llm_model, llm_temperature)
     
     # Initialize ModelContextService
     modelContextService = ModelContextService()
 
     yield
     logger.info("Shutting down MLentory API")
+    _vllm_stop.set()
+    if _vllm_thread is not None:
+        _vllm_thread.join(timeout=1)
     close_driver()
 
 
