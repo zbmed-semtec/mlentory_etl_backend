@@ -29,6 +29,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from api.schemas.responses import (
     FacetedRelatedModelsResponse,
@@ -39,6 +40,7 @@ from api.schemas.responses import (
     PaginatedResponse,
     VectorFacetedSearchResponse,
 )
+from api.services.content_safety_service import apply_content_safety, require_content_safety_token
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.splade_search_service import splade_search_service
 from api.services.vector_search_service import vector_search_service
@@ -52,6 +54,39 @@ from api.services.RelatedModelsController import RelatedModelsController
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class ContentSafetyUpdate(BaseModel):
+    contentSafety: str = Field(description='Review mark: "safe" or "inappropriate"')
+
+
+@router.put("/models/{model_id}/content-safety")
+async def set_model_content_safety(
+    model_id: str,
+    body: ContentSafetyUpdate,
+    _: None = Depends(require_content_safety_token),
+) -> dict:
+    """Mark a model safe or inappropriate. Requires the review token."""
+    try:
+        return apply_content_safety(
+            elasticsearch_service.client,
+            elasticsearch_service._model_search_indices(),
+            model_id,
+            body.contentSafety,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Model not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError:
+        logger.error("Could not save content safety decision for %s", model_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not save the content safety decision")
+    except Exception:
+        logger.error("Saved content safety decision but failed to update search for %s", model_id, exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail="Decision saved, but the search index was not updated",
+        )
 
 # Controller dependencies
 def get_related_models_controller():
