@@ -1028,7 +1028,7 @@ class GraphService:
                     # Note: We use string comparison for ISO dates which works for standard format
                     
                     is_active = (snap["valid_from"] is None or snap["valid_from"] <= timestamp) and \
-                                (snap["valid_to"] is None or snap["valid_to"] >= timestamp)
+                                (snap["valid_to"] is None or snap["valid_to"] > timestamp)
                                 
                     if is_active:
                         predicate = snap["predicate"]

@@ -7,12 +7,14 @@ Provides aggregated platform-level statistics derived from the indexed models.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import List
+from datetime import datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 
+from api.config import get_neo4j_config
 from api.services.elasticsearch_service import elasticsearch_service
+from etl_loaders.rdf_store import _run_cypher
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +31,19 @@ async def get_platform_stats() -> dict:
             - total_models: Total number of indexed models
             - integrated_platforms: Number of active platform indexes
             - categories: Number of unique ML task categories
-            - recent_updates: Models updated/created in the last 7 days
+            - last_updated: Newest date a platform load saved a model field
     """
     try:
         total_models = _get_total_models()
         categories = _get_category_count()
         integrated_platforms = _get_integrated_platforms()
-        recent_updates = _get_recent_updates()
+        last_updated = _get_last_updated()
 
         stats = {
             "total_models": total_models,
             "integrated_platforms": integrated_platforms,
             "categories": categories,
-            "recent_updates": recent_updates,
+            "last_updated": last_updated,
         }
 
         logger.info("Platform statistics retrieved successfully: %s", stats)
@@ -119,32 +121,37 @@ def _get_integrated_platforms() -> int:
         return 1
 
 
-def _get_recent_updates() -> int:
-    """
-    Count models created or updated in the last 7 days.
-    """
+def _get_last_updated() -> Optional[str]:
+    """Newest time a model field was saved, across every platform."""
     try:
-        recent_threshold = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        query = {
-            "size": 0,
-            "query": {
-                "range": {
-                    "dateCreated": {
-                        "gte": recent_threshold,
-                    }
-                }
-            },
-        }
-        response = elasticsearch_service.client.search(
-            index=elasticsearch_service._model_search_indices(),
-            body=query,
-            params={"ignore_unavailable": "true"},
+        rows = _run_cypher(
+            """
+            MATCH ()-[r:HAS_PROPERTY_SNAPSHOT]->()
+            WHERE r.valid_from IS NOT NULL
+            RETURN max(r.valid_from) AS last_updated
+            """,
+            {},
+            cfg=get_neo4j_config(),
         )
-        total = response.get("hits", {}).get("total", 0)
-        if isinstance(total, dict):
-            return int(total.get("value", 0))
-        return int(total)
+        if not rows or rows[0].get("last_updated") is None:
+            return None
+        return _format_last_updated(rows[0]["last_updated"])
     except Exception as exc:
-        logger.warning("Could not determine recent updates: %s", exc)
-        return 0
+        logger.warning("Could not determine last updated: %s", exc)
+        return None
+
+
+def _format_last_updated(value: object) -> str:
+    """Format a Neo4j datetime as '23 Oct 2026'."""
+    if hasattr(value, "to_native"):
+        when = value.to_native()
+    else:
+        text = str(value).replace("Z", "+00:00")
+        if "." in text:
+            head, tail = text.split(".", 1)
+            fraction = "".join(ch for ch in tail if ch.isdigit())[:6]
+            tz = tail[len("".join(ch for ch in tail if ch.isdigit())) :]
+            text = f"{head}.{fraction}{tz}" if fraction else f"{head}{tz}"
+        when = datetime.fromisoformat(text)
+    return f"{when.day} {when.strftime('%b %Y')}"
 
