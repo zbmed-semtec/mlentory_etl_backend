@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from api.services.content_report_service import submit_content_report
+from api.services.content_report_service import accept_content_report, submit_content_report
 
 
 class _FakeClient:
@@ -52,6 +52,31 @@ def test_report_requires_a_reason(tmp_path):
     client = _FakeClient([_hit()])
     with pytest.raises(ValueError):
         submit_content_report(client, ["hf_models"], "abc", "https://example.test/m", "  ", tmp_path)
+
+
+def test_accepting_a_report_hides_the_model(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_REPORTS_TOKEN", raising=False)
+    client = _FakeClient([_hit()])
+    created = submit_content_report(
+        client,
+        ["hf_models"],
+        "abc",
+        "https://mlentory.example/models/abc",
+        "inappropriate image",
+        tmp_path,
+    )
+    accepted = accept_content_report(
+        client,
+        ["hf_models"],
+        created["report_id"],
+        tmp_path,
+        tmp_path / "decisions.json",
+    )
+    saved = json.loads((tmp_path / f"{created['report_id']}.json").read_text(encoding="utf-8"))
+    assert accepted["status"] == "accepted"
+    assert accepted["contentSafety"] == "inappropriate"
+    assert saved["status"] == "accepted"
+    assert client.updates[-1]["doc"] == {"contentSafety": "inappropriate"}
 
 
 def test_report_for_missing_model(tmp_path):
