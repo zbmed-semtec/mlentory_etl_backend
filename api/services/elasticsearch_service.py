@@ -28,7 +28,7 @@ from elasticsearch_dsl import Q, Search
 
 from api.config import get_es_client, get_es_config
 from api.schemas.responses import ModelListItem, FacetValue, FacetConfig
-from api.services.faceted_search import FacetedSearchMixin
+from api.services.faceted_search import INAPPROPRIATE_CONTENT, FacetedSearchMixin
 from etl_loaders.index_loader import ModelDocument
 from etl_loaders.elasticsearch_store import search
 
@@ -161,7 +161,9 @@ class ElasticsearchService(FacetedSearchMixin):
             return None
 
         hit = response["hits"]["hits"][0]["_source"]
-        
+        if hit.get("contentSafety") == INAPPROPRIATE_CONTENT:
+            return None
+
         mlentory_id = next(
             (id for id in hit["db_identifier"] if id.startswith("https://w3id.org/mlentory/mlentory_graph/")),
             -1

@@ -37,6 +37,8 @@ _REQUIRED_ES_FIELDS = (
 # Loader defaults when upstream metadata is missing; excluded from search results.
 _MISSING_INDEX_VALUES = ("", "Unknown")
 
+# Explicit review mark. A missing contentSafety value means safe.
+INAPPROPRIATE_CONTENT = "inappropriate"
 
 class FacetedSearchMixin:
     """Mixin that adds faceted search capabilities to Elasticsearch service."""
@@ -65,7 +67,7 @@ class FacetedSearchMixin:
             )
         ]
         # A missing contentSafety value means safe. Only an explicit inappropriate mark is excluded, so unmarked models stay listed.
-        must_not.append({"term": {"contentSafety": "inappropriate"}})
+        must_not.append({"term": {"contentSafety": INAPPROPRIATE_CONTENT}})
         return {"bool": {"must": must, "must_not": must_not}}
 
     def get_facets_config(self) -> Dict[str, FacetConfig]:
