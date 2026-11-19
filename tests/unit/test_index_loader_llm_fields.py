@@ -28,6 +28,21 @@ def test_build_model_document_includes_llm_fields():
     assert doc.adaption_techniques == "fine-tuning"
     assert doc.parameter_count == "7B"
     assert doc.contentSafety is None
+
+
+def test_build_model_document_copies_content_safety_decision():
+    graph_id = "https://w3id.org/mlentory/mlentory_graph/abc123"
+    model = {
+        "https://schema.org/identifier": [graph_id],
+        "https://schema.org/name": "test-model",
+    }
+    doc = build_model_document(
+        model,
+        "hf_models",
+        {},
+        {graph_id: "inappropriate"},
+    )
+    assert doc.contentSafety == "inappropriate"
     assert doc.db_identifier == ["https://w3id.org/mlentory/model/hf/test-model"]
     assert doc.mlentory_id
     assert doc.meta.id == doc.mlentory_id

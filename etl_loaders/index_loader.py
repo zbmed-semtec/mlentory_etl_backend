@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from elasticsearch_dsl import Date, Document, Keyword, Long, Text, connections
 
+from etl_loaders.content_safety_store import decision_for, load_decisions
 from etl_loaders.elasticsearch_store import (
     ElasticsearchConfig,
     create_elasticsearch_client,
@@ -121,7 +122,12 @@ def _extract_base_models(model: Dict[str, Any]) -> List[str]:
     return base_models
 
 
-def build_model_document(model: Dict[str, Any], index_name: str, translation_mapping: Dict[str, str]) -> ModelDocument:
+def build_model_document(
+    model: Dict[str, Any],
+    index_name: str,
+    translation_mapping: Dict[str, str],
+    content_safety_decisions: Optional[Dict[str, str]] = None,
+) -> ModelDocument:
     """
     Create `ModelDocument` from a normalized FAIR4ML model dict.
     
@@ -129,6 +135,8 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         model: Normalized FAIR4ML model dict.
         index_name: Name of the Elasticsearch index.
         translation_mapping: Dictionary of URIs to human readable names.
+        content_safety_decisions: Review marks keyed by model identifier.
+            A missing mark leaves ``contentSafety`` unset, which means safe.
 
     Returns:
         `ModelDocument` object.
@@ -192,6 +200,11 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
     in_language = [translation_mapping.get(lang, lang) for lang in in_language]
     model_category = [translation_mapping.get(cat, cat) for cat in _extract_list(model_category)]
     source_value = str(source_name) if source_name is not None else "Unknown"
+    content_safety = decision_for(
+        content_safety_decisions or {},
+        mlentory_id,
+        *db_identifier,
+    )
     doc = ModelDocument(
         mlentory_id=mlentory_id,
         db_identifier=db_identifier,
@@ -216,6 +229,7 @@ def build_model_document(model: Dict[str, Any], index_name: str, translation_map
         adaption_techniques=str(adaption_techniques) if adaption_techniques is not None else None,
         parameter_count=str(parameter_count) if parameter_count is not None else None,
         downloads=_download_count(model),
+        contentSafety=content_safety,
         meta={"id": mlentory_id},
     )
 
@@ -254,6 +268,9 @@ def index_models(
 
     logger.info("Loaded %s translation mapping entries", len(translation_mapping))
 
+    content_safety_decisions = load_decisions()
+    logger.info("Loaded %s content safety decisions", len(content_safety_decisions))
+
     es_client = create_elasticsearch_client(config)
     connections.add_connection("default", es_client)
 
@@ -265,7 +282,12 @@ def index_models(
 
     for idx, model in enumerate(models):
         try:
-            doc = build_model_document(model, index_name, translation_mapping)
+            doc = build_model_document(
+                model,
+                index_name,
+                translation_mapping,
+                content_safety_decisions,
+            )
             doc.save(using=es_client, refresh=False)
             indexed += 1
         except Exception as exc:
