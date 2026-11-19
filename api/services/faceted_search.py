@@ -64,6 +64,8 @@ class FacetedSearchMixin:
                 "source",
             )
         ]
+        # A missing contentSafety value means safe. Only an explicit inappropriate mark is excluded, so unmarked models stay listed.
+        must_not.append({"term": {"contentSafety": "inappropriate"}})
         return {"bool": {"must": must, "must_not": must_not}}
 
     def get_facets_config(self) -> Dict[str, FacetConfig]:
