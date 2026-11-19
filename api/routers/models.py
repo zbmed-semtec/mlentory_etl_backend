@@ -40,6 +40,7 @@ from api.schemas.responses import (
     PaginatedResponse,
     VectorFacetedSearchResponse,
 )
+from api.services.content_report_service import submit_content_report
 from api.services.content_safety_service import apply_content_safety, require_content_safety_token
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.splade_search_service import splade_search_service
@@ -58,6 +59,11 @@ router = APIRouter()
 
 class ContentSafetyUpdate(BaseModel):
     contentSafety: str = Field(description='Review mark: "safe" or "inappropriate"')
+
+
+class ContentReport(BaseModel):
+    page_url: str = Field(description="Address of the model page being reported")
+    reason: str = Field(description="Why this model should be reviewed")
 
 
 @router.put("/models/{model_id}/content-safety")
@@ -86,6 +92,35 @@ async def set_model_content_safety(
         raise HTTPException(
             status_code=502,
             detail="Decision saved, but the search index was not updated",
+        )
+
+
+@router.post("/models/{model_id}/reports", status_code=201)
+async def report_model_content(
+    model_id: str,
+    body: ContentReport,
+) -> dict:
+    """Record a visitor report. This does not hide or show the model."""
+    try:
+        return submit_content_report(
+            elasticsearch_service.client,
+            elasticsearch_service._model_search_indices(),
+            model_id,
+            body.page_url,
+            body.reason,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Model not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError:
+        logger.error("Could not save content report for %s", model_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not save the report")
+    except Exception:
+        logger.error("Saved content report but failed to open a review issue for %s", model_id, exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail="Report saved, but the review issue was not created",
         )
 
 # Controller dependencies
