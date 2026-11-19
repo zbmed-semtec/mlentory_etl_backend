@@ -40,7 +40,7 @@ from api.schemas.responses import (
     PaginatedResponse,
     VectorFacetedSearchResponse,
 )
-from api.services.content_report_service import submit_content_report
+from api.services.content_report_service import accept_content_report, submit_content_report
 from api.services.content_safety_service import apply_content_safety, require_content_safety_token
 from api.services.elasticsearch_service import elasticsearch_service
 from api.services.splade_search_service import splade_search_service
@@ -122,6 +122,30 @@ async def report_model_content(
             status_code=502,
             detail="Report saved, but the review issue was not created",
         )
+
+
+@router.post("/reports/{report_id}/accept")
+async def accept_model_report(
+    report_id: str,
+    _: None = Depends(require_content_safety_token),
+) -> dict:
+    """Accept a report and mark its model inappropriate. Requires the review token."""
+    try:
+        return accept_content_report(
+            elasticsearch_service.client,
+            elasticsearch_service._model_search_indices(),
+            report_id,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Report not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError:
+        logger.error("Could not save accepted content report %s", report_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not save the review decision")
+    except Exception:
+        logger.error("Could not hide the model for report %s", report_id, exc_info=True)
+        raise HTTPException(status_code=502, detail="The model could not be hidden")
 
 # Controller dependencies
 def get_related_models_controller():
