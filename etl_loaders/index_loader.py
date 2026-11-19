@@ -53,6 +53,9 @@ class ModelDocument(Document):
     adaption_techniques = Keyword()
     parameter_count = Keyword()
     downloads = Long()
+    # "safe" or "inappropriate". A missing value means safe, so existing
+    # documents stay visible until a review explicitly marks one.
+    contentSafety = Keyword()
 
     class Index:
         # Default name; actual index is configured by caller/env.

@@ -27,6 +27,7 @@ def test_build_model_document_includes_llm_fields():
     assert doc.data_splits == "80/10/10 train/val/test"
     assert doc.adaption_techniques == "fine-tuning"
     assert doc.parameter_count == "7B"
+    assert doc.contentSafety is None
     assert doc.db_identifier == ["https://w3id.org/mlentory/model/hf/test-model"]
     assert doc.mlentory_id
     assert doc.meta.id == doc.mlentory_id
