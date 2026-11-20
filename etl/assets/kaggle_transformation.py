@@ -6,11 +6,12 @@ Pipeline:
 2) Create separate assets for each property group:
     - mlmodels.json       (FAIR4ML MLModel records: Kaggle variations only)
     - entity_linking.json (linkage of parent catalog row -> keywords/licenses)
+    - partial_llm_properties.json (LLM schema fields such as mlTask / description)
 
 A Kaggle "model" on the website is a container. The downloadable artifacts
 are variations (framework + slug). Only variations are stored as
-``fair4ml:MLModel``. Parent rows still supply tags, dates, inLanguage, and
-the shared card text.
+``fair4ml:MLModel``. Parent rows still supply tags, dates, inLanguage, LLM
+schema fields, and the shared card text.
 """
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ from etl_transformers.common.entity_link_metadata import (
     apply_entity_link_extraction_metadata,
 )
 from etl_transformers.common.llm_inlanguage import LLM_INLANGUAGE_METHOD
+from etl_transformers.hf.map_llm_schema_properties import map_llm_schema_properties
 from schemas.fair4ml import MLModel
 from schemas.schemaorg import DefinedTerm, Language
 
@@ -580,18 +582,63 @@ def kaggle_entity_linking(
     return str(output_path)
 
 
+def _apply_kaggle_llm_overlay(
+    merged_data: Dict[str, Any],
+    llm_record: Optional[Dict[str, Any]],
+) -> None:
+    """
+    Merge LLM schema extraction onto a parent catalog row.
+
+    Reuses the shared HF mapper (mlTask, description, domain, …). Keeps
+    Kaggle ``inLanguage`` IRIs from the dedicated language assets when already
+    present — the shared mapper would otherwise rewrite them with HF hashes.
+    """
+    if not isinstance(llm_record, dict) or not llm_record:
+        return
+
+    # Drop indexing keys that may ride along from partial_llm_properties.json
+    clean = {
+        key: value
+        for key, value in llm_record.items()
+        if key not in {"_model_id", "_index", "_error"}
+    }
+    if not clean:
+        return
+
+    had_inlanguage = bool(merged_data.get("inLanguage"))
+    overlay = map_llm_schema_properties(clean, existing_partial=merged_data)
+    if not overlay:
+        return
+
+    if had_inlanguage:
+        overlay.pop("inLanguage", None)
+        overlay_meta = overlay.get("extraction_metadata")
+        if isinstance(overlay_meta, dict):
+            overlay_meta.pop("inLanguage", None)
+
+    if "extraction_metadata" in overlay:
+        merged_meta = dict(merged_data.get("extraction_metadata") or {})
+        merged_meta.update(overlay.pop("extraction_metadata") or {})
+        merged_data["extraction_metadata"] = merged_meta
+
+    merged_data.update(overlay)
+
+
 def merge_kaggle_partial_schemas(
     basic_by_id: Dict[str, Dict[str, Any]],
     entity_linking_data: Dict[str, Dict[str, Any]],
     all_model_ids: List[str],
+    llm_by_model_id: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[Tuple[str, Dict[str, Any]]]:
     """
-    Merge basic properties + entity linking into a dict compatible with MLModel(**data).
+    Merge basic properties + entity linking + optional LLM schema fields
+    into a dict compatible with MLModel(**data).
 
     Returns:
         List of (model_id, merged_dict)
     """
     merged_items: List[Tuple[str, Dict[str, Any]]] = []
+    llm_by_model_id = llm_by_model_id or {}
 
     for model_id in all_model_ids:
         bp = basic_by_id.get(model_id) or {}
@@ -643,6 +690,9 @@ def merge_kaggle_partial_schemas(
 
         apply_entity_link_extraction_metadata(merged_data, "kaggle", linked_fields)
 
+        # LLM fills gaps such as mlTask / description when catalog fields are empty.
+        _apply_kaggle_llm_overlay(merged_data, llm_by_model_id.get(model_id))
+
         # Minimal required fields
         if not merged_data.get("name"):
             merged_data["name"] = model_id
@@ -659,6 +709,12 @@ def merge_kaggle_partial_schemas(
         elif isinstance(mc, list):
             merged_data["modelCategory"] = [str(x) for x in mc if str(x).strip()]
 
+        tasks = merged_data.get("mlTask")
+        if isinstance(tasks, str):
+            merged_data["mlTask"] = [tasks] if tasks.strip() else []
+        elif isinstance(tasks, list):
+            merged_data["mlTask"] = [str(x) for x in tasks if str(x).strip()]
+
         cit = merged_data.get("citation")
         if cit is None or not isinstance(cit, list):
             merged_data["citation"] = []
@@ -668,21 +724,27 @@ def merge_kaggle_partial_schemas(
             merged_data["intendedUse"] = str(iu)
 
         # Kaggle records lineage per instance, never on the model itself, so a
-        # parent model has no evidence it was adapted from anything.
-        merged_data.setdefault("adaptionTechniques", None)
+        # parent model has no evidence it was adapted from anything — unless the
+        # LLM inferred adaptionTechniques from the card.
+        if "adaptionTechniques" not in merged_data:
+            merged_data["adaptionTechniques"] = None
 
         merged_items.append((model_id, merged_data))
 
     return merged_items
 
 
-_PARENT_LINK_FIELDS = ("keywords", "source", "inLanguage")
+_PARENT_LINK_FIELDS = ("keywords", "source", "inLanguage", "mlTask")
 _PARENT_FALLBACK_FIELDS = (
     "dateCreated",
     "dateModified",
     "datePublished",
     "citation",
     "referencePublication",
+    "description",
+    "domain",
+    "dataSplits",
+    "adaptionTechniques",
 )
 
 
@@ -693,8 +755,9 @@ def inherit_parent_catalog_fields(
     """
     Copy catalog fields from the Kaggle parent container onto a variation.
 
-    Keywords, source, and inLanguage are declared on the parent page. Dates and
-    citations are inherited when the variation has none of its own.
+    Keywords, source, inLanguage, and mlTask are declared on the parent page
+    (or filled by the parent LLM pass). Dates, citations, and other LLM text
+    fields are inherited when the variation has none of its own.
     """
     if not parent_data:
         return
@@ -763,6 +826,101 @@ def validate_kaggle_mlmodels(
     return normalized, errors
 
 
+def _build_kaggle_partial_llm_properties(
+    raw_models: List[Dict[str, Any]],
+    llm_schema_by_model: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Build per-model LLM partial records keyed for the Kaggle merge."""
+    partials: List[Dict[str, Any]] = []
+    for idx, raw_model in enumerate(raw_models):
+        if not isinstance(raw_model, dict):
+            continue
+        model_id = str(raw_model.get("modelId", "")).strip() or f"unknown_{idx}"
+        llm_record = llm_schema_by_model.get(model_id, {})
+        partial: Dict[str, Any] = {
+            "_model_id": model_id,
+            "_index": idx,
+        }
+        if isinstance(llm_record, dict):
+            partial.update(llm_record)
+        partials.append(partial)
+    return partials
+
+
+@asset(
+    group_name="kaggle_transformation",
+    ins={"llm_extraction": AssetIn("kaggle_llm_schema_extractors")},
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
+)
+def kaggle_llm_schema_properties(
+    llm_extraction: Tuple[Dict[str, Dict[str, str]], str],
+) -> str:
+    """
+    Expose the path to Kaggle LLM schema extraction results for transform.
+
+    Reads ``llm_extraction_results.json`` written by ``kaggle_llm_schema_extractors``.
+    """
+    _, llm_schema_path = llm_extraction
+    path = Path(llm_schema_path)
+    if not path.is_file():
+        logger.warning("Kaggle LLM schema properties file not found: %s", llm_schema_path)
+    else:
+        logger.info("Using Kaggle LLM schema properties at %s", llm_schema_path)
+    return str(llm_schema_path)
+
+
+@asset(
+    group_name="kaggle_transformation",
+    ins={
+        "models_data": AssetIn("kaggle_normalized_model_folder"),
+        "llm_schema_path": AssetIn("kaggle_llm_schema_properties"),
+    },
+    tags={"pipeline": "kaggle_etl", "stage": "transform"},
+)
+def kaggle_extract_llm_properties(
+    models_data: Tuple[str, str],
+    llm_schema_path: str,
+) -> str:
+    """
+    Stage LLM schema extraction results for merge into normalized Kaggle models.
+
+    Reads ``llm_extraction_results.json`` and writes ``partial_llm_properties.json``
+    in the normalized run folder.
+    """
+    raw_data_json_path, normalized_folder = models_data
+
+    with open(raw_data_json_path, "r", encoding="utf-8") as f:
+        raw_models = json.load(f)
+    if isinstance(raw_models, dict):
+        raw_models = (
+            raw_models.get("models")
+            or raw_models.get("data")
+            or raw_models.get("items")
+            or []
+        )
+    if not isinstance(raw_models, list):
+        raise ValueError(f"Expected list of models at {raw_data_json_path}")
+
+    llm_schema_by_model: Dict[str, Dict[str, Any]] = {}
+    llm_path = Path(llm_schema_path)
+    if llm_path.is_file():
+        with open(llm_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            llm_schema_by_model = loaded
+    else:
+        logger.warning("Kaggle LLM schema properties file not found: %s", llm_schema_path)
+
+    partials = _build_kaggle_partial_llm_properties(raw_models, llm_schema_by_model)
+    output_path = Path(normalized_folder) / "partial_llm_properties.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(partials, f, indent=2, ensure_ascii=False, default=_json_default)
+
+    logger.info("Saved %s Kaggle LLM partial property records to %s", len(partials), output_path)
+    return str(output_path)
+
+
 @asset(
     group_name="kaggle_transformation",
     ins={
@@ -770,6 +928,7 @@ def validate_kaggle_mlmodels(
         "basic_properties_path": AssetIn("kaggle_extract_basic_properties"),
         "entity_linking_path": AssetIn("kaggle_entity_linking"),
         "instances_data": AssetIn("kaggle_instances_raw"),
+        "llm_properties_path": AssetIn("kaggle_extract_llm_properties"),
     },
     tags={"pipeline": "kaggle_etl", "stage": "transform"},
 )
@@ -778,19 +937,22 @@ def kaggle_model_normalized(
     basic_properties_path: str,
     entity_linking_path: str,
     instances_data: Tuple[str, str],
+    llm_properties_path: str,
 ) -> str:
     """
     Builds FAIR4ML-validated MLModel objects for Kaggle variations.
 
     Parent Kaggle models are containers only. Each variation (framework + slug)
     is stored as an ``MLModel``. Parent rows still feed keywords, source,
-    inLanguage, dates, and the shared card text onto those variations.
+    inLanguage, mlTask (including LLM-filled), dates, and the shared card text
+    onto those variations.
 
     Inputs:
       - run_folder_data: (raw_models_json_path, normalized_run_folder)
       - basic_properties_path: .../partial_basic_properties.json
       - entity_linking_path: .../entity_linking.json
       - instances_data: (instances_json_path, raw_run_folder)
+      - llm_properties_path: .../partial_llm_properties.json
 
     Output:
       - .../mlmodels.json in the normalized_run_folder
@@ -851,6 +1013,29 @@ def kaggle_model_normalized(
             f"Expected dict in entity_linking.json, got: {type(entity_linking).__name__}"
         )
 
+    llm_by_model_id: Dict[str, Dict[str, Any]] = {}
+    llm_path = Path(llm_properties_path) if llm_properties_path else None
+    if llm_path and llm_path.is_file():
+        with open(llm_path, "r", encoding="utf-8") as f:
+            llm_partials = json.load(f)
+        if isinstance(llm_partials, list):
+            for item in llm_partials:
+                if not isinstance(item, dict):
+                    continue
+                mid = str(item.get("_model_id", "")).strip()
+                if mid:
+                    llm_by_model_id[mid] = item
+        elif isinstance(llm_partials, dict):
+            llm_by_model_id = {
+                str(k): v for k, v in llm_partials.items() if isinstance(v, dict)
+            }
+        logger.info("Loaded LLM partials for %d Kaggle parent models", len(llm_by_model_id))
+    else:
+        logger.warning(
+            "Kaggle LLM partials missing at %s; continuing without LLM overlay",
+            llm_properties_path,
+        )
+
     all_ids = list(
         dict.fromkeys(raw_ids + list(basic_by_id.keys()) + list(entity_linking.keys()))
     )
@@ -859,6 +1044,7 @@ def kaggle_model_normalized(
         basic_by_id=basic_by_id,
         entity_linking_data=entity_linking,
         all_model_ids=all_ids,
+        llm_by_model_id=llm_by_model_id,
     )
     parent_by_model_id: Dict[str, Dict[str, Any]] = {
         model_id: data for model_id, data in merged_parents

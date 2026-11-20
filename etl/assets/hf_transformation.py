@@ -45,6 +45,24 @@ from schemas.croissant import CroissantDataset
 logger = logging.getLogger(__name__)
 
 
+def _parameter_count_as_str(pc_val: Any) -> Optional[str]:
+    """Collapse modelsize dicts to the FAIR4ML string scale label (e.g. ``3B``)."""
+    if pc_val is None:
+        return None
+    if isinstance(pc_val, str):
+        label = pc_val.strip()
+        return label or None
+    if isinstance(pc_val, dict):
+        total = pc_val.get("total")
+        if isinstance(total, str) and total.strip():
+            return total.strip()
+        for value in pc_val.values():
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+    return str(pc_val)
+
+
 def _json_default(o):
     """Non-recursive JSON serializer for known non-serializable types."""
     if isinstance(o, BaseModel):
@@ -286,7 +304,7 @@ def hf_extract_basic_properties(
             partial_data["_model_id"] = model_id
             partial_data["_index"] = idx
 
-            pc_val = modelsizes.get(model_id)
+            pc_val = _parameter_count_as_str(modelsizes.get(model_id))
             if pc_val:
                 partial_data["parameterCount"] = pc_val
 
@@ -312,7 +330,7 @@ def hf_extract_basic_properties(
                 "url": ""
             })
             err_entry = partial_schemas[-1]
-            pc_val = modelsizes.get(model_id)
+            pc_val = _parameter_count_as_str(modelsizes.get(model_id))
             if pc_val:
                 err_entry["parameterCount"] = pc_val
             err_entry["citation"] = []
@@ -786,11 +804,11 @@ def hf_models_normalized(
         # Warn if fewer models were produced than provided as input, and provide file paths to the errors
         if len(normalized_models) < len(raw_models):
             logger.warning(
-                "Normalized model count (%s) is less than input raw models (%s).",
-                "check the entity linking and validation errors files: %s",
+                "Normalized model count (%s) is less than input raw models (%s). "
+                "Check the entity linking and validation errors files: %s",
                 len(normalized_models),
                 len(raw_models),
-                str(errors_path)
+                str(errors_path),
             )
     
     return (str(output_path), str(normalized_folder))
@@ -817,6 +835,11 @@ def merge_model_partial_schemas(
             merged.pop("_model_id", None)
             merged.pop("_index", None)
             merged.pop("_error", None)
+            pc_val = _parameter_count_as_str(merged.get("parameterCount"))
+            if pc_val:
+                merged["parameterCount"] = pc_val
+            else:
+                merged.pop("parameterCount", None)
 
             # Add linked entities
             if model_id in entity_linking_data:
@@ -858,6 +881,11 @@ def merge_model_partial_schemas(
                     merged_meta.update(llm_overlay.pop("extraction_metadata"))
                     merged["extraction_metadata"] = merged_meta
                 merged.update(llm_overlay)
+                pc_val = _parameter_count_as_str(merged.get("parameterCount"))
+                if pc_val:
+                    merged["parameterCount"] = pc_val
+                else:
+                    merged.pop("parameterCount", None)
 
             merged_schemas.append(merged)
             

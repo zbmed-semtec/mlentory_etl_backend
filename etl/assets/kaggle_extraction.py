@@ -43,8 +43,23 @@ from etl_transformers.common.llm_inlanguage import (
     LLM_INLANGUAGE_METHOD,
     predictions_from_llm_output,
 )
+from etl_transformers.common.llm_keywords import (
+    LLM_KEYWORDS_CONFIDENCE,
+    LLM_KEYWORDS_METHOD,
+    extract_keywords_with_llm,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _model_card_text(raw_model: Dict[str, Any]) -> str:
+    """Parent-card text used for LLM enrichment (same fields as schema extract)."""
+    return str(
+        raw_model.get("abstract")
+        or raw_model.get("intendedUse")
+        or raw_model.get("documentation_content")
+        or ""
+    ).strip()
 
 
 KAGGLE_ROOT = Path("/data/1_raw/kaggle")
@@ -110,6 +125,7 @@ def kaggle_raw_records(run_folder: str, refs: List[str]) -> Dict[str, Any]:
     records_data, extraction_timestamp = extractor.fetch_records(
         output_dir=str(STATE_DIR),
         num_models=config.num_models,
+        offset=config.offset,
         incremental=config.incremental,
         force_full_refresh=config.force_full_refresh,
         refresh_metadata=False,  # already refreshed by kaggle_model_refs
@@ -123,10 +139,6 @@ def kaggle_raw_records(run_folder: str, refs: List[str]) -> Dict[str, Any]:
     records_data["timestamp"] = extraction_timestamp
 
     records = records_data.get("data") or []
-    if config.num_models:
-        records = records[: config.num_models]
-        records_data["data"] = records
-
     summary = records_data.get("summary", {})
     logger.info(
         "Kaggle fetch: %d records, %d failed, %.1f min, %.2f rec/s",
@@ -340,6 +352,9 @@ def kaggle_identified_keywords(models_data: Tuple[str, str]) -> Dict[str, List[s
     Kaggle curates its tags, each carrying a stable ref ("nlp",
     "classification") and a taxonomy path ("analysis > nlp"). This mapping is
     what groups models by keyword downstream.
+
+    Parents with card text but no tags get a secondary LLM keyword pass so
+    search facets / the metadata gate are not empty for undocumented tags.
  
     Args:
         models_data: Tuple of (models_json_path, run_folder)
@@ -347,12 +362,60 @@ def kaggle_identified_keywords(models_data: Tuple[str, str]) -> Dict[str, List[s
     Returns:
         Dict of {model_id: [keyword_refs]}
     """
-    models_json_path, _ = models_data
+    models_json_path, run_folder = models_data
     enrichment = KaggleEnrichment()
     models_df = KaggleHelper.load_models_dataframe(models_json_path)
  
     model_keywords = enrichment.identifiers["keywords"].identify_per_model(models_df)
-    logger.info("Identified keywords for %d models", len(model_keywords))
+    logger.info("Identified curated keywords for %d models", len(model_keywords))
+
+    with open(models_json_path, "r", encoding="utf-8") as file_handle:
+        raw_models = json.load(file_handle)
+    if not isinstance(raw_models, list):
+        logger.warning("Expected list of models at %s", models_json_path)
+        return model_keywords
+
+    texts_for_llm: Dict[str, str] = {}
+    for raw_model in raw_models:
+        if not isinstance(raw_model, dict):
+            continue
+        model_id = str(raw_model.get("modelId") or "").strip()
+        if not model_id or model_keywords.get(model_id):
+            continue
+        text = _model_card_text(raw_model)
+        if text:
+            texts_for_llm[model_id] = text
+
+    if texts_for_llm:
+        existing_refs: Set[str] = {
+            ref
+            for refs in model_keywords.values()
+            for ref in refs
+            if ref
+        }
+        llm_keywords = extract_keywords_with_llm(
+            texts_for_llm,
+            existing_refs=existing_refs,
+            log=logger,
+        )
+        filled = 0
+        for model_id, refs in llm_keywords.items():
+            if not refs:
+                continue
+            model_keywords[model_id] = refs
+            filled += 1
+        out_path = Path(run_folder) / "llm_keywords_results.json"
+        with open(out_path, "w", encoding="utf-8") as file_handle:
+            json.dump(llm_keywords, file_handle, indent=2, ensure_ascii=False)
+        logger.info(
+            "LLM filled keywords for %d/%d untagged parents with text (saved %s)",
+            filled,
+            len(texts_for_llm),
+            out_path,
+        )
+    else:
+        logger.info("No untagged parents with card text for LLM keyword fill")
+
     return model_keywords
  
  
@@ -374,6 +437,9 @@ def kaggle_keywords_raw(
     One row per distinct keyword: the same tag repeats identically across
     every model that carries it, so keywords are de-duplicated by ref - one
     node, many edges.
+
+    LLM-proposed refs that are not present in the Kaggle tag catalog are
+    synthesized as Keyword rows so entity linking / load still work.
  
     Returns (keywords_json_path, run_folder).
     """
@@ -390,6 +456,53 @@ def kaggle_keywords_raw(
  
     extractor = KaggleExtractor(records_data=records)
     keywords_df = extractor.extract_specific_keywords(sorted(keyword_names))
+
+    found_refs: Set[str] = set()
+    if not keywords_df.empty and "keywordId" in keywords_df.columns:
+        found_refs = {
+            str(value).strip()
+            for value in keywords_df["keywordId"].tolist()
+            if str(value).strip()
+        }
+
+    missing = sorted(keyword_names - found_refs)
+    if missing:
+        from etl_extractors.kaggle.clients.keywords_client import KaggleKeywordsClient
+
+        client = KaggleKeywordsClient(records_data=records)
+        synthetic_rows = []
+        for ref in missing:
+            row = client.fetch_keyword_metadata(
+                ref,
+                {
+                    "ref": ref,
+                    "name": ref,
+                    "description": "",
+                    "fullPath": f"llm > {ref}",
+                },
+            )
+            prior_meta = row.get("extraction_metadata")
+            extraction_time = ""
+            if isinstance(prior_meta, dict):
+                extraction_time = str(prior_meta.get("extraction_time") or "")
+            row["extraction_metadata"] = {
+                "extraction_method": LLM_KEYWORDS_METHOD,
+                "confidence": LLM_KEYWORDS_CONFIDENCE,
+                "extraction_time": extraction_time,
+                "source_field": "card",
+                "notes": "LLM-proposed keyword; not present in Kaggle tag catalog",
+            }
+            synthetic_rows.append(row)
+        synth_df = pd.DataFrame(synthetic_rows)
+        keywords_df = (
+            pd.concat([keywords_df, synth_df], ignore_index=True)
+            if not keywords_df.empty
+            else synth_df
+        )
+        logger.info(
+            "Synthesized %d LLM keyword entities not found in Kaggle tags",
+            len(synthetic_rows),
+        )
  
     keywords_path = Path(run_folder) / "keywords.json"
     keywords_df.to_json(str(keywords_path), orient="records", indent=2)
@@ -631,6 +744,16 @@ def kaggle_llm_schema_extractors(raw_data: Tuple[str, str]) -> Tuple[Dict[str, D
         models_data = json.load(file)
 
     documents = KaggleLLMSchemaPropertyExtractor.prepare_documents(models_data)
+
+    if not documents:
+        logger.warning(
+            "No Kaggle model texts available for LLM schema extraction; writing empty results"
+        )
+        final_path = Path(run_folder) / "llm_extraction_results.json"
+        with open(final_path, "w", encoding="utf-8") as f:
+            json.dump({}, f, indent=4)
+        return ({}, str(final_path))
+
     logger.info("Prepared %d model texts for LLM extraction. Average length: %.2f characters", len(documents), np.mean([len(text) for text in documents.values()]))
     llm_extractor = KaggleLLMSchemaPropertyExtractor(logger=logger, config=LLMConfig())
     result = llm_extractor.extract(documents, typical_visible_output_tokens=2048)

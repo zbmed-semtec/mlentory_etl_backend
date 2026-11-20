@@ -14,6 +14,7 @@ from dagster import AssetIn, asset
 
 from etl.config import get_general_config
 from etl_loaders.elasticsearch_store import ElasticsearchConfig, clean_index
+from etl_loaders.etl_run_report import publish_index_report
 from etl_loaders.index_loader import check_elasticsearch_connection, index_models
 from etl_loaders.rdf_loader import (
     build_and_persist_models_rdf,
@@ -628,4 +629,11 @@ def ai4life_index_models_elasticsearch(
     elasticsearch_report_path = rdf_run_folder / "elasticsearch_report.json"
     with open(elasticsearch_report_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
+    publish_index_report(
+        platform="ai4life",
+        run_id=rdf_run_folder.name,
+        index_name=index_name,
+        models_indexed=stats.get("models_indexed"),
+        index_errors=stats.get("errors"),
+    )
     return str(elasticsearch_report_path)

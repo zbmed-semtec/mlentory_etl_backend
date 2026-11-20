@@ -18,6 +18,7 @@ from typing import Any, Dict, Tuple
 from elasticsearch_dsl import connections
 from dagster import AssetIn, asset
 from etl_loaders.elasticsearch_store import ElasticsearchConfig, create_elasticsearch_client, clean_index
+from etl_loaders.etl_run_report import publish_index_report
 from etl_loaders.index_loader import ModelDocument, build_model_document, check_elasticsearch_connection
 
 from etl.config import get_general_config
@@ -306,7 +307,14 @@ def hf_index_models_elasticsearch(
     with open(elasticsearch_report_path, 'w', encoding='utf-8') as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
     logger.info(f"Elasticsearch report saved to: {elasticsearch_report_path}")
-    
+    publish_index_report(
+        platform="hf",
+        run_id=rdf_run_folder.name,
+        index_name=stats.get("index") or os.getenv("ELASTIC_HF_MODELS_INDEX", "hf_models"),
+        models_indexed=stats.get("models_indexed"),
+        index_errors=stats.get("errors"),
+    )
+
     return str(elasticsearch_report_path)
     
 

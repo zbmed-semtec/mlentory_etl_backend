@@ -109,6 +109,7 @@ class ElasticsearchService(FacetedSearchMixin):
                 baseModels=getattr(hit, "baseModels", None) or [],
                 datasets=getattr(hit, "datasets", None) or [],
                 platform=getattr(hit, "source", None) or "Unknown",
+                downloads=getattr(hit, "downloads", None),
             )
             models.append(model)
 
@@ -179,6 +180,7 @@ class ElasticsearchService(FacetedSearchMixin):
             baseModels=hit.get("baseModels", []) or [],
             datasets=hit.get("datasets", []) or [],
             platform=hit.get("source") or "Unknown",
+            downloads=hit.get("downloads"),
         )
 
 
