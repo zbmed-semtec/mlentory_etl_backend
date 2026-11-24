@@ -29,8 +29,9 @@ def _hit():
 
 
 def test_report_is_saved_without_changing_the_model(tmp_path, monkeypatch):
-    monkeypatch.delenv("GITHUB_REPORTS_REPO", raising=False)
-    monkeypatch.delenv("GITHUB_REPORTS_TOKEN", raising=False)
+    monkeypatch.delenv("GITLAB_URL", raising=False)
+    monkeypatch.delenv("GITLAB_REPORTS_PROJECT", raising=False)
+    monkeypatch.delenv("GITLAB_REPORTS_TOKEN", raising=False)
     client = _FakeClient([_hit()])
     result = submit_content_report(
         client,
@@ -44,7 +45,7 @@ def test_report_is_saved_without_changing_the_model(tmp_path, monkeypatch):
     assert saved["model_id"] == "https://w3id.org/mlentory/mlentory_graph/abc"
     assert saved["reason"] == "This page shows an inappropriate image"
     assert result["status"] == "received"
-    assert result["github_issue"] is None
+    assert result["gitlab_issue"] is None
     assert client.updates == []
 
 
@@ -55,7 +56,9 @@ def test_report_requires_a_reason(tmp_path):
 
 
 def test_accepting_a_report_hides_the_model(tmp_path, monkeypatch):
-    monkeypatch.delenv("GITHUB_REPORTS_TOKEN", raising=False)
+    monkeypatch.delenv("GITLAB_URL", raising=False)
+    monkeypatch.delenv("GITLAB_REPORTS_PROJECT", raising=False)
+    monkeypatch.delenv("GITLAB_REPORTS_TOKEN", raising=False)
     client = _FakeClient([_hit()])
     created = submit_content_report(
         client,

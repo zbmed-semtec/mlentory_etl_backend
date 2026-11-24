@@ -1,8 +1,9 @@
 """Save a visitor's content report.
 
 A report does not change contentSafety. It records the model, page, and
-reason so a person can review it. When a private GitHub repo is configured,
-it also opens an issue there.
+reason so a person can review it. When a GitLab project is configured, it
+also opens an issue there. The token must be a project or group access
+token, so GitLab attributes the issue to that bot instead of a person.
 """
 
 from __future__ import annotations
@@ -12,11 +13,12 @@ import logging
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from api.services.content_safety_service import (
     _canonical_id,
@@ -75,67 +77,109 @@ def save_report(report: Dict[str, str], directory: Optional[Path] = None) -> Pat
     return target
 
 
-def create_github_issue(report: Dict[str, str]) -> Optional[str]:
-    """Open a review issue when both repo and token are set. Otherwise skip."""
-    repo = os.getenv("GITHUB_REPORTS_REPO", "").strip()
-    token = os.getenv("GITHUB_REPORTS_TOKEN", "").strip()
-    if not repo or not token:
+def _gitlab_settings() -> Optional[Tuple[str, str, str]]:
+    """Return URL, project, and token. Issues go to the mlentory project."""
+    base = os.getenv("GITLAB_URL", "https://gitlab.zbmed.de").strip().rstrip("/")
+    project = os.getenv("GITLAB_REPORTS_PROJECT", "zbmed-semtec/mlentory").strip().strip("/")
+    token = os.getenv("GITLAB_REPORTS_TOKEN", "").strip()
+    if not token:
         return None
-    if repo.count("/") != 1:
-        raise ValueError("GITHUB_REPORTS_REPO must look like owner/repo")
+    if not base.startswith(("http://", "https://")):
+        raise ValueError("GITLAB_URL must start with http:// or https://")
+    if not re.fullmatch(r"\d+|[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+", project):
+        raise ValueError("GITLAB_REPORTS_PROJECT must be a numeric id or a path like group/project")
+    return base, project, token
 
-    payload = json.dumps(
-        {
-            "title": f"Content report {report['report_id']}",
-            "body": (
-                f"Model: {report['model_id']}\n"
-                f"Page: {report['page_url']}\n\n"
-                f"Reason:\n{report['reason']}\n"
-            ),
-        }
-    ).encode("utf-8")
+
+def _gitlab_request(method: str, url: str, token: str, payload: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{repo}/issues",
-        data=payload,
+        url,
+        data=data,
         headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
+            "PRIVATE-TOKEN": token,
+            "Accept": "application/json",
             "Content-Type": "application/json",
             "User-Agent": "mlentory-content-reports",
         },
-        method="POST",
+        method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
-            created = json.loads(response.read().decode("utf-8"))
+            body = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GitHub issue was not created ({exc.code}): {detail}") from exc
-    return created.get("html_url")
+        raise RuntimeError(f"GitLab request failed ({exc.code}): {detail}") from exc
+    parsed = json.loads(body) if body else {}
+    if not isinstance(parsed, dict):
+        raise RuntimeError("GitLab response was not an object")
+    return parsed
 
 
-def close_github_issue(issue_url: str) -> None:
-    """Close the review issue after the report is accepted. A failure is logged only."""
-    match = re.fullmatch(r"https://github.com/([^/]+/[^/]+)/issues/(\d+)", issue_url or "")
-    token = os.getenv("GITHUB_REPORTS_TOKEN", "").strip()
-    if not match or not token:
+def _is_bot_user(user: Dict[str, Any]) -> bool:
+    """Project and group access tokens belong to a bot user, not a person."""
+    if user.get("bot") is True:
+        return True
+    if user.get("bot") is False:
+        return False
+    username = str(user.get("username") or "")
+    return re.fullmatch(r"(?:project|group)_\d+_bot_[0-9a-fA-F]+", username) is not None
+
+
+def _require_bot_token(base: str, token: str) -> None:
+    user = _gitlab_request("GET", f"{base}/api/v4/user", token)
+    if _is_bot_user(user):
         return
-    repo, number = match.group(1), match.group(2)
-    request = urllib.request.Request(
-        f"https://api.github.com/repos/{repo}/issues/{number}",
-        data=json.dumps({"state": "closed"}).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "Content-Type": "application/json",
-            "User-Agent": "mlentory-content-reports",
-        },
-        method="PATCH",
+    raise ValueError(
+        "GITLAB_REPORTS_TOKEN must be a project or group access token so the issue is opened by a bot"
     )
+
+
+def create_gitlab_issue(report: Dict[str, str]) -> Optional[str]:
+    """Open a review issue as the configured bot. Skip when GitLab is not configured."""
+    settings = _gitlab_settings()
+    if settings is None:
+        return None
+    base, project, token = settings
+    _require_bot_token(base, token)
+
+    project_id = urllib.parse.quote(project, safe="")
+    created = _gitlab_request(
+        "POST",
+        f"{base}/api/v4/projects/{project_id}/issues",
+        token,
+        {
+            "title": f"Content report {report['report_id']}",
+            "description": (
+                f"Model: {report['model_id']}\n\n"
+                f"Page: {report['page_url']}\n\n"
+                f"Reason:\n\n{report['reason']}\n"
+            ),
+        },
+    )
+    issue_url = created.get("web_url")
+    return issue_url if isinstance(issue_url, str) else None
+
+
+def close_gitlab_issue(issue_url: str) -> None:
+    """Close the review issue after the report is accepted. A failure is logged only."""
+    settings = _gitlab_settings()
+    if settings is None:
+        return
+    base, _project, token = settings
+    match = re.fullmatch(r"(https?://[^/]+)/(.+)/-/(?:issues|work_items)/(\d+)/?", issue_url or "")
+    if not match or match.group(1) != base:
+        return
+    project_id = urllib.parse.quote(match.group(2), safe="")
+    number = match.group(3)
     try:
-        with urllib.request.urlopen(request, timeout=15):
-            return
-    except (urllib.error.URLError, TimeoutError) as exc:
+        _gitlab_request(
+            "PUT",
+            f"{base}/api/v4/projects/{project_id}/issues/{number}",
+            token,
+            {"state_event": "close"},
+        )
+    except (urllib.error.URLError, TimeoutError, RuntimeError) as exc:
         logger.warning("Could not close content report issue %s: %s", issue_url, exc)
 
 
@@ -161,15 +205,15 @@ def submit_content_report(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     save_report(report, directory)
-    issue_url = create_github_issue(report)
+    issue_url = create_gitlab_issue(report)
     if issue_url:
-        report["github_issue"] = issue_url
+        report["gitlab_issue"] = issue_url
         save_report(report, directory)
     return {
         "report_id": report["report_id"],
         "model_id": report["model_id"],
         "status": "received",
-        "github_issue": issue_url,
+        "gitlab_issue": issue_url,
     }
 
 
@@ -193,7 +237,7 @@ def accept_content_report(
     report["contentSafety"] = decision["contentSafety"]
     report["accepted_at"] = datetime.now(timezone.utc).isoformat()
     save_report(report, directory)
-    close_github_issue(str(report.get("github_issue") or ""))
+    close_gitlab_issue(str(report.get("gitlab_issue") or ""))
     return {
         "report_id": report["report_id"],
         "model_id": decision["model_id"],
