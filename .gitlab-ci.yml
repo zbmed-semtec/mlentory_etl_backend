@@ -1,0 +1,26 @@
+# Checks Python files changed in a merge request.
+# The existing tree is not lint-clean, so a full-repo run would fail every merge.
+
+stages:
+  - check
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+backend:
+  stage: check
+  image: python:3.12-slim
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - pip install --no-cache-dir ruff black
+    - |
+      files=$(git diff --name-only --diff-filter=ACMR "$CI_MERGE_REQUEST_DIFF_BASE_SHA" "$CI_COMMIT_SHA" -- '*.py')
+      if [ -z "$files" ]; then
+        echo "No Python files changed."
+        exit 0
+      fi
+      echo "$files"
+      printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 ruff check
+      printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 black --check
