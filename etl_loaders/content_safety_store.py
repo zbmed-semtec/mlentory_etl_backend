@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 SAFE = "safe"
 INAPPROPRIATE = "inappropriate"
 ALLOWED = {SAFE, INAPPROPRIATE}
+HF_NOT_FOR_ALL_AUDIENCES_TAG = "not-for-all-audiences"
 
 
 def store_path() -> Path:
@@ -59,6 +60,20 @@ def decision_for(decisions: Dict[str, str], *model_ids: str) -> Optional[str]:
         if value in ALLOWED:
             return value
     return None
+
+
+def apply_hf_audience_tag(stored: Optional[str], keywords: Iterable[str]) -> Optional[str]:
+    """Hide a model that carries Hugging Face's not-for-all-audiences tag.
+
+    A stored review wins. The tag only fills in when nobody has marked the
+    model safe or inappropriate yet.
+    """
+    if stored in ALLOWED:
+        return stored
+    for keyword in keywords:
+        if str(keyword).strip().casefold() == HF_NOT_FOR_ALL_AUDIENCES_TAG:
+            return INAPPROPRIATE
+    return stored
 
 
 def record_decision(model_id: str, value: str, path: Optional[Path] = None) -> None:

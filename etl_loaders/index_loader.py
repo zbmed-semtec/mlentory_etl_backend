@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from elasticsearch_dsl import Date, Document, Keyword, Long, Text, connections
 
-from etl_loaders.content_safety_store import decision_for, load_decisions
+from etl_loaders.content_safety_store import apply_hf_audience_tag, decision_for, load_decisions
 from etl_loaders.elasticsearch_store import (
     ElasticsearchConfig,
     create_elasticsearch_client,
@@ -137,6 +137,8 @@ def build_model_document(
         translation_mapping: Dictionary of URIs to human readable names.
         content_safety_decisions: Review marks keyed by model identifier.
             A missing mark leaves ``contentSafety`` unset, which means safe.
+            Hugging Face's ``not-for-all-audiences`` keyword marks the model
+            inappropriate when no review is stored.
 
     Returns:
         `ModelDocument` object.
@@ -200,10 +202,13 @@ def build_model_document(
     in_language = [translation_mapping.get(lang, lang) for lang in in_language]
     model_category = [translation_mapping.get(cat, cat) for cat in _extract_list(model_category)]
     source_value = str(source_name) if source_name is not None else "Unknown"
-    content_safety = decision_for(
-        content_safety_decisions or {},
-        mlentory_id,
-        *db_identifier,
+    content_safety = apply_hf_audience_tag(
+        decision_for(
+            content_safety_decisions or {},
+            mlentory_id,
+            *db_identifier,
+        ),
+        _extract_list(keywords),
     )
     doc = ModelDocument(
         mlentory_id=mlentory_id,
